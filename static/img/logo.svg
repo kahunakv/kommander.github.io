@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Kommander">
+  <rect width="128" height="128" rx="24" fill="#111827"/>
+  <path d="M35 28h18v34l30-34h22L73 63l34 37H84L53 65v35H35V28z" fill="#60A5FA"/>
+  <path d="M54 64l30-36h21L73 63l34 37H84L54 64z" fill="#34D399" fill-opacity=".72"/>
+</svg>
