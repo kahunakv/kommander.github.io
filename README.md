@@ -1,6 +1,6 @@
 # Kommander Documentation
 
-This repository contains the Docusaurus documentation site for [Kommander](https://github.com/andresgutierrez/kommander), a Raft consensus library for C#/.NET.
+This repository contains the Docusaurus documentation site for [Kommander](https://github.com/kahunakv/kommander), a Raft consensus library for C#/.NET.
 
 ## Development
 

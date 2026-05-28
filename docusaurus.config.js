@@ -16,7 +16,11 @@ const config = {
   deploymentBranch: 'gh-pages',
 
   onBrokenLinks: 'throw',
-  onBrokenMarkdownLinks: 'warn',
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
 
   i18n: {
     defaultLocale: 'en',
@@ -30,7 +34,7 @@ const config = {
       ({
         docs: {
           sidebarPath: './sidebars.js',
-          editUrl: 'https://github.com/andresgutierrez/kommander.github.io/tree/main/',
+          editUrl: 'https://github.com/kahunakv/kommander.github.io/tree/main/',
         },
         blog: false,
         theme: {
@@ -58,7 +62,7 @@ const config = {
             label: 'Docs',
           },
           {
-            href: 'https://github.com/andresgutierrez/kommander',
+            href: 'https://github.com/kahunakv/kommander',
             label: 'GitHub',
             position: 'right',
           },
@@ -94,7 +98,7 @@ const config = {
             items: [
               {
                 label: 'GitHub',
-                href: 'https://github.com/andresgutierrez/kommander',
+                href: 'https://github.com/kahunakv/kommander',
               },
               {
                 label: 'NuGet',
