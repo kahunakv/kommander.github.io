@@ -8,10 +8,11 @@ const config = {
   tagline: 'Raft consensus for replicated .NET services',
   favicon: 'img/logo.svg',
 
-  url: 'https://kommander.github.io',
-  baseUrl: '/',
+  url: 'https://kahunakv.github.io',
+  baseUrl: '/kommander.github.io/',
+  trailingSlash: true,
 
-  organizationName: 'andresgutierrez',
+  organizationName: 'kahunakv',
   projectName: 'kommander.github.io',
   deploymentBranch: 'gh-pages',
 
