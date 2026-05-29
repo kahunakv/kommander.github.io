@@ -10,10 +10,12 @@
 | Replication | `ReplicateLogs`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
 | Partition routing | `GetPartitionKey`, `GetPrefixPartitionKey` |
 | Transport entry points | `Handshake`, `RequestVote`, `Vote`, `AppendLogs`, `CompleteAppendLogs` |
-| Components | `ActorSystem`, `WalAdapter`, `Communication`, `Discovery`, `Configuration`, `HybridLogicalClock`, `ReadThreadPool`, `WriteThreadPool` |
+| Components | `WalAdapter`, `Communication`, `Discovery`, `Configuration`, `HybridLogicalClock`, `ReadScheduler`, `WalScheduler` |
 | Events | `OnRestoreStarted`, `OnRestoreFinished`, `OnReplicationError`, `OnLogRestored`, `OnReplicationReceived`, `OnLeaderChanged` |
 
 The transport entry points are intended for communication adapters and HTTP/gRPC endpoint handlers. Normal application writes should use the replication APIs.
+
+`RaftManager` also exposes system-partition callbacks on the concrete type for internal configuration replication. They are not part of `IRaft`.
 
 ## Events
 
@@ -40,8 +42,6 @@ raft.OnLeaderChanged += (partitionId, leaderEndpoint) =>
     return Task.FromResult(true);
 };
 ```
-
-System partition events also exist on `RaftManager` for internal configuration replication, but they are not part of `IRaft`.
 
 ## Operation Status Values
 

@@ -20,6 +20,16 @@ Install-Package Kommander
 
 This example creates one node using static discovery, RocksDB storage, and gRPC communication. In a real cluster, run one `RaftManager` per node with a unique host, port, node id, and a discovery list containing the other nodes.
 
+This sample does not build a database by itself. It shows the minimum pieces needed to join a Raft cluster and replicate one application command. The command is just bytes plus a string `type`; your service decides how to decode and apply it.
+
+Before reading the code, keep these roles in mind:
+
+- `RaftConfiguration` names this node and tells other nodes how to reach it.
+- `StaticDiscovery` lists the peer nodes in the cluster.
+- `RocksDbWAL` stores Raft log entries durably.
+- `GrpcCommunication` sends Raft messages to other nodes.
+- `OnReplicationReceived` is where your application applies committed entries.
+
 ```csharp
 using System.Text;
 using Kommander;
@@ -29,13 +39,13 @@ using Kommander.Discovery;
 using Kommander.Time;
 using Kommander.WAL;
 using Microsoft.Extensions.Logging;
-using Nixie;
 
 ILoggerFactory loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
 ILogger<IRaft> logger = loggerFactory.CreateLogger<IRaft>();
 
 // Every node needs a stable identity and an advertised endpoint.
-// Partition 0 is reserved for Kommander internals; user partitions start at 1.
+// Partition 0 is reserved for Kommander internals. Application data uses
+// partitions greater than 0, starting with partition 1.
 RaftConfiguration configuration = new()
 {
     NodeName = "node-1",
@@ -46,8 +56,6 @@ RaftConfiguration configuration = new()
 };
 
 IRaft raft = new RaftManager(
-    // Kommander runs each Raft partition through lightweight actors.
-    new ActorSystem(logger: logger),
     configuration,
     // StaticDiscovery is the simplest cluster membership option: list the peers
     // this node should contact. Do not include the local node in this list.
@@ -56,7 +64,7 @@ IRaft raft = new RaftManager(
         new RaftNode("localhost:8003")
     ]),
     // The WAL stores Raft log entries before they are applied to your state
-    // machine, so committed work can be restored after a restart.
+    // machine, so proposed and committed work can be restored after a restart.
     new RocksDbWAL(path: "./data", revision: "node-1", logger),
     // The communication adapter must match the endpoints exposed by your host.
     // For gRPC, map the routes shown in the Hosting Endpoints guide.
@@ -71,7 +79,7 @@ IRaft raft = new RaftManager(
 raft.OnReplicationReceived += (partitionId, log) =>
 {
     string payload = Encoding.UTF8.GetString(log.LogData ?? []);
-    Console.WriteLine($"{partitionId}: {log.Id} {log.Type} {payload}");
+    Console.WriteLine($"{partitionId}: {log.Id} {log.Type} {log.LogType} {payload}");
     return Task.FromResult(true);
 };
 
@@ -87,9 +95,9 @@ if (await raft.AmILeader(1, timeout.Token))
     // ReplicateLogs writes the payload to the leader WAL, sends it to followers,
     // and auto-commits after quorum because autoCommit defaults to true.
     RaftReplicationResult result = await raft.ReplicateLogs(
-        partitionId: 1,
-        type: "Greeting",
-        data: Encoding.UTF8.GetBytes("Hello from Kommander"),
+        1,
+        "Greeting",
+        Encoding.UTF8.GetBytes("Hello from Kommander"),
         cancellationToken: timeout.Token
     );
 
@@ -98,10 +106,12 @@ if (await raft.AmILeader(1, timeout.Token))
         : $"Replication failed: {result.Status}");
 }
 
-// LeaveCluster stops Raft processing. Passing disposeActorSystem disposes the
-// actor runtime created for this sample.
-await raft.LeaveCluster(disposeActorSystem: true);
+// LeaveCluster stops timers, partition executors, transport dispatch, and
+// fair WAL schedulers. Passing dispose also disposes owned resources.
+await raft.LeaveCluster(dispose: true);
 ```
+
+If this node is not the leader for partition `1`, the sample does not replicate anything. In a real service, you can call `WaitForLeader` to find the leader endpoint and route the client request there, or let clients retry against another node.
 
 ## Next Steps
 

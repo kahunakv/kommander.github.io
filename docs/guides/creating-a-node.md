@@ -1,10 +1,9 @@
 # Creating A Node
 
-`RaftManager` is the main implementation of `IRaft`. A node combines configuration, discovery, storage, communication, a hybrid logical clock, and an actor system.
+`RaftManager` is the main implementation of `IRaft`. A node combines configuration, discovery, storage, communication, a hybrid logical clock, partition executors, and fair WAL schedulers.
 
 ```csharp
 IRaft raft = new RaftManager(
-    actorSystem,
     configuration,
     discovery,
     walAdapter,
@@ -25,7 +24,8 @@ Use a unique `NodeId` when possible. If `NodeId` is `0`, Kommander derives one f
 | `IWAL` | Persists proposed, committed, rolled-back, and checkpoint log entries. |
 | `ICommunication` | Sends Raft protocol messages to remote nodes. |
 | `HybridLogicalClock` | Produces proposal ticket timestamps. |
-| `ActorSystem` | Runs Kommander's internal state machines. |
+| Partition executors | Run each partition state machine serially so Raft state has one owner. |
+| `ReadScheduler` / `WalScheduler` | Run synchronous WAL reads and writes on fair, partition-aware worker queues. |
 
 ## Lifecycle
 
@@ -41,7 +41,7 @@ await raft.JoinCluster();
 Call `LeaveCluster` when shutting down:
 
 ```csharp
-await raft.LeaveCluster(disposeActorSystem: true);
+await raft.LeaveCluster(dispose: true);
 ```
 
 ## Cluster Visibility

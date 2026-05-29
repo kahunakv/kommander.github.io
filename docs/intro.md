@@ -6,9 +6,33 @@ sidebar_position: 1
 
 Kommander is an open-source distributed consensus library for C#/.NET. It helps several running processes agree on the same ordered stream of changes, even when individual nodes restart, lose network connectivity, or stop responding.
 
-If you have not worked with Raft or consensus algorithms before, the core idea is simple: one node becomes the leader for a partition, that leader accepts a proposed change, and the change is considered committed only after enough nodes have stored it. Your application can then apply committed changes in the same order on every node.
+If you have not worked with [Raft](https://raft.github.io/) or consensus algorithms before, the core idea is simple: one node becomes the leader for a partition, that leader accepts a proposed change, and the change is considered committed only after enough nodes have stored it. Your application can then apply committed changes in the same order on every node.
 
 That gives you a reliable foundation for building services where multiple machines need to behave like one coordinated system.
+
+## Mental Model
+
+Think of Kommander as a shared notebook for important decisions:
+
+1. One node is allowed to write the next line for a partition.
+2. A majority of the nodes copy that line.
+3. After the majority has it, the line is committed.
+4. Every node reads committed lines in the same order and updates its local state.
+
+Your application decides what the lines mean. A line might mean "job 123 started", "tenant 42 moved to node A", or "workflow abc advanced to the next step".
+
+## Basic Terms
+
+| Term | Plain meaning |
+| --- | --- |
+| Node | One running process that participates in the cluster. |
+| Partition | An independent stream of decisions. Different partitions can have different leaders. |
+| Leader | The node currently allowed to propose new decisions for a partition. |
+| Follower | A node that receives and stores decisions from the leader. |
+| Quorum | A majority of nodes. Kommander waits for quorum before treating a proposal as committed. |
+| Log | The ordered list of decisions for a partition. |
+| State machine | Your application code that applies committed log entries to local state. |
+| WAL | Write-ahead log. Durable storage used to remember Raft log entries across restarts. |
 
 ## What You Can Build
 
@@ -44,6 +68,8 @@ A typical Kommander-backed service works like this:
 5. Subscribe to callbacks that restore and apply committed log entries.
 6. Propose changes through `ReplicateLogs` when the local node is leader for a partition.
 
+The most important callback is `OnReplicationReceived`. That is where your service receives a committed log entry and updates its own state.
+
 ## What Kommander Is Not
 
 Kommander is a library, not a finished database product. It is not a key/value store, lock service, sequencer, cache, or scripting engine by itself.
@@ -59,6 +85,8 @@ That boundary is intentional. Kommander owns consensus mechanics. Your applicati
 - gRPC, REST/JSON, and in-memory communication adapters.
 - Static, dynamic, and multicast discovery.
 - Hybrid logical clock proposal tickets.
+- Explicit partition executors that own each partition's Raft state serially.
+- Fair read and WAL schedulers for synchronous storage work.
 - Restore, replication, leadership, and error callbacks.
 - ASP.NET Core route extensions for Raft endpoints.
 

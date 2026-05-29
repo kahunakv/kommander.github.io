@@ -8,12 +8,12 @@ const FeatureList = [
     description: 'Run independent Raft partitions so one node can lead some workloads while following others.',
   },
   {
-    title: 'Pluggable Runtime',
-    description: 'Choose RocksDB, SQLite, or in-memory WALs with gRPC, REST/JSON, or in-memory communication.',
+    title: 'Fair Storage Scheduling',
+    description: 'Keep partition state transitions moving while synchronous WAL reads and writes run through fair worker queues.',
   },
   {
-    title: 'Application Callbacks',
-    description: 'React to restored logs, committed replications, leader changes, and replication errors in your own state machine.',
+    title: 'Pluggable Adapters',
+    description: 'Choose RocksDB, SQLite, or in-memory WALs with gRPC, REST/JSON, or in-memory communication.',
   },
 ];
 

@@ -34,6 +34,18 @@ const sidebars = {
     },
     {
       type: 'category',
+      label: 'Recipes',
+      items: [
+        'recipes',
+        'recipes/leader-owned-workers',
+        'recipes/replicated-configuration',
+        'recipes/idempotent-job-processing',
+        'recipes/partitioned-metadata',
+        'recipes/durable-workflow-state',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Operations',
       items: ['operations/sample-server', 'operations/testing'],
     },
