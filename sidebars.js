@@ -12,6 +12,7 @@ const sidebars = {
         'guides/creating-a-node',
         'guides/replicating-logs',
         'guides/hosting-endpoints',
+        'guides/security-and-authentication',
       ],
     },
     {

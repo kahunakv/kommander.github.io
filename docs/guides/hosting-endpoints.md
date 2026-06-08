@@ -34,7 +34,7 @@ Use `RestCommunication` on the `RaftManager`:
 ICommunication communication = new RestCommunication();
 ```
 
-For REST, configure `HttpScheme`, `HttpAuthBearerToken`, `HttpTimeout`, and `HttpVersion` on `RaftConfiguration`.
+For REST, configure `HttpScheme`, `HttpTimeout`, and `HttpVersion` on `RaftConfiguration`. For transport authentication and TLS settings, see [Security And Authentication](security-and-authentication.md).
 
 `MapRestRaftRoutes` currently maps these protocol endpoints:
 
