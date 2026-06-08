@@ -34,6 +34,21 @@ const sidebars = {
     },
     {
       type: 'category',
+      label: 'Internals',
+      items: [
+        'internals',
+        'internals/runtime',
+        'internals/scheduler',
+        'internals/backpressure-and-admission-control',
+        'internals/metrics-and-diagnostics',
+        'internals/wal',
+        'internals/leader-election',
+        'internals/partitions-and-splitting',
+        'internals/compaction',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Recipes',
       items: [
         'recipes',
@@ -47,7 +62,15 @@ const sidebars = {
     {
       type: 'category',
       label: 'Operations',
-      items: ['operations/sample-server', 'operations/testing'],
+      items: [
+        'operations/sample-server',
+        'operations/testing',
+        'operations/leadership-control',
+        'operations/checkpoints-and-compaction',
+        'operations/wal-diagnostics',
+        'operations/transport-batching',
+        'operations/deterministic-testing',
+      ],
     },
     {
       type: 'category',

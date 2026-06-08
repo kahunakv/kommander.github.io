@@ -20,6 +20,17 @@ dotnet test Kommander.Tests/Kommander.Tests.csproj --filter "FullyQualifiedName~
 dotnet test Kommander.Tests/Kommander.Tests.csproj --filter "FullyQualifiedName~TestThreeNodeCluster.TestJoinClusterAndMultiReplicateLogs"
 dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~Kommander.Tests.RaftSafety
 dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~Kommander.Tests.Scheduler
+dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~Kommander.Tests.Simulation
+dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~Kommander.Tests.WAL
 ```
 
-For fast local simulations, use `InMemoryWAL` with `InMemoryCommunication`. The source tree also contains deterministic scheduler and Raft-safety test suites that exercise election safety, commit monotonicity, stale WAL completions, stale append responses, and partition restore behavior.
+For fast local simulations, use `InMemoryWAL` with `InMemoryCommunication`.
+
+Recent test additions are worth knowing about:
+
+- `Kommander.Tests.Simulation`: deterministic simulation runtime with seeded randomness, replay logs, virtual time, and reproducible failure scenarios.
+- `Kommander.Tests.Scheduler`: focused tests for partition executors, fair read/write schedulers, timer behavior, transport batching, and the system coordinator.
+- `Kommander.Tests.RaftSafety`: safety assertions for election safety, commit monotonicity, stale WAL completions, stale append responses, log matching, and system-partition restore behavior.
+- `Kommander.Tests.WAL`: RocksDB, SQLite, and automatic compaction coverage.
+
+The deterministic simulation harness is especially useful when you need to reproduce leadership churn, delayed I/O, transport partitions, or replay a failure with the same random seed.

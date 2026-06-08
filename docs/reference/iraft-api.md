@@ -5,8 +5,8 @@
 | Area | Members |
 | --- | --- |
 | Lifecycle | `JoinCluster`, `LeaveCluster`, `UpdateNodes` |
-| Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName` |
-| Leadership | `AmILeaderQuick`, `AmILeader`, `WaitForLeader` |
+| Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes` |
+| Leadership | `AmILeaderQuick`, `AmILeader`, `WaitForLeader`, `WaitForLeaderStableAsync` |
 | Replication | `ReplicateLogs`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
 | Partition routing | `GetPartitionKey`, `GetPrefixPartitionKey` |
 | Transport entry points | `Handshake`, `RequestVote`, `Vote`, `AppendLogs`, `CompleteAppendLogs` |
@@ -16,6 +16,17 @@
 The transport entry points are intended for communication adapters and HTTP/gRPC endpoint handlers. Normal application writes should use the replication APIs.
 
 `RaftManager` also exposes system-partition callbacks on the concrete type for internal configuration replication. They are not part of `IRaft`.
+
+## Cluster Activity
+
+`GetLastNodeActivity` returns the last HLC timestamp when the local node observed activity from a specific endpoint.
+
+`GetActiveNodes` returns non-local endpoints seen within a time window. This is useful for diagnostics, health displays, and tests that need to confirm recent follower activity.
+
+```csharp
+HLCTimestamp lastSeen = raft.GetLastNodeActivity("node-b:2070");
+IReadOnlyList<string> activeNodes = raft.GetActiveNodes(TimeSpan.FromSeconds(2));
+```
 
 ## Events
 
@@ -42,6 +53,34 @@ raft.OnLeaderChanged += (partitionId, leaderEndpoint) =>
     return Task.FromResult(true);
 };
 ```
+
+## Leadership Helpers
+
+Use `WaitForLeader` when you need the current leader endpoint before routing a request. Use `WaitForLeaderStableAsync` when you need the same non-empty leader to remain stable for a minimum duration.
+
+```csharp
+string leader = await raft.WaitForLeader(1, cancellationToken);
+
+string stableLeader = await raft.WaitForLeaderStableAsync(
+    1,
+    TimeSpan.FromMilliseconds(500),
+    cancellationToken
+);
+```
+
+`WaitForLeaderStableAsync` is especially useful in tests and operational flows where you want to avoid reacting to a leader that is still flapping.
+
+## Test Hooks
+
+Recent Kommander builds expose several advanced members on `IRaft` marked with `EditorBrowsable(EditorBrowsableState.Never)`:
+
+- `ForceLeaderForTestingAsync`
+- `StepDownAsync`
+- `TransferLeadershipAsync`
+- `SuspendHeartbeatsAsync`
+- `ResumeHeartbeatsAsync`
+
+These are intended for deterministic tests and fault-injection scenarios, not ordinary application traffic or public API endpoints.
 
 ## Operation Status Values
 

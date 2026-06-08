@@ -16,6 +16,15 @@ IWAL sqlite = new SqliteWAL("./data", "node-1", logger);
 IWAL memory = new InMemoryWAL(logger);
 ```
 
+Both durable adapters also support `syncWrites: false` for benchmarks and some CI scenarios:
+
+```csharp
+IWAL fastRocks = new RocksDbWAL("./data", "node-1", logger, syncWrites: false);
+IWAL fastSqlite = new SqliteWAL("./data", "node-1", logger, syncWrites: false);
+```
+
+With `syncWrites: false`, acknowledged writes may still be lost on process or machine crash. Use that mode only when crash durability is not part of what you are validating.
+
 Custom adapters implement `IWAL`.
 
 ```csharp
@@ -27,9 +36,11 @@ public interface IWAL : IDisposable
     long GetMaxLog(int partitionId);
     long GetCurrentTerm(int partitionId);
     long GetLastCheckpoint(int partitionId);
+    int CountPersistedLogs(int partitionId);
+    int CountRemovableLogs(int partitionId);
     string? GetMetaData(string key);
     bool SetMetaData(string key, string value);
-    RaftOperationStatus CompactLogsOlderThan(
+    (RaftOperationStatus Status, int Removed) CompactLogsOlderThan(
         int partitionId,
         long lastCheckpoint,
         int compactNumberEntries
@@ -37,13 +48,20 @@ public interface IWAL : IDisposable
 }
 ```
 
+The counting methods are useful for tests, diagnostics, and compaction visibility:
+
+- `CountPersistedLogs`: total persisted log rows for the partition.
+- `CountRemovableLogs`: persisted rows strictly below the last committed checkpoint.
+
 ## Communication Adapters
 
 | Adapter | Use case |
 | --- | --- |
-| `GrpcCommunication` | Networked clusters using gRPC. |
+| `GrpcCommunication` | Networked clusters using gRPC streaming. |
 | `RestCommunication` | Networked clusters using REST/JSON endpoints. |
 | `InMemoryCommunication` | Unit tests and in-process simulations. |
+
+Recent versions batch outbound Raft transport messages through `BatchRequests`. That includes append traffic and control traffic such as step-down notices and leadership-transfer requests.
 
 Custom transports implement `ICommunication`.
 

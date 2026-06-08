@@ -4,6 +4,21 @@ Kommander gives applications a replicated log, partition leadership, and callbac
 
 Kommander is intentionally not a finished database or workflow engine. In each pattern, your service owns the domain model, persistence format, API, authorization, and side effects. Kommander owns the ordered, replicated decision stream.
 
+## How to Read These Recipes
+
+If you are new to Raft, think of Kommander as a way to make a small cluster agree on important decisions before your application acts on them.
+
+A command is an application-level decision you want the cluster to remember, such as "this job started", "this configuration value changed", or "this resource now belongs to node-a". Kommander replicates that command to the partition's Raft group. Once the command is committed, every node receives it through callbacks and can update its own local view.
+
+Most recipes are split into the same beginner-friendly pieces:
+
+- The problem: why this is hard in a distributed service.
+- The pattern: where Kommander fits.
+- Applying state: what your callbacks should do after a command commits.
+- Notes: practical details that prevent common mistakes.
+
+The most important rule is that callbacks should be quick and deterministic. Use them to update local state, indexes, projections, or durable application storage. Avoid slow network calls, payment requests, emails, or other external side effects inside the callback. Record the decision first, then let your application workers perform side effects with idempotency keys.
+
 ## Recipes
 
 - [Leader-Owned Workers](recipes/leader-owned-workers.md): run one active coordinator per partition.
