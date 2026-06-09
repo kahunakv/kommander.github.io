@@ -8,10 +8,11 @@
 | Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes` |
 | Leadership | `AmILeaderQuick`, `AmILeader`, `WaitForLeader`, `WaitForLeaderStableAsync` |
 | Replication | `ReplicateLogs`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
+| Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetPartitionGeneration`, `GetPartitionMap`, `RegisterStateMachineTransfer` |
 | Partition routing | `GetPartitionKey`, `GetPrefixPartitionKey` |
 | Transport entry points | `Handshake`, `RequestVote`, `Vote`, `AppendLogs`, `CompleteAppendLogs` |
 | Components | `WalAdapter`, `Communication`, `Discovery`, `Configuration`, `HybridLogicalClock`, `ReadScheduler`, `WalScheduler` |
-| Events | `OnRestoreStarted`, `OnRestoreFinished`, `OnReplicationError`, `OnLogRestored`, `OnReplicationReceived`, `OnLeaderChanged` |
+| Events | `OnRestoreStarted`, `OnRestoreFinished`, `OnReplicationError`, `OnLogRestored`, `OnReplicationReceived`, `OnLeaderChanged`, `OnPartitionMapChanged` |
 
 The transport entry points are intended for communication adapters and HTTP/gRPC endpoint handlers. Normal application writes should use the replication APIs.
 
@@ -51,6 +52,10 @@ raft.OnReplicationError += (partitionId, log) => { };
 raft.OnLeaderChanged += (partitionId, leaderEndpoint) =>
 {
     return Task.FromResult(true);
+};
+
+raft.OnPartitionMapChanged += ranges =>
+{
 };
 ```
 
@@ -97,3 +102,27 @@ These are intended for deterministic tests and fault-injection scenarios, not or
 | `ProposalTimeout` | The proposal did not complete in time. |
 | `ReplicationFailed` | Replication failed before commit. |
 | `Pending` | Internal state used while asynchronous work is in progress. |
+| `ProposalQueueFull` | The per-partition client proposal queue is full. Retry with backoff. |
+| `RestoreInProgress` | The partition is still restoring from the WAL. Retry after a short delay. |
+| `PartitionMoved` | The partition generation changed. Refresh the partition map and retry on the current owner. |
+
+## Elastic Partition APIs
+
+Kommander also exposes runtime partition lifecycle operations:
+
+```csharp
+RaftPartitionLifecycleResult created = await raft.CreatePartitionAsync(10);
+RaftPartitionLifecycleResult split = await raft.SplitPartitionAsync(2);
+RaftPartitionLifecycleResult merged = await raft.MergePartitionsAsync(2, 3);
+RaftPartitionLifecycleResult removed = await raft.RemovePartitionAsync(10);
+```
+
+Useful companion APIs:
+
+```csharp
+long generation = raft.GetPartitionGeneration(2);
+IReadOnlyList<RaftPartitionRange> map = raft.GetPartitionMap();
+raft.RegisterStateMachineTransfer(new MyTransfer());
+```
+
+See [Elastic Partitions](../guides/elastic-partitions.md) for the full behavior and application responsibilities.

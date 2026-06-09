@@ -20,3 +20,16 @@ await items.ForEachAsync(maxDegreeOfParallelism: 8, async item =>
 `SmallDictionary<TKey, TValue>` is a fixed-capacity, non-thread-safe dictionary optimized for very small maps.
 
 Use it where the expected key count is small and predictable.
+
+## Partition Types
+
+Elastic partition APIs use a few public support types:
+
+- `RaftPartitionRange`: one partition-map entry, including `PartitionId`, hash range, `Generation`, `State`, and `RoutingMode`.
+- `RaftPartitionLifecycleResult`: result from create, remove, split, and merge operations.
+- `RaftSplitPlan`: optional split configuration such as target partition id, routing mode, and hash boundary.
+- `RaftMergePlan`: identifies the survivor and source partitions during merge.
+- `RaftPartitionState`: `Active`, `Splitting`, `Draining`, `Removed`.
+- `RaftRoutingMode`: `HashRange`, `Unrouted`.
+
+See [Elastic Partitions](../guides/elastic-partitions.md) for when applications should use these types.

@@ -29,3 +29,5 @@ await manager.SplitPartition(partitionId);
 ```
 
 The caller must be initialized, the target partition must be `1` or higher, and the local node must be leader for the target partition.
+
+Recent Kommander builds also expose create, remove, split, and merge APIs through `IRaft`, along with generation fencing and partition-map snapshots. See [Elastic Partitions](../guides/elastic-partitions.md) for the user-facing lifecycle behavior.
