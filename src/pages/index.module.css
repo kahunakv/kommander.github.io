@@ -1,24 +1,36 @@
 .heroBanner {
-  padding: 5rem 0;
+  padding: 5rem 0 4rem;
   text-align: center;
   position: relative;
   overflow: hidden;
   background:
     radial-gradient(circle at 18% 20%, rgba(46, 141, 255, 0.20), transparent 30%),
-    linear-gradient(135deg, #111827 0%, #182033 58%, #143333 100%);
+    radial-gradient(circle at 85% 22%, rgba(8, 145, 178, 0.18), transparent 28%),
+    linear-gradient(135deg, #0f172a 0%, #162235 52%, #133447 100%);
   color: #fff;
 }
 
+.heroEyebrow {
+  margin: 0 0 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
 .heroTitle {
-  font-size: 4rem;
-  line-height: 1;
+  font-size: 4.1rem;
+  line-height: 0.96;
   letter-spacing: 0;
+  max-width: 13ch;
+  margin: 0 auto;
 }
 
 .heroSubtitle {
   font-size: 1.35rem;
   margin: 1rem auto 0;
-  max-width: 42rem;
+  max-width: 48rem;
   color: #dbeafe;
 }
 
@@ -31,6 +43,112 @@
   margin-top: 2rem;
 }
 
+.proofGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-top: 2.5rem;
+}
+
+.proofPill {
+  border: 1px solid rgba(191, 219, 254, 0.22);
+  background: rgba(15, 23, 42, 0.24);
+  color: #e0f2fe;
+  border-radius: 8px;
+  padding: 0.95rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.primarySection {
+  padding: 4.5rem 0;
+}
+
+.bandSection {
+  padding: 4.5rem 0;
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.03));
+}
+
+.sectionHeading {
+  max-width: 52rem;
+  margin-bottom: 2rem;
+}
+
+.sectionEyebrow {
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ifm-color-primary);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 2.3rem;
+  line-height: 1.02;
+}
+
+.sectionSubtitle {
+  margin: 0.9rem 0 0;
+  font-size: 1.08rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.advantageCard,
+.fitCard,
+.calloutCard {
+  height: 100%;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  padding: 1.35rem;
+  background: var(--ifm-background-surface-color);
+}
+
+.cardTitle {
+  margin-bottom: 0.65rem;
+  font-size: 1.15rem;
+}
+
+.cardDescription {
+  margin: 0;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.fitGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.fitList {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.fitList li + li {
+  margin-top: 0.5rem;
+}
+
+.calloutRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.footerActions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 2rem;
+}
+
 @media screen and (max-width: 996px) {
   .heroBanner {
     padding: 3rem 1rem;
@@ -38,5 +156,17 @@
 
   .heroTitle {
     font-size: 3rem;
+    max-width: none;
+  }
+
+  .proofGrid,
+  .cardGrid,
+  .fitGrid,
+  .calloutRow {
+    grid-template-columns: 1fr;
+  }
+
+  .sectionTitle {
+    font-size: 1.9rem;
   }
 }
