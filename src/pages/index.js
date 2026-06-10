@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import {Highlight, themes as prismThemes} from 'prism-react-renderer';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
@@ -11,6 +12,20 @@ const proofPoints = [
   'RocksDB, SQLite, or in-memory WAL',
   'gRPC, REST, or in-memory transport',
 ];
+
+const heroSnippet = `// Only the leader for a partition can propose. The change is
+// committed once a quorum of nodes has durably stored it.
+if (await raft.AmILeader(partitionId, ct))
+{
+    RaftReplicationResult result = await raft.ReplicateLogs(
+        partitionId, "OrderPlaced", payload, cancellationToken: ct);
+
+    Console.WriteLine($"Committed at log #{result.LogIndex}");
+}
+
+// Every node applies committed entries in the same order,
+// so the whole cluster ends up with one source of truth.
+raft.OnReplicationReceived += (partitionId, log) => Apply(log.LogData);`;
 
 const advantageCards = [
   {
@@ -83,14 +98,15 @@ function HomepageHeader() {
   return (
     <header className={clsx('hero', styles.heroBanner)}>
       <div className="container">
-        <p className={styles.heroEyebrow}>Distributed coordination for .NET</p>
+        <p className={styles.heroEyebrow}>Open-source Raft for C# and .NET</p>
         <Heading as="h1" className={styles.heroTitle}>
-          Raft consensus for .NET
+          Make your .NET services agree, and survive failure
         </Heading>
         <p className={styles.heroSubtitle}>
-          Kommander is an embedded Raft library for C# and .NET that gives you partitioned
-          leader election, quorum-backed log replication, durable WAL storage, elastic
-          partitions, and operational visibility inside your own service
+          Kommander is an embedded library that lets several nodes commit the same ordered
+          stream of changes, so your system keeps one source of truth even when nodes
+          restart or the network breaks. You keep your data model and APIs. It handles
+          leader election, replication, and durable recovery.
         </p>
         <div className={styles.buttons}>
           <Link className="button button--primary button--lg" to="/docs/getting-started">
@@ -100,6 +116,19 @@ function HomepageHeader() {
             Why Kommander
           </Link>
         </div>
+        <Highlight theme={prismThemes.dracula} code={heroSnippet} language="csharp">
+          {({className, style, tokens, getLineProps, getTokenProps}) => (
+            <pre className={clsx(className, styles.heroCode)} style={style}>
+              {tokens.map((line, i) => (
+                <div key={i} {...getLineProps({line})}>
+                  {line.map((token, key) => (
+                    <span key={key} {...getTokenProps({token})} />
+                  ))}
+                </div>
+              ))}
+            </pre>
+          )}
+        </Highlight>
         <div className={styles.proofGrid}>
           {proofPoints.map((point) => (
             <div key={point} className={styles.proofPill}>
