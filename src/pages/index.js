@@ -18,7 +18,11 @@ const heroSnippet = `// Only the leader for a partition can propose. The change 
 if (await raft.AmILeader(partitionId, ct))
 {
     RaftReplicationResult result = await raft.ReplicateLogs(
-        partitionId, "OrderPlaced", payload, cancellationToken: ct);
+        partitionId, 
+        "OrderPlaced", 
+        payload, 
+        cancellationToken: ct
+    );
 
     Console.WriteLine($"Committed at log #{result.LogIndex}");
 }

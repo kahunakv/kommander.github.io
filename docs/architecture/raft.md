@@ -6,6 +6,8 @@ Kommander implements this model with partitioned Raft groups. Each partition ele
 
 If you are new to Raft, read "replicated state machine" as "the same sequence of decisions is replayed on every node." Kommander gives every node the same committed sequence. Your code turns that sequence into useful state.
 
+![Compressed overview of the Raft algorithm](/img/raft-compressed.png)
+
 ## Why Raft Exists
 
 Raft solves a specific problem: several machines need to agree on what happened, in what order, even when some machines are slow, disconnected, or restarted.
@@ -14,7 +16,11 @@ Without a consensus protocol, two nodes can both believe they are allowed to mak
 
 ## Leader Election
 
-Followers monitor leader heartbeats. When a heartbeat is not received within the configured election window, a follower can become a candidate and request votes. A candidate becomes leader after receiving quorum support for the current term.
+Followers monitor leader heartbeats. When a heartbeat is not received within the configured election window, a follower does not jump straight into a real election anymore.
+
+Current Kommander builds first run a pre-vote round. In that round, the follower asks peers whether they would support an election for `currentTerm + 1` without actually incrementing the term or recording a real vote yet. Only if that pre-vote reaches quorum does the node become a candidate, increment the term, and request real votes.
+
+This reduces disruption from stale or partitioned nodes. A node that is isolated, behind on logs, or cut off from quorum can fail pre-vote without forcing the rest of the cluster into unnecessary term churn.
 
 A term is an election era. When a new election happens, the term increases. Terms help nodes reject stale messages from old leaders.
 

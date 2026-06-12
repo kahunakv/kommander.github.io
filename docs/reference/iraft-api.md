@@ -18,6 +18,17 @@ The transport entry points are intended for communication adapters and HTTP/gRPC
 
 `RaftManager` also exposes system-partition callbacks on the concrete type for internal configuration replication. They are not part of `IRaft`.
 
+## Lifecycle Notes
+
+`JoinCluster` now accepts an optional cancellation token:
+
+```csharp
+using CancellationTokenSource joinTimeout = new(TimeSpan.FromSeconds(30));
+await raft.JoinCluster(joinTimeout.Token);
+```
+
+If you do not supply your own cancellation, `RaftManager` still applies an internal 60-second timeout while waiting for cluster initialization to complete.
+
 ## Cluster Activity
 
 `GetLastNodeActivity` returns the last HLC timestamp when the local node observed activity from a specific endpoint.
@@ -126,3 +137,19 @@ raft.RegisterStateMachineTransfer(new MyTransfer());
 ```
 
 See [Elastic Partitions](../guides/elastic-partitions.md) for the full behavior and application responsibilities.
+
+## Replication Signature Note
+
+`ReplicateLogs` now takes `expectedGeneration` before `cancellationToken` in the optional-parameter list.
+
+That makes named arguments the safest style for most callers:
+
+```csharp
+RaftReplicationResult result = await raft.ReplicateLogs(
+    partitionId: 1,
+    type: "OrderCreated",
+    data: payload,
+    expectedGeneration: generation,
+    cancellationToken: cancellationToken
+);
+```

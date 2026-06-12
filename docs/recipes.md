@@ -26,6 +26,9 @@ The most important rule is that callbacks should be quick and deterministic. Use
 - [Idempotent Job Processing](recipes/idempotent-job-processing.md): record job state transitions before workers perform side effects.
 - [Partitioned Metadata](recipes/partitioned-metadata.md): build tenant-aware metadata services with independent Raft partitions.
 - [Durable Workflow State](recipes/durable-workflow-state.md): replicate workflow decisions so processes can recover after crashes.
+- [Checkpointed Projections](recipes/checkpointed-projections.md): reduce replay cost by writing checkpoints at stable milestones.
+- [Splitting Hot Tenant Ranges](recipes/splitting-hot-tenant-ranges.md): scale a busy key range by dividing one hot partition into two.
+- [Merging Cooled Partitions](recipes/merging-cooled-partitions.md): collapse lightly loaded ranges after a traffic spike passes.
 
 ## Common Shape
 

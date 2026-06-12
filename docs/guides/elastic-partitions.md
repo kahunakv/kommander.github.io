@@ -13,6 +13,11 @@ This page documents the user-facing APIs and the application behavior you need t
 
 Partition `0` is still reserved for Kommander system configuration. Elastic partition APIs apply to user partitions `1` and above.
 
+If you want task-oriented walkthroughs instead of the whole API surface, also read:
+
+- [Splitting A Hot Partition](./splitting-a-hot-partition.md)
+- [Merging Idle Partitions](./merging-idle-partitions.md)
+
 ## Why You Would Use This
 
 Elastic partitions are useful when the right partition count is not known up front.

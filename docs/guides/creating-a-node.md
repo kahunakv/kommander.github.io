@@ -35,8 +35,11 @@ Call `JoinCluster` after subscribing to restore and replication callbacks:
 raft.OnLogRestored += RestoreLog;
 raft.OnReplicationReceived += ApplyCommittedLog;
 
-await raft.JoinCluster();
+using CancellationTokenSource joinTimeout = new(TimeSpan.FromSeconds(30));
+await raft.JoinCluster(joinTimeout.Token);
 ```
+
+If you do not pass your own cancellation token, `JoinCluster` still uses an internal 60-second timeout while waiting for the system partition to initialize user partitions.
 
 Call `LeaveCluster` when shutting down:
 

@@ -11,8 +11,11 @@ const sidebars = {
       items: [
         'guides/creating-a-node',
         'guides/replicating-logs',
+        'guides/checkpointing-and-recovery',
         'guides/hosting-endpoints',
         'guides/elastic-partitions',
+        'guides/splitting-a-hot-partition',
+        'guides/merging-idle-partitions',
         'guides/security-and-authentication',
       ],
     },
@@ -59,6 +62,9 @@ const sidebars = {
         'recipes/idempotent-job-processing',
         'recipes/partitioned-metadata',
         'recipes/durable-workflow-state',
+        'recipes/checkpointed-projections',
+        'recipes/splitting-hot-tenant-ranges',
+        'recipes/merging-cooled-partitions',
       ],
     },
     {

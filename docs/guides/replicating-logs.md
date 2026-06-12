@@ -61,6 +61,19 @@ if (proposal.Success)
 }
 ```
 
+If you use generation fencing with elastic partitions, pass `expectedGeneration` explicitly and prefer named arguments so the optional-parameter order stays obvious:
+
+```csharp
+RaftReplicationResult proposal = await raft.ReplicateLogs(
+    partitionId: 1,
+    type: "PaymentReserved",
+    data: payload,
+    autoCommit: false,
+    expectedGeneration: generation,
+    cancellationToken: cancellationToken
+);
+```
+
 Rollback uses the same ticket:
 
 ```csharp

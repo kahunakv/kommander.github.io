@@ -15,7 +15,7 @@
 | `HttpTimeout` | `5` | REST request timeout in seconds. |
 | `HttpVersion` | `2.0` | REST HTTP version. |
 | `HeartbeatInterval` | `500 ms` | Leader heartbeat interval. |
-| `RecentHeartbeat` | `100 ms` | Cross-partition recent-heartbeat window. |
+| `RecentHeartbeat` | `100 ms` | Per-partition heartbeat throttle window for leader heartbeats sent to a follower. |
 | `VotingTimeout` | `1500 ms` | Candidate vote wait timeout. |
 | `CheckLeaderInterval` | `250 ms` | Leader election supervision interval. |
 | `TimerInitialDelay` | `2500 ms` | Initial delay before periodic Raft timers start firing. |
@@ -24,6 +24,7 @@
 | `EndElectionTimeout` | `4000 ms` | Upper election timeout bound. |
 | `StartElectionTimeoutIncrement` | `100 ms` | Lower timeout backoff increment. |
 | `EndElectionTimeoutIncrement` | `200 ms` | Upper timeout backoff increment. |
+| `ElectionTimeoutSeed` | `null` | Optional deterministic seed for partition election timeout randomization. Use in tests and simulations when you need reproducible leader-election timing. |
 | `SlowRaftStateMachineLog` | `50 ms` | Slow partition state-machine operation warning threshold. |
 | `SlowRaftWALMachineLog` | `25 ms` | Slow WAL warning threshold. |
 | `ReadIOThreads` | `8` | Fair scheduler workers for synchronous WAL reads. |
@@ -77,3 +78,10 @@ The `MaxDrainQuantum*` settings tune how many operations each partition executor
 - maintenance.
 
 Higher control and replication quanta help Raft protocol traffic stay ahead of client floods. In most deployments, the defaults are the right starting point.
+
+## Recent Timing Notes
+
+Two recent timing-related changes matter for operators and test authors:
+
+- `ElectionTimeoutSeed` lets each partition derive its election timeout randomness from a deterministic seed combined with the partition id. That makes election behavior reproducible in tests without making every partition use the exact same sequence.
+- `RecentHeartbeat` now throttles heartbeats per `(node, partition)` pair instead of only per node. That avoids one busy partition suppressing heartbeats for every other partition on the same follower.

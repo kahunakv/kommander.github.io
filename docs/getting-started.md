@@ -85,7 +85,8 @@ raft.OnReplicationReceived += (partitionId, log) =>
 
 // Join starts discovery, restores WAL state, initializes partitions, and begins
 // leader election and heartbeat processing.
-await raft.JoinCluster();
+using CancellationTokenSource joinTimeout = new(TimeSpan.FromSeconds(30));
+await raft.JoinCluster(joinTimeout.Token);
 
 using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
 
@@ -112,6 +113,8 @@ await raft.LeaveCluster(dispose: true);
 ```
 
 If this node is not the leader for partition `1`, the sample does not replicate anything. In a real service, you can call `WaitForLeader` to find the leader endpoint and route the client request there, or let clients retry against another node.
+
+If you omit the `JoinCluster` cancellation token, Kommander still applies an internal 60-second timeout while waiting for cluster initialization.
 
 ## Next Steps
 
