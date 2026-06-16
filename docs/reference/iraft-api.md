@@ -5,7 +5,8 @@
 | Area | Members |
 | --- | --- |
 | Lifecycle | `JoinCluster`, `LeaveCluster`, `UpdateNodes` |
-| Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes` |
+| Membership | `GetMembership`, `LocalRole`, `OnMembershipChanged` |
+| Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes`, `GetFollowerLagAsync` |
 | Leadership | `AmILeaderQuick`, `AmILeader`, `WaitForLeader`, `WaitForLeaderStableAsync` |
 | Replication | `ReplicateLogs`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
 | Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetPartitionGeneration`, `GetPartitionMap`, `RegisterStateMachineTransfer` |
@@ -29,6 +30,43 @@ await raft.JoinCluster(joinTimeout.Token);
 
 If you do not supply your own cancellation, `RaftManager` still applies an internal 60-second timeout while waiting for cluster initialization to complete.
 
+There is also a seed-based overload:
+
+```csharp
+await raft.JoinCluster(
+    new[] { "node-a:7000", "node-b:7000" },
+    joinTimeout.Token
+);
+```
+
+Current membership-capable builds join new nodes as learners first and only return once the node has been promoted to a committed voter.
+
+## Membership
+
+`GetMembership` returns a point-in-time snapshot of the committed cluster roster.
+
+`LocalRole` tells you whether the local node is currently a:
+
+- `Voter`
+- `Learner`
+- `Leaving`
+- `NotMember`
+
+```csharp
+ClusterMembership roster = raft.GetMembership();
+ClusterMemberRole localRole = raft.LocalRole;
+```
+
+Use `OnMembershipChanged` to observe roster version changes:
+
+```csharp
+raft.OnMembershipChanged += membership =>
+{
+};
+```
+
+`MembershipVersion` is monotonic for the life of the cluster and is the main fence for membership updates.
+
 ## Cluster Activity
 
 `GetLastNodeActivity` returns the last HLC timestamp when the local node observed activity from a specific endpoint.
@@ -39,6 +77,17 @@ If you do not supply your own cancellation, `RaftManager` still applies an inter
 HLCTimestamp lastSeen = raft.GetLastNodeActivity("node-b:2070");
 IReadOnlyList<string> activeNodes = raft.GetActiveNodes(TimeSpan.FromSeconds(2));
 ```
+
+`GetFollowerLagAsync` returns the observed lag for a follower on a partition when the local node has that progress information:
+
+```csharp
+long? lag = await raft.GetFollowerLagAsync(
+    partitionId: 1,
+    followerEndpoint: "node-b:2070"
+);
+```
+
+`null` means there is no recorded lag value for that follower and partition on this node.
 
 ## Events
 
@@ -66,6 +115,10 @@ raft.OnLeaderChanged += (partitionId, leaderEndpoint) =>
 };
 
 raft.OnPartitionMapChanged += ranges =>
+{
+};
+
+raft.OnMembershipChanged += membership =>
 {
 };
 ```
@@ -116,6 +169,11 @@ These are intended for deterministic tests and fault-injection scenarios, not or
 | `ProposalQueueFull` | The per-partition client proposal queue is full. Retry with backoff. |
 | `RestoreInProgress` | The partition is still restoring from the WAL. Retry after a short delay. |
 | `PartitionMoved` | The partition generation changed. Refresh the partition map and retry on the current owner. |
+| `StaleMembership` | The roster version changed. Re-read membership and retry against the current version. |
+| `ConcurrentMembershipChange` | Another membership change is already in flight. Retry after it commits. |
+| `InsufficientVoters` | The requested removal would leave the cluster unavailable. Do not retry blindly. |
+| `LogMismatch` | A follower rejected an anchored backfill append because its log did not match `PrevLogIndex` / `PrevLogTerm`. The leader backs up and retries. |
+| `SnapshotRequired` | The follower needs entries below the leader's compaction floor. Ordinary log backfill cannot catch it up. |
 
 ## Elastic Partition APIs
 

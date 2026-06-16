@@ -77,12 +77,32 @@ public interface ICommunication
 }
 ```
 
+### Dynamic Membership Support
+
+Current dynamic membership support is not identical across transports.
+
+Practical state today:
+
+- membership roster commits and join flow work on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`,
+- graceful leave RPCs are wired on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`,
+- cross-partition remote lag lookup for learner promotion is wired on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`,
+- gossip anti-entropy is currently only wired on `InMemoryCommunication`,
+- SWIM ping probing is currently only wired on `InMemoryCommunication`.
+
+That means:
+
+- gRPC and REST can still run membership commits and joins through Raft replication,
+- gRPC and REST can use graceful leave through their transport RPCs,
+- gRPC and REST can use remote follower lag lookups for learner promotion,
+- gRPC and REST should keep `PingInterval = 0`,
+- gossip and SWIM behavior are still more limited than in-process transport.
+
 ## Discovery Adapters
 
 | Adapter | Use case |
 | --- | --- |
-| `StaticDiscovery` | Fixed cluster membership. |
-| `DynamicDiscovery` | Mutable in-memory node list controlled by the application. |
+| `StaticDiscovery` | Fixed seed/contact list. Useful for bootstrap, not as the live membership authority. |
+| `DynamicDiscovery` | Mutable in-memory contact list controlled by the application. Useful for tests and programmatic bootstrap. |
 | `MulticastDiscovery` | UDP multicast discovery on local networks. |
 
 `RedisDiscovery` is present in source as a placeholder and returns no nodes in this release. Do not use it for cluster formation.
@@ -96,3 +116,5 @@ public interface IDiscovery
     List<RaftNode> GetNodes();
 }
 ```
+
+With dynamic membership enabled, discovery helps nodes find contact points. The committed roster on partition `0` remains the source of truth for who actually belongs to the cluster and who counts toward quorum.

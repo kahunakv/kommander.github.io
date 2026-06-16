@@ -30,6 +30,8 @@ The partition leader accepts proposals, assigns log indexes, writes the proposal
 
 The log index is the committed position of an entry in the partition's ordered history. If two nodes have committed entry `25`, they should agree on the earlier committed entries that led there.
 
+Followers that fall behind are repaired through bounded log backfill. The live replication path handles followers that are keeping up; the backfill path sends missing committed entries with a log-matching anchor so a follower cannot grow gaps or keep a divergent uncommitted tail. See [Log Backfill And Catch-Up](../guides/log-backfill-and-catch-up.md).
+
 ## State Machine Integration
 
 Kommander does not own your domain state. Your application applies committed log entries through `OnReplicationReceived` and rebuilds state during restore through `OnLogRestored`.

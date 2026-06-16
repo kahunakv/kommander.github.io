@@ -10,7 +10,9 @@ const sidebars = {
       label: 'Guides',
       items: [
         'guides/creating-a-node',
+        'guides/dynamic-cluster-membership',
         'guides/replicating-logs',
+        'guides/log-backfill-and-catch-up',
         'guides/checkpointing-and-recovery',
         'guides/hosting-endpoints',
         'guides/elastic-partitions',
@@ -32,6 +34,7 @@ const sidebars = {
       type: 'category',
       label: 'Architecture',
       items: [
+        'architecture/overview',
         'architecture/raft',
         'architecture/partitioning',
         'architecture/hybrid-logical-clocks',

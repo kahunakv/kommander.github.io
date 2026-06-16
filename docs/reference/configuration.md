@@ -37,6 +37,17 @@
 | `MaxDrainQuantumReplication` | `4` | Maximum replication operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumClient` | `2` | Maximum client operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumMaintenance` | `1` | Maximum maintenance operations drained per partition-executor wake cycle. |
+| `BackfillThreshold` | `10` | Follower lag threshold that switches the leader from empty heartbeats to active committed-log backfill. |
+| `MaxBackfillEntriesPerRound` | `128` | Maximum committed log entries shipped to one stale follower per backfill round. |
+| `LearnerPromotionLag` | `10` | Maximum lag a learner may have on any partition and still be considered caught up enough for promotion. |
+| `LearnerPromotionStableWindow` | `3 s` | How long a learner must remain within `LearnerPromotionLag` before promotion to voter. |
+| `GossipInterval` | `5 s` | Interval between membership gossip rounds. |
+| `GossipFanout` | `2` | Random peers contacted per gossip round. `0` disables gossip. |
+| `PingTimeout` | `500 ms` | SWIM direct/indirect probe timeout. |
+| `IndirectPingFanout` | `2` | Number of relay peers used for indirect SWIM probes. |
+| `SuspicionTimeout` | `5 s` | How long a node stays `Suspect` before becoming `Dead`. |
+| `DeadMemberEvictionGrace` | `30 s` | How long a node remains `Dead` before the system-partition leader evicts it. |
+| `PingInterval` | `0 s` | SWIM ping round interval. `0` disables the detector. Keep disabled on gRPC and REST in current builds. |
 | `CompactEveryOperations` | `10000` | Committed operations between automatic WAL compaction triggers per partition. Set to `0` or lower to disable automatic compaction. |
 | `CompactNumberEntries` | `100` | Max entries the WAL adapter is asked to remove per `CompactLogsOlderThan` call. Values below `1` are treated as `1`. |
 | `MaxEntriesPerCompaction` | `5000` | Upper bound on entries removed during one triggered compaction pass before yielding. Values below `CompactNumberEntries` are treated as `CompactNumberEntries`. |
@@ -67,6 +78,26 @@ Recent Kommander releases added explicit admission control so client traffic and
 - `MaxWalBatchSize` controls how many WAL write operations may be combined into one flush.
 
 If a client proposal limit is hit, the runtime can reject new work with `RaftOperationStatus.ProposalQueueFull` instead of letting memory usage grow indefinitely.
+
+## Dynamic Membership
+
+Recent Kommander builds added runtime cluster membership management with learners, promotion, gossip dissemination, and optional SWIM-based failure detection.
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `BackfillThreshold` | `10` | Follower lag threshold that switches the leader from empty heartbeats to active committed-log backfill. |
+| `MaxBackfillEntriesPerRound` | `128` | Maximum committed log entries shipped to one stale follower per backfill round. |
+| `LearnerPromotionLag` | `10` | Maximum lag a learner may have on any partition and still be considered caught up enough for promotion. |
+| `LearnerPromotionStableWindow` | `3 s` | How long a learner must remain within `LearnerPromotionLag` before promotion to voter. |
+| `GossipInterval` | `5 s` | Interval between membership gossip rounds. |
+| `GossipFanout` | `2` | Random peers contacted per gossip round. `0` disables gossip. |
+| `PingInterval` | `0 s` | SWIM ping round interval. `0` disables the detector. Keep disabled on gRPC and REST in current builds. |
+| `PingTimeout` | `500 ms` | SWIM direct/indirect probe timeout. |
+| `IndirectPingFanout` | `2` | Number of relay peers used for indirect SWIM probes. |
+| `SuspicionTimeout` | `5 s` | How long a node stays `Suspect` before becoming `Dead`. |
+| `DeadMemberEvictionGrace` | `30 s` | How long a node remains `Dead` before the system-partition leader evicts it. |
+
+Important current limitation: `PingInterval` should remain `0` on gRPC and REST transports because ping probing is not fully wired there yet. Enabling SWIM on those transports can incorrectly mark healthy peers dead.
 
 ## Executor Drain Quanta
 

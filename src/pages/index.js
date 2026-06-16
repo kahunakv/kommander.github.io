@@ -8,8 +8,9 @@ import styles from './index.module.css';
 
 const proofPoints = [
   'Partitioned Raft groups',
+  'Dynamic membership',
+  'Elastic partitions',
   'Embedded in your .NET service',
-  'RocksDB, SQLite, or in-memory WAL',
   'gRPC, REST, or in-memory transport',
 ];
 
@@ -56,6 +57,11 @@ const advantageCards = [
     title: 'Scale partitions at runtime',
     description:
       'Create, split, merge, and remove user partitions without restarting the cluster, with generation fencing to protect callers from stale routing.',
+  },
+  {
+    title: 'Change cluster membership safely',
+    description:
+      'Add nodes as learners, promote them after catch-up, and remove members through the committed system partition roster instead of trusting discovery snapshots.',
   },
   {
     title: 'Debug real runtime behavior',
@@ -207,13 +213,29 @@ export default function Home() {
             <div className={styles.calloutRow}>
               <div className={styles.calloutCard}>
                 <Heading as="h3" className={styles.cardTitle}>
-                  Runtime capabilities
+                  Elastic partitions
                 </Heading>
                 <p className={styles.cardDescription}>
-                  Per-partition leadership, explicit commit and rollback, checkpoints,
-                  automatic compaction, backpressure, elastic partitions, and state-transfer
-                  hooks.
+                  Create partitions for new workloads, split hot ranges, merge cooled ranges,
+                  and fence stale callers with partition generations while your service keeps
+                  ownership of state-transfer behavior.
                 </p>
+                <Link className={styles.inlineLink} to="/docs/guides/elastic-partitions">
+                  Read the partition guide
+                </Link>
+              </div>
+              <div className={styles.calloutCard}>
+                <Heading as="h3" className={styles.cardTitle}>
+                  Dynamic membership
+                </Heading>
+                <p className={styles.cardDescription}>
+                  Join new nodes as non-voting learners, promote them after they catch up,
+                  and remove members through a committed roster on the system partition so
+                  quorum is based on consensus, not discovery.
+                </p>
+                <Link className={styles.inlineLink} to="/docs/guides/dynamic-cluster-membership">
+                  Read the membership guide
+                </Link>
               </div>
               <div className={styles.calloutCard}>
                 <Heading as="h3" className={styles.cardTitle}>
