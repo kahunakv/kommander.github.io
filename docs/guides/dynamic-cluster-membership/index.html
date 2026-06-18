@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Dynamic Cluster Membership | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Dynamic Cluster Membership | Kommander"><meta data-rh="true" name="description" content="Kommander can change the cluster roster at runtime."><meta data-rh="true" property="og:description" content="Kommander can change the cluster roster at runtime."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dynamic Cluster Membership","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f593088b.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.b44632f5.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -103,7 +103,7 @@
 </ul>
 <p>This is what lets nodes join without harming quorum availability during catch-up.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="catch-up-limitation-you-should-know">Catch-Up Limitation You Should Know<a href="#catch-up-limitation-you-should-know" class="hash-link" aria-label="Direct link to Catch-Up Limitation You Should Know" title="Direct link to Catch-Up Limitation You Should Know" translate="no">​</a></h2>
-<p>Current Kommander builds use bounded log backfill to catch learners up.</p>
+<p>Kommander uses bounded log backfill to catch learners up.</p>
 <p>That works only while the learner still needs entries above the current compaction floor. If the WAL has already compacted away the history a fresh learner needs, there is not yet a snapshot-install path wired into learner catch-up.</p>
 <p>In practical terms:</p>
 <ul>
@@ -122,7 +122,7 @@
 <li class="">then eventual eviction by the system-partition leader.</li>
 </ul>
 <p>For the full liveness model, see <a class="" href="/kommander.github.io/docs/guides/swim-failure-detection/">SWIM Failure Detection</a>.</p>
-<p>Current Kommander builds enable SWIM by default:</p>
+<p>Kommander enables SWIM by default:</p>
 <p><code>PingInterval</code> defaults to <code>1 second</code>.</p>
 <p>Set <code>PingInterval</code> to <code>0</code> or lower only when you intentionally want to disable failure detection. If you do that, also set <code>EnableQuiescence = false</code>, because quiesced partitions rely on SWIM to notice a dead leader node.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="transport-support-today">Transport Support Today<a href="#transport-support-today" class="hash-link" aria-label="Direct link to Transport Support Today" title="Direct link to Transport Support Today" translate="no">​</a></h2>

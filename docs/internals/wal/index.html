@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">WAL Internals | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/internals/wal/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="WAL Internals | Kommander"><meta data-rh="true" name="description" content="The write-ahead log, or WAL, is how Kommander remembers Raft log entries across restarts."><meta data-rh="true" property="og:description" content="The write-ahead log, or WAL, is how Kommander remembers Raft log entries across restarts."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/internals/wal/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/wal/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/wal/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"WAL Internals","item":"https://kahunakv.github.io/kommander.github.io/docs/internals/wal"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f593088b.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.b44632f5.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -42,7 +42,7 @@
 </ol>
 <p>For auto-commit proposals, the leader commits after quorum completion. For manual proposals, the caller uses the proposal ticket with <code>CommitLogs</code> or <code>RollbackLogs</code>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="cross-partition-group-commit">Cross-Partition Group Commit<a href="#cross-partition-group-commit" class="hash-link" aria-label="Direct link to Cross-Partition Group Commit" title="Direct link to Cross-Partition Group Commit" translate="no">​</a></h2>
-<p>Recent Kommander builds let <code>FairWalScheduler</code> batch writes from multiple ready partitions into one <code>IWAL.Write</code> call.</p>
+<p><code>FairWalScheduler</code> can batch writes from multiple ready partitions into one <code>IWAL.Write</code> call.</p>
 <p>The scheduler batches in two layers:</p>
 <ul>
 <li class="">up to <code>MaxWalBatchSize</code> operations from one partition,</li>
