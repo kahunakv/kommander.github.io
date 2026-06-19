@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Checkpointed Projections | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/recipes/checkpointed-projections/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Checkpointed Projections | Kommander"><meta data-rh="true" name="description" content="Use Kommander checkpoints when your projection can always be rebuilt from the log, but replay time starts becoming a real operational cost."><meta data-rh="true" property="og:description" content="Use Kommander checkpoints when your projection can always be rebuilt from the log, but replay time starts becoming a real operational cost."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/recipes/checkpointed-projections/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/recipes/checkpointed-projections/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/recipes/checkpointed-projections/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Checkpointed Projections","item":"https://kahunakv.github.io/kommander.github.io/docs/recipes/checkpointed-projections"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f72b912f.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -18,20 +18,13 @@
 <p>A projection can be correct and still become expensive to rebuild if a busy partition accumulates a long WAL history.</p>
 <p>Common symptoms:</p>
 <ul>
-<li class="">node restart takes too long,</li>
-<li class="">restore callbacks replay a large amount of old history,</li>
-<li class="">WAL storage keeps growing even though older state is no longer useful,</li>
-<li class="">recovery time becomes harder to predict.</li>
+<li class="">node restart takes too long- restore callbacks replay a large amount of old history- WAL storage keeps growing even though older state is no longer useful- recovery time becomes harder to predict.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="when-this-is-a-good-fit">When This Is a Good Fit<a href="#when-this-is-a-good-fit" class="hash-link" aria-label="Direct link to When This Is a Good Fit" title="Direct link to When This Is a Good Fit" translate="no">​</a></h2>
 <p>Use this pattern when your application state is naturally incremental and older history is less important than fast restore from a recent stable point.</p>
 <p>Good examples:</p>
 <ul>
-<li class="">counters and quotas,</li>
-<li class="">tenant metadata indexes,</li>
-<li class="">job status tables,</li>
-<li class="">workflow summaries,</li>
-<li class="">leader-owned coordination state.</li>
+<li class="">counters and quotas- tenant metadata indexes- job status tables- workflow summaries- leader-owned coordination state.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="kommander-pattern">Kommander Pattern<a href="#kommander-pattern" class="hash-link" aria-label="Direct link to Kommander Pattern" title="Direct link to Kommander Pattern" translate="no">​</a></h2>
 <p>Replicate ordinary commands as usual, update your projection in the callbacks, and periodically commit a checkpoint after a stable batch of work.</p>
@@ -44,10 +37,7 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-your-application-owns">What Your Application Owns<a href="#what-your-application-owns" class="hash-link" aria-label="Direct link to What Your Application Owns" title="Direct link to What Your Application Owns" translate="no">​</a></h2>
 <p>Kommander records the checkpoint entry. Your application still owns:</p>
 <ul>
-<li class="">the projection structure,</li>
-<li class="">the rule for deciding when a checkpoint is worth writing,</li>
-<li class="">restore behavior in <code>OnLogRestored</code>,</li>
-<li class="">any local snapshot or persisted read-model format.</li>
+<li class="">the projection structure- the rule for deciding when a checkpoint is worth writing- restore behavior in <code>OnLogRestored</code>- any local snapshot or persisted read-model format.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="notes">Notes<a href="#notes" class="hash-link" aria-label="Direct link to Notes" title="Direct link to Notes" translate="no">​</a></h2>
 <ul>

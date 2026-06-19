@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Checkpointing And Recovery | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Checkpointing And Recovery | Kommander"><meta data-rh="true" name="description" content="Checkpoints give your application a durable &quot;safe point&quot; inside a partition&#x27;s log."><meta data-rh="true" property="og:description" content="Checkpoints give your application a durable &quot;safe point&quot; inside a partition&#x27;s log."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Checkpointing And Recovery","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f72b912f.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -21,32 +21,22 @@
 <p>That does <strong>not</strong> mean Kommander serializes your domain state for you. Your application still owns its state machine and restore logic.</p>
 <p>What Kommander provides is:</p>
 <ul>
-<li class="">replicated checkpoint entries,</li>
-<li class="">restore that starts from the latest committed checkpoint boundary in the WAL,</li>
-<li class="">automatic compaction eligibility for older log history.</li>
+<li class="">replicated checkpoint entries- restore that starts from the latest committed checkpoint boundary in the WAL- automatic compaction eligibility for older log history.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="when-to-write-a-checkpoint">When To Write A Checkpoint<a href="#when-to-write-a-checkpoint" class="hash-link" aria-label="Direct link to When To Write A Checkpoint" title="Direct link to When To Write A Checkpoint" translate="no">​</a></h2>
 <p>Good times to write a checkpoint:</p>
 <ul>
-<li class="">after a meaningful batch of committed work,</li>
-<li class="">after rebuilding or refreshing a derived local snapshot,</li>
-<li class="">after a workflow phase where replaying older history is no longer useful,</li>
-<li class="">before expecting a partition to accumulate a large amount of additional traffic.</li>
+<li class="">after a meaningful batch of committed work- after rebuilding or refreshing a derived local snapshot- after a workflow phase where replaying older history is no longer useful- before expecting a partition to accumulate a large amount of additional traffic.</li>
 </ul>
 <p>Less useful patterns:</p>
 <ul>
-<li class="">writing a checkpoint after every single command,</li>
-<li class="">never writing checkpoints at all,</li>
-<li class="">treating checkpoints as a replacement for application restore logic.</li>
+<li class="">writing a checkpoint after every single command- never writing checkpoints at all- treating checkpoints as a replacement for application restore logic.</li>
 </ul>
 <p>If you never write checkpoints, compaction has little or nothing to reclaim.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="basic-flow">Basic Flow<a href="#basic-flow" class="hash-link" aria-label="Direct link to Basic Flow" title="Direct link to Basic Flow" translate="no">​</a></h2>
 <p>The usual sequence is:</p>
 <ol>
-<li class="">replicate normal application entries,</li>
-<li class="">apply them through your state machine,</li>
-<li class="">periodically replicate a checkpoint,</li>
-<li class="">let automatic compaction remove older WAL history over time.</li>
+<li class="">replicate normal application entries2. apply them through your state machine3. periodically replicate a checkpoint4. let automatic compaction remove older WAL history over time.</li>
 </ol>
 <p>Example:</p>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token class-name">RaftReplicationResult</span><span class="token plain"> write </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> </span><span class="token keyword" style="color:#00009f">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">ReplicateLogs</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">partitionId</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">2</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">type</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token string" style="color:#e3116c">&quot;OrderPlaced&quot;</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">data</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> payload</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">cancellationToken</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> cancellationToken</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token keyword" style="color:#00009f">if</span><span class="token plain"> </span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">write</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">Status </span><span class="token operator" style="color:#393A34">!=</span><span class="token plain"> RaftOperationStatus</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">Success</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token keyword" style="color:#00009f">return</span><span class="token punctuation" style="color:#393A34">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token class-name">RaftReplicationResult</span><span class="token plain"> checkpoint </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> </span><span class="token keyword" style="color:#00009f">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">ReplicateCheckpoint</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">partitionId</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">2</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">cancellationToken</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> cancellationToken</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
@@ -55,9 +45,7 @@
 <p>On restore, Kommander replays the WAL from the latest committed checkpoint boundary forward.</p>
 <p>From the application&#x27;s point of view, the important implication is simple:</p>
 <ul>
-<li class="">newer checkpoints reduce how much history may need to be replayed,</li>
-<li class="">older history may disappear after compaction,</li>
-<li class="">your restore code must still be correct from the retained checkpoint boundary onward.</li>
+<li class="">newer checkpoints reduce how much history may need to be replayed- older history may disappear after compaction- your restore code must still be correct from the retained checkpoint boundary onward.</li>
 </ul>
 <p>If you need deterministic rebuild behavior, keep your restore path compatible with starting from the newest retained checkpoint and replaying the remaining committed entries.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="compaction-relationship">Compaction Relationship<a href="#compaction-relationship" class="hash-link" aria-label="Direct link to Compaction Relationship" title="Direct link to Compaction Relationship" translate="no">​</a></h2>
@@ -70,34 +58,23 @@
 </ul>
 <p>When compaction runs, Kommander:</p>
 <ol>
-<li class="">finds the last committed checkpoint for the partition,</li>
-<li class="">removes entries older than that checkpoint in batches,</li>
-<li class="">stops when there is no more eligible work or the pass limit is reached.</li>
+<li class="">finds the last committed checkpoint for the partition2. removes entries older than that checkpoint in batches3. stops when there is no more eligible work or the pass limit is reached.</li>
 </ol>
 <p>This means checkpoints influence <strong>how much</strong> old WAL can be removed, while the compaction settings influence <strong>how fast</strong> that removal happens.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="a-practical-strategy">A Practical Strategy<a href="#a-practical-strategy" class="hash-link" aria-label="Direct link to A Practical Strategy" title="Direct link to A Practical Strategy" translate="no">​</a></h2>
 <p>For most applications, start with this approach:</p>
 <ul>
-<li class="">write normal commands freely,</li>
-<li class="">add checkpoints at stable milestones rather than every write,</li>
-<li class="">observe WAL growth and restore time,</li>
-<li class="">increase checkpoint frequency only if replay or storage growth becomes a problem.</li>
+<li class="">write normal commands freely- add checkpoints at stable milestones rather than every write- observe WAL growth and restore time- increase checkpoint frequency only if replay or storage growth becomes a problem.</li>
 </ul>
 <p>Examples of stable milestones:</p>
 <ul>
-<li class="">every few hundred or few thousand applied operations,</li>
-<li class="">after closing an accounting period,</li>
-<li class="">after finishing a tenant import,</li>
-<li class="">after completing a durable workflow stage.</li>
+<li class="">every few hundred or few thousand applied operations- after closing an accounting period- after finishing a tenant import- after completing a durable workflow stage.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-your-application-still-owns">What Your Application Still Owns<a href="#what-your-application-still-owns" class="hash-link" aria-label="Direct link to What Your Application Still Owns" title="Direct link to What Your Application Still Owns" translate="no">​</a></h2>
 <p>Kommander does not automatically create a business snapshot file or serialize your in-memory domain objects.</p>
 <p>Your application still decides:</p>
 <ul>
-<li class="">what state is reconstructed during <code>OnLogRestored</code>,</li>
-<li class="">whether you maintain your own local snapshot representation,</li>
-<li class="">when a checkpoint is meaningful for your domain,</li>
-<li class="">whether restore time or WAL growth is acceptable.</li>
+<li class="">what state is reconstructed during <code>OnLogRestored</code>- whether you maintain your own local snapshot representation- when a checkpoint is meaningful for your domain- whether restore time or WAL growth is acceptable.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="related-reading">Related Reading<a href="#related-reading" class="hash-link" aria-label="Direct link to Related Reading" title="Direct link to Related Reading" translate="no">​</a></h2>
 <ul>

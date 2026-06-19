@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">SWIM Failure Detection | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/swim-failure-detection/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="SWIM Failure Detection | Kommander"><meta data-rh="true" name="description" content="Kommander uses a SWIM-style failure detector to track whether cluster nodes appear alive."><meta data-rh="true" property="og:description" content="Kommander uses a SWIM-style failure detector to track whether cluster nodes appear alive."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/swim-failure-detection/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/swim-failure-detection/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/swim-failure-detection/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"SWIM Failure Detection","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/swim-failure-detection"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f72b912f.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -23,23 +23,17 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="where-swim-is-used">Where SWIM Is Used<a href="#where-swim-is-used" class="hash-link" aria-label="Direct link to Where SWIM Is Used" title="Direct link to Where SWIM Is Used" translate="no">​</a></h2>
 <p>SWIM supports two user-visible behaviors:</p>
 <ul>
-<li class="">dynamic membership can evict a dead member after the system-partition leader commits a <code>RemoveMember</code>,</li>
-<li class="">partition quiescence lets idle partitions stop per-partition heartbeats while followers use SWIM to notice leader-node failure.</li>
+<li class="">dynamic membership can evict a dead member after the system-partition leader commits a <code>RemoveMember</code>- partition quiescence lets idle partitions stop per-partition heartbeats while followers use SWIM to notice leader-node failure.</li>
 </ul>
 <p>The important boundary is:</p>
 <ul>
-<li class="">SWIM detects liveness,</li>
-<li class="">Raft commits membership changes,</li>
-<li class="">Raft elections still decide partition leadership.</li>
+<li class="">SWIM detects liveness- Raft commits membership changes- Raft elections still decide partition leadership.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="how-probing-works">How Probing Works<a href="#how-probing-works" class="hash-link" aria-label="Direct link to How Probing Works" title="Direct link to How Probing Works" translate="no">​</a></h2>
 <p>Each node periodically probes another node.</p>
 <p>The normal flow is:</p>
 <ol>
-<li class="">send a direct <code>Ping</code>,</li>
-<li class="">if direct ping times out, ask a few peers to relay indirect <code>PingReq</code> probes,</li>
-<li class="">if direct and indirect probes fail, mark the target <code>Suspect</code>,</li>
-<li class="">if it remains suspect for <code>SuspicionTimeout</code>, mark it <code>Dead</code>.</li>
+<li class="">send a direct <code>Ping</code>2. if direct ping times out, ask a few peers to relay indirect <code>PingReq</code> probes3. if direct and indirect probes fail, mark the target <code>Suspect</code>4. if it remains suspect for <code>SuspicionTimeout</code>, mark it <code>Dead</code>.</li>
 </ol>
 <p>Indirect probing reduces false positives caused by one bad network path between two nodes.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="liveness-states">Liveness States<a href="#liveness-states" class="hash-link" aria-label="Direct link to Liveness States" title="Direct link to Liveness States" translate="no">​</a></h2>
@@ -54,29 +48,23 @@
 <p>When a voter is <code>Dead</code> for longer than <code>DeadMemberEvictionGrace</code>, the system-partition leader may commit a <code>RemoveMember</code> entry.</p>
 <p>That keeps the safety boundary clear:</p>
 <ul>
-<li class="">SWIM is advisory liveness,</li>
-<li class="">the committed roster on partition <code>0</code> remains the source of truth,</li>
-<li class="">quorum changes happen only through Raft.</li>
+<li class="">SWIM is advisory liveness- the committed roster on partition <code>0</code> remains the source of truth- quorum changes happen only through Raft.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="configuration">Configuration<a href="#configuration" class="hash-link" aria-label="Direct link to Configuration" title="Direct link to Configuration" translate="no">​</a></h2>
 <table><thead><tr><th>Property</th><th style="text-align:right">Default</th><th>Description</th></tr></thead><tbody><tr><td><code>PingInterval</code></td><td style="text-align:right"><code>1 s</code></td><td>How often a node probes a random peer. Set to <code>0</code> or lower to disable SWIM.</td></tr><tr><td><code>PingTimeout</code></td><td style="text-align:right"><code>500 ms</code></td><td>Direct or indirect probe timeout. Lower values detect failures faster but can increase false positives on slow networks.</td></tr><tr><td><code>IndirectPingFanout</code></td><td style="text-align:right"><code>2</code></td><td>Number of relay peers used after a direct ping timeout.</td></tr><tr><td><code>SuspicionTimeout</code></td><td style="text-align:right"><code>5 s</code></td><td>Time a node may remain <code>Suspect</code> before becoming <code>Dead</code>.</td></tr><tr><td><code>DeadMemberEvictionGrace</code></td><td style="text-align:right"><code>30 s</code></td><td>How long a node must remain <code>Dead</code> before the system-partition leader may evict it.</td></tr></tbody></table>
 <p>When <code>EnableQuiescence = true</code>, <code>PingInterval</code> must also be:</p>
 <ul>
-<li class="">greater than <code>0</code>,</li>
-<li class="">lower than <code>StartElectionTimeout</code>.</li>
+<li class="">greater than <code>0</code>- lower than <code>StartElectionTimeout</code>.</li>
 </ul>
 <p>Kommander validates these constraints at startup.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="transport-support">Transport Support<a href="#transport-support" class="hash-link" aria-label="Direct link to Transport Support" title="Direct link to Transport Support" translate="no">​</a></h2>
 <p>Built-in transports support direct and indirect SWIM probing:</p>
 <ul>
-<li class=""><code>InMemoryCommunication</code>,</li>
-<li class=""><code>GrpcCommunication</code>,</li>
-<li class=""><code>RestCommunication</code>.</li>
+<li class=""><code>InMemoryCommunication</code>- <code>GrpcCommunication</code>- <code>RestCommunication</code>.</li>
 </ul>
 <p>Custom transports should implement:</p>
 <ul>
-<li class=""><code>SendPing</code>,</li>
-<li class=""><code>SendPingReq</code>.</li>
+<li class=""><code>SendPing</code>- <code>SendPingReq</code>.</li>
 </ul>
 <p>If a custom transport falls back to the default failure-returning implementations, SWIM will treat probes as failed.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="operational-notes">Operational Notes<a href="#operational-notes" class="hash-link" aria-label="Direct link to Operational Notes" title="Direct link to Operational Notes" translate="no">​</a></h2>

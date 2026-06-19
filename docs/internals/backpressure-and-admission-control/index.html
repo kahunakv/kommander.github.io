@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Backpressure And Admission Control | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/internals/backpressure-and-admission-control/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Backpressure And Admission Control | Kommander"><meta data-rh="true" name="description" content="Kommander uses several layers of backpressure and admission control to keep one hot partition or a burst of client traffic from overwhelming the runtime."><meta data-rh="true" property="og:description" content="Kommander uses several layers of backpressure and admission control to keep one hot partition or a burst of client traffic from overwhelming the runtime."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/internals/backpressure-and-admission-control/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/backpressure-and-admission-control/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/backpressure-and-admission-control/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Backpressure And Admission Control","item":"https://kahunakv.github.io/kommander.github.io/docs/internals/backpressure-and-admission-control"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f72b912f.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -18,18 +18,13 @@
 <p>Without admission control, a leader could keep accepting more client proposals than its partition executor or WAL scheduler can safely drain. That would let memory usage grow without bound and could delay heartbeats, vote handling, append completions, and other control-plane work that Raft needs to stay healthy.</p>
 <p>Kommander addresses that in three places:</p>
 <ol>
-<li class="">the partition executor admission gate for client proposals,</li>
-<li class="">the WAL write scheduler queue limits,</li>
-<li class="">the read scheduler queue limits.</li>
+<li class="">the partition executor admission gate for client proposals2. the WAL write scheduler queue limits3. the read scheduler queue limits.</li>
 </ol>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="layer-1-client-proposal-admission">Layer 1: Client Proposal Admission<a href="#layer-1-client-proposal-admission" class="hash-link" aria-label="Direct link to Layer 1: Client Proposal Admission" title="Direct link to Layer 1: Client Proposal Admission" translate="no">​</a></h2>
 <p>The first gate is inside <code>RaftPartitionExecutor</code>.</p>
 <p>Each partition executor has four work classes:</p>
 <ul>
-<li class="">control,</li>
-<li class="">replication,</li>
-<li class="">client,</li>
-<li class="">maintenance.</li>
+<li class="">control- replication- client- maintenance.</li>
 </ul>
 <p>Only the client queue is admission-limited. Control, replication, and maintenance work remain structurally separate so client traffic cannot starve Raft protocol traffic.</p>
 <p>The main configuration knob is:</p>
@@ -55,12 +50,7 @@
 </ul>
 <p><code>FairWalScheduler</code> enforces:</p>
 <ul>
-<li class="">a per-partition pending-write depth limit,</li>
-<li class="">an optional global pending-write depth limit across all partitions,</li>
-<li class="">FIFO write order within each partition,</li>
-<li class="">fair rotation across active partitions,</li>
-<li class="">batching of compatible writes up to <code>MaxWalBatchSize</code> per partition,</li>
-<li class="">cross-partition group commits across up to <code>MaxWalGroupBatchPartitions</code> ready partitions.</li>
+<li class="">a per-partition pending-write depth limit- an optional global pending-write depth limit across all partitions- FIFO write order within each partition- fair rotation across active partitions- batching of compatible writes up to <code>MaxWalBatchSize</code> per partition- cross-partition group commits across up to <code>MaxWalGroupBatchPartitions</code> ready partitions.</li>
 </ul>
 <p>If the scheduler cannot accept more write work, it throws <code>BackpressureExceededException</code>.</p>
 <p>The Raft state machine and WAL code are written to treat that as a real admission failure. Mutable proposal state is snapshotted before WAL enqueue, so if the enqueue fails, the code restores the original log metadata instead of leaving half-mutated in-memory state behind.</p>
@@ -76,10 +66,7 @@
 <p>Admission control works together with weighted draining in <code>RaftPartitionExecutor</code>.</p>
 <p>The executor drains work in this priority order:</p>
 <ol>
-<li class="">control,</li>
-<li class="">replication,</li>
-<li class="">client,</li>
-<li class="">maintenance.</li>
+<li class="">control2. replication3. client4. maintenance.</li>
 </ol>
 <p>Configuration fields let you tune how many operations each class drains per wake cycle:</p>
 <ul>
@@ -91,9 +78,7 @@
 <p>These settings do not replace admission control. They control how accepted work is scheduled after it is already in the executor.</p>
 <p>In practice:</p>
 <ul>
-<li class="">higher control and replication quanta help heartbeats and append processing stay ahead of client floods,</li>
-<li class="">a lower client quantum helps prevent proposal bursts from delaying follower catch-up,</li>
-<li class="">maintenance stays lowest priority so normal consensus traffic keeps moving.</li>
+<li class="">higher control and replication quanta help heartbeats and append processing stay ahead of client floods- a lower client quantum helps prevent proposal bursts from delaying follower catch-up- maintenance stays lowest priority so normal consensus traffic keeps moving.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="typical-flow-under-load">Typical Flow Under Load<a href="#typical-flow-under-load" class="hash-link" aria-label="Direct link to Typical Flow Under Load" title="Direct link to Typical Flow Under Load" translate="no">​</a></h2>
 <p>When a partition gets hot, Kommander pushes back in stages:</p>
