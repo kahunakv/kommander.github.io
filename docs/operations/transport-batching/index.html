@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Transport Batching | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/operations/transport-batching/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Transport Batching | Kommander"><meta data-rh="true" name="description" content="Kommander transport code uses BatchRequests for grouped transport work."><meta data-rh="true" property="og:description" content="Kommander transport code uses BatchRequests for grouped transport work."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/operations/transport-batching/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/transport-batching/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/transport-batching/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Transport Batching","item":"https://kahunakv.github.io/kommander.github.io/docs/operations/transport-batching"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -16,7 +16,10 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-gets-batched">What Gets Batched<a href="#what-gets-batched" class="hash-link" aria-label="Direct link to What Gets Batched" title="Direct link to What Gets Batched" translate="no">​</a></h2>
 <p>Batched transport traffic includes:</p>
 <ul>
-<li class="">append-log traffic- append completions- vote and handshake traffic- control-plane messages such as step-down notices and leadership-transfer requests.</li>
+<li class="">append-log traffic</li>
+<li class="">append completions</li>
+<li class="">vote and handshake traffic</li>
+<li class="">control-plane messages such as step-down notices and leadership-transfer requests.</li>
 </ul>
 <p>This reduces per-message overhead and gives transports one place to send mixed Raft traffic efficiently.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="transport-adapters">Transport Adapters<a href="#transport-adapters" class="hash-link" aria-label="Direct link to Transport Adapters" title="Direct link to Transport Adapters" translate="no">​</a></h2>

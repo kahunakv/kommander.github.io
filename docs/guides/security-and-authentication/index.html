@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Security And Authentication | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/security-and-authentication/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Security And Authentication | Kommander"><meta data-rh="true" name="description" content="Kommander supports transport-level security settings for node-to-node REST and gRPC traffic through RaftConfiguration.TransportSecurity."><meta data-rh="true" property="og:description" content="Kommander supports transport-level security settings for node-to-node REST and gRPC traffic through RaftConfiguration.TransportSecurity."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/security-and-authentication/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/security-and-authentication/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/security-and-authentication/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Security And Authentication","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/security-and-authentication"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -42,7 +42,13 @@
 <p><code>SharedSecret</code> is the mode that is currently implemented end to end.</p>
 <p>In this mode, Kommander signs node-to-node requests using a cluster secret and validates:</p>
 <ul>
-<li class="">the signature- the sender node id- the timestamp- the nonce- the allowed clock skew- replay protection- and, when configured, the presence of TLS.</li>
+<li class="">the signature</li>
+<li class="">the sender node id</li>
+<li class="">the timestamp</li>
+<li class="">the nonce</li>
+<li class="">the allowed clock skew</li>
+<li class="">replay protection</li>
+<li class="">and, when configured, the presence of TLS.</li>
 </ul>
 <p>This is the practical production-ready authentication mode in the current codebase.</p>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="mutualtls">MutualTls<a href="#mutualtls" class="hash-link" aria-label="Direct link to MutualTls" title="Direct link to MutualTls" translate="no">​</a></h3>
@@ -53,13 +59,19 @@
 <p><code>HttpAuthBearerToken</code> still exists on <code>RaftConfiguration</code>, but it is a legacy compatibility setting.</p>
 <p>Internally, <code>GetEffectiveTransportSecurity()</code> falls back to <code>HttpAuthBearerToken</code> when:</p>
 <ul>
-<li class=""><code>TransportSecurity.SharedSecret</code> is empty- and <code>HttpAuthBearerToken</code> is set.</li>
+<li class=""><code>TransportSecurity.SharedSecret</code> is empty</li>
+<li class="">and <code>HttpAuthBearerToken</code> is set.</li>
 </ul>
 <p>That fallback is there to preserve older REST-based configurations. New configurations should prefer <code>TransportSecurity.SharedSecret</code>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-shared-secret-authentication-actually-checks">What Shared-Secret Authentication Actually Checks<a href="#what-shared-secret-authentication-actually-checks" class="hash-link" aria-label="Direct link to What Shared-Secret Authentication Actually Checks" title="Direct link to What Shared-Secret Authentication Actually Checks" translate="no">​</a></h2>
 <p>For authenticated network requests, Kommander signs and validates fields that include:</p>
 <ul>
-<li class="">HTTP method or gRPC method- request path or RPC name- sender node- timestamp- nonce- request body bytes for REST.</li>
+<li class="">HTTP method or gRPC method</li>
+<li class="">request path or RPC name</li>
+<li class="">sender node</li>
+<li class="">timestamp</li>
+<li class="">nonce</li>
+<li class="">request body bytes for REST.</li>
 </ul>
 <p>Validation can fail with statuses such as:</p>
 <ul>
@@ -72,7 +84,11 @@
 </ul>
 <p>This gives the runtime basic protection against:</p>
 <ul>
-<li class="">unsigned requests- forged signatures- badly formed authentication data- clock-skewed requests- and replayed requests.</li>
+<li class="">unsigned requests</li>
+<li class="">forged signatures</li>
+<li class="">badly formed authentication data</li>
+<li class="">clock-skewed requests</li>
+<li class="">and replayed requests.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="tls-requirements">TLS Requirements<a href="#tls-requirements" class="hash-link" aria-label="Direct link to TLS Requirements" title="Direct link to TLS Requirements" translate="no">​</a></h2>
 <p><code>RequireTls</code> controls whether authenticated traffic must arrive over TLS.</p>
@@ -90,14 +106,21 @@
 <p>For REST, <code>MapRestRaftRoutes()</code> installs middleware that authenticates <code>/v1/raft/*</code> requests before they reach the Raft handlers.</p>
 <p>When authentication is enabled:</p>
 <ul>
-<li class="">the request body is buffered- the configured signature header is read- sender node, timestamp, and nonce headers are read- the request is validated by <code>RaftTransportAuthenticator</code>- unauthenticated requests return <code>401 Unauthorized</code>.</li>
+<li class="">the request body is buffered</li>
+<li class="">the configured signature header is read</li>
+<li class="">sender node, timestamp, and nonce headers are read</li>
+<li class="">the request is validated by <code>RaftTransportAuthenticator</code></li>
+<li class="">unauthenticated requests return <code>401 Unauthorized</code>.</li>
 </ul>
 <p>This means REST authentication is enforced at the hosting layer, not manually inside each endpoint handler.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="grpc-authentication-flow">gRPC Authentication Flow<a href="#grpc-authentication-flow" class="hash-link" aria-label="Direct link to gRPC Authentication Flow" title="Direct link to gRPC Authentication Flow" translate="no">​</a></h2>
 <p>For gRPC, <code>RaftService</code> calls <code>ValidateAuth()</code> at the beginning of each RPC handler.</p>
 <p>When authentication is enabled:</p>
 <ul>
-<li class="">metadata is read from the request- the current transport security settings are resolved- the request is validated by <code>RaftTransportAuthenticator</code>- failed authentication raises <code>RpcException</code> with <code>StatusCode.Unauthenticated</code>.</li>
+<li class="">metadata is read from the request</li>
+<li class="">the current transport security settings are resolved</li>
+<li class="">the request is validated by <code>RaftTransportAuthenticator</code></li>
+<li class="">failed authentication raises <code>RpcException</code> with <code>StatusCode.Unauthenticated</code>.</li>
 </ul>
 <p>On the client side, gRPC request metadata is also signed when the mode is <code>SharedSecret</code>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="recommended-setups">Recommended Setups<a href="#recommended-setups" class="hash-link" aria-label="Direct link to Recommended Setups" title="Direct link to Recommended Setups" translate="no">​</a></h2>

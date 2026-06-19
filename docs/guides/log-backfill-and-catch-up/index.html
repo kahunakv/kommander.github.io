@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Log Backfill And Catch-Up | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/log-backfill-and-catch-up/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Log Backfill And Catch-Up | Kommander"><meta data-rh="true" name="description" content="Backfill is how a leader catches a lagging follower up without creating gaps in the follower&#x27;s log."><meta data-rh="true" property="og:description" content="Backfill is how a leader catches a lagging follower up without creating gaps in the follower&#x27;s log."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/log-backfill-and-catch-up/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/log-backfill-and-catch-up/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/log-backfill-and-catch-up/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Log Backfill And Catch-Up","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/log-backfill-and-catch-up"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -19,7 +19,11 @@
 <p>If the leader has committed entries <code>1..10</code> and a follower only has <code>1..3</code>, the leader cannot simply send entry <code>10</code>. That would leave a hole from <code>4..9</code>.</p>
 <p>Backfill fills the missing range in bounded chunks:</p>
 <ol>
-<li class="">the leader detects that a follower is behind2. it reads a slice of missing committed entries from its WAL3. it sends that slice with a log-matching anchor4. the follower accepts only if the anchor matches5. the process repeats until the follower is close enough for normal live replication.</li>
+<li class="">the leader detects that a follower is behind</li>
+<li class="">it reads a slice of missing committed entries from its WAL</li>
+<li class="">it sends that slice with a log-matching anchor</li>
+<li class="">the follower accepts only if the anchor matches</li>
+<li class="">the process repeats until the follower is close enough for normal live replication.</li>
 </ol>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="live-replication-vs-backfill">Live Replication vs Backfill<a href="#live-replication-vs-backfill" class="hash-link" aria-label="Direct link to Live Replication vs Backfill" title="Direct link to Live Replication vs Backfill" translate="no">​</a></h2>
 <p>Kommander has two replication paths.</p>
@@ -39,7 +43,9 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="anchored-backfill">Anchored Backfill<a href="#anchored-backfill" class="hash-link" aria-label="Direct link to Anchored Backfill" title="Direct link to Anchored Backfill" translate="no">​</a></h2>
 <p>A backfill batch carries:</p>
 <ul>
-<li class=""><code>PrevLogIndex</code>- <code>PrevLogTerm</code>- the missing committed entries after that index.</li>
+<li class=""><code>PrevLogIndex</code></li>
+<li class=""><code>PrevLogTerm</code></li>
+<li class="">the missing committed entries after that index.</li>
 </ul>
 <p>The follower checks:</p>
 <p>&quot;Do I already have the entry at <code>PrevLogIndex</code> with term <code>PrevLogTerm</code>?&quot;</p>
@@ -64,7 +70,9 @@
 <table><thead><tr><th>Property</th><th style="text-align:right">Default</th><th>Description</th></tr></thead><tbody><tr><td><code>BackfillThreshold</code></td><td style="text-align:right"><code>10</code></td><td>Follower lag must exceed this before backfill starts. Smaller values start backfill earlier.</td></tr><tr><td><code>MaxBackfillEntriesPerRound</code></td><td style="text-align:right"><code>128</code></td><td>Maximum committed entries sent in one backfill round. Larger values catch up faster but send larger batches.</td></tr></tbody></table>
 <p>Compaction settings also affect catch-up indirectly:</p>
 <ul>
-<li class=""><code>CompactEveryOperations</code>- <code>CompactNumberEntries</code>- <code>MaxEntriesPerCompaction</code>.</li>
+<li class=""><code>CompactEveryOperations</code></li>
+<li class=""><code>CompactNumberEntries</code></li>
+<li class=""><code>MaxEntriesPerCompaction</code>.</li>
 </ul>
 <p>More aggressive compaction can make <code>SnapshotRequired</code> more likely for far-behind followers.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="operational-notes">Operational Notes<a href="#operational-notes" class="hash-link" aria-label="Direct link to Operational Notes" title="Direct link to Operational Notes" translate="no">​</a></h2>

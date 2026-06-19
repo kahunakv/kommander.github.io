@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Partition Quiescence | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/partition-quiescence/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Partition Quiescence | Kommander"><meta data-rh="true" name="description" content="Partition quiescence reduces idle heartbeat traffic."><meta data-rh="true" property="og:description" content="Partition quiescence reduces idle heartbeat traffic."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/partition-quiescence/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/partition-quiescence/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/partition-quiescence/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Partition Quiescence","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/partition-quiescence"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -23,14 +23,18 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="why-this-matters">Why This Matters<a href="#why-this-matters" class="hash-link" aria-label="Direct link to Why This Matters" title="Direct link to Why This Matters" translate="no">​</a></h2>
 <p>Without quiescence, heartbeat traffic grows with both:</p>
 <ul>
-<li class="">node count- partition count.</li>
+<li class="">node count</li>
+<li class="">partition count.</li>
 </ul>
 <p>For a cluster with many mostly idle partitions, that can produce a large amount of network and CPU work that carries no application data.</p>
 <p>Quiescence changes the idle case from &quot;heartbeat every partition forever&quot; to &quot;watch node liveness once through SWIM.&quot;</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="how-a-partition-quiesces">How A Partition Quiesces<a href="#how-a-partition-quiesces" class="hash-link" aria-label="Direct link to How A Partition Quiesces" title="Direct link to How A Partition Quiesces" translate="no">​</a></h2>
 <p>A leader may quiesce a partition when all of these are true:</p>
 <ul>
-<li class=""><code>EnableQuiescence</code> is <code>true</code>- the partition is not already quiesced- there are no active proposals- the partition has been idle longer than <code>QuiesceAfter</code>.</li>
+<li class=""><code>EnableQuiescence</code> is <code>true</code></li>
+<li class="">the partition is not already quiesced</li>
+<li class="">there are no active proposals</li>
+<li class="">the partition has been idle longer than <code>QuiesceAfter</code>.</li>
 </ul>
 <p>When that happens, the leader sends an <code>AppendLogs</code> message with <code>Quiesce = true</code>. Followers set their local quiesced flag for that partition.</p>
 <p>Quiescence is local runtime state. It is not a replicated application log entry and it does not change quorum math.</p>
@@ -38,7 +42,10 @@
 <p>Any real write wakes the partition.</p>
 <p>On the leader:</p>
 <ol>
-<li class="">a client proposal arrives2. the leader clears the local quiesced state3. the entry is replicated normally4. periodic heartbeats resume.</li>
+<li class="">a client proposal arrives</li>
+<li class="">the leader clears the local quiesced state</li>
+<li class="">the entry is replicated normally</li>
+<li class="">periodic heartbeats resume.</li>
 </ol>
 <p>On followers, any normal append with <code>Quiesce = false</code> clears the quiesced state.</p>
 <p>After the burst of writes ends and the partition stays idle past <code>QuiesceAfter</code>, it can quiesce again.</p>
@@ -46,19 +53,24 @@
 <p>Quiesced followers do not rely on the per-partition election timeout while the leader&#x27;s node is still considered alive.</p>
 <p>Instead, they watch SWIM node state:</p>
 <ul>
-<li class=""><code>Alive</code>: stay quiet- <code>Suspect</code> or <code>Dead</code>: un-quiesce and start the normal pre-vote/election path.</li>
+<li class=""><code>Alive</code>: stay quiet</li>
+<li class=""><code>Suspect</code> or <code>Dead</code>: un-quiesce and start the normal pre-vote/election path.</li>
 </ul>
 <p>Failover is triggered on <code>Suspect</code>, not <code>Dead</code>, so it is tied to roughly one <code>PingInterval</code> rather than waiting for the full <code>SuspicionTimeout</code>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="timing-requirements">Timing Requirements<a href="#timing-requirements" class="hash-link" aria-label="Direct link to Timing Requirements" title="Direct link to Timing Requirements" translate="no">​</a></h2>
 <p>Quiescence depends on SWIM.</p>
 <p>When <code>EnableQuiescence = true</code>, Kommander validates:</p>
 <ul>
-<li class=""><code>PingInterval &gt; 0</code>- <code>PingInterval &lt; StartElectionTimeout</code>.</li>
+<li class=""><code>PingInterval &gt; 0</code></li>
+<li class=""><code>PingInterval &lt; StartElectionTimeout</code>.</li>
 </ul>
 <p>If SWIM is disabled, a quiesced follower would have no signal that the leader&#x27;s node died. If <code>PingInterval</code> is too high, failover from a quiesced partition would be slower than ordinary election timeout.</p>
 <p>The defaults are valid:</p>
 <ul>
-<li class=""><code>EnableQuiescence = true</code>- <code>QuiesceAfter = 1500 ms</code>- <code>PingInterval = 1 s</code>- <code>StartElectionTimeout = 2000 ms</code>.</li>
+<li class=""><code>EnableQuiescence = true</code></li>
+<li class=""><code>QuiesceAfter = 1500 ms</code></li>
+<li class=""><code>PingInterval = 1 s</code></li>
+<li class=""><code>StartElectionTimeout = 2000 ms</code>.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="configuration">Configuration<a href="#configuration" class="hash-link" aria-label="Direct link to Configuration" title="Direct link to Configuration" translate="no">​</a></h2>
 <table><thead><tr><th>Property</th><th style="text-align:right">Default</th><th>Description</th></tr></thead><tbody><tr><td><code>EnableQuiescence</code></td><td style="text-align:right"><code>true</code></td><td>Enables idle partition quiescence. Set to <code>false</code> to keep classic per-partition heartbeats on every interval.</td></tr><tr><td><code>QuiesceAfter</code></td><td style="text-align:right"><code>1500 ms</code></td><td>How long a partition must be idle, with no active proposals, before the leader sends a quiesce marker and suppresses heartbeats.</td></tr><tr><td><code>PingInterval</code></td><td style="text-align:right"><code>1 s</code></td><td>SWIM probe cadence. Must be greater than <code>0</code> and lower than <code>StartElectionTimeout</code> when quiescence is enabled.</td></tr><tr><td><code>SuspicionTimeout</code></td><td style="text-align:right"><code>5 s</code></td><td>Time from <code>Suspect</code> to <code>Dead</code>. Quiesced failover starts on <code>Suspect</code>, so this does not directly gate quiesced failover latency.</td></tr><tr><td><code>StartElectionTimeout</code></td><td style="text-align:right"><code>2000 ms</code></td><td>Lower election timeout bound. <code>PingInterval</code> must be below this while quiescence is enabled.</td></tr></tbody></table>

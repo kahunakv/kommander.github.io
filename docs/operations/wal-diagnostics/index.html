@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">WAL Diagnostics | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/operations/wal-diagnostics/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="WAL Diagnostics | Kommander"><meta data-rh="true" name="description" content="Kommander exposes WAL visibility helpers and a practical durability switch for test environments."><meta data-rh="true" property="og:description" content="Kommander exposes WAL visibility helpers and a practical durability switch for test environments."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/operations/wal-diagnostics/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/wal-diagnostics/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/wal-diagnostics/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"WAL Diagnostics","item":"https://kahunakv.github.io/kommander.github.io/docs/operations/wal-diagnostics"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -33,7 +33,9 @@
 <p><code>CountRemovableLogs</code> returns the number of persisted rows strictly below the last committed checkpoint.</p>
 <p>These are useful for:</p>
 <ul>
-<li class="">compaction diagnostics- WAL-focused tests- operational checks that want to estimate how much history is still removable.</li>
+<li class="">compaction diagnostics</li>
+<li class="">WAL-focused tests</li>
+<li class="">operational checks that want to estimate how much history is still removable.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="optional-non-synchronous-writes">Optional Non-Synchronous Writes<a href="#optional-non-synchronous-writes" class="hash-link" aria-label="Direct link to Optional Non-Synchronous Writes" title="Direct link to Optional Non-Synchronous Writes" translate="no">​</a></h2>
 <p>Both durable adapters support <code>syncWrites: false</code>:</p>

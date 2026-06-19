@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Merging Idle Partitions | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/merging-idle-partitions/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Merging Idle Partitions | Kommander"><meta data-rh="true" name="description" content="Merge partitions when the cluster has more user partitions than the workload really needs."><meta data-rh="true" property="og:description" content="Merge partitions when the cluster has more user partitions than the workload really needs."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/merging-idle-partitions/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/merging-idle-partitions/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/merging-idle-partitions/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Merging Idle Partitions","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/merging-idle-partitions"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -15,33 +15,44 @@
 <p>Merge partitions when the cluster has more user partitions than the workload really needs.</p>
 <p>Typical reasons:</p>
 <ul>
-<li class="">two adjacent hash ranges are both lightly loaded- a past split solved a traffic spike that no longer exists- you want fewer active leaders and less partition overhead- a drained source partition should be folded back into its neighbor.</li>
+<li class="">two adjacent hash ranges are both lightly loaded</li>
+<li class="">a past split solved a traffic spike that no longer exists</li>
+<li class="">you want fewer active leaders and less partition overhead</li>
+<li class="">a drained source partition should be folded back into its neighbor.</li>
 </ul>
 <p>This guide explains the application-facing merge flow. For the full lifecycle API, see <a class="" href="/kommander.github.io/docs/guides/elastic-partitions/">Elastic Partitions</a>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-a-merge-does">What A Merge Does<a href="#what-a-merge-does" class="hash-link" aria-label="Direct link to What A Merge Does" title="Direct link to What A Merge Does" translate="no">​</a></h2>
 <p>A merge combines two user partitions into one survivor partition.</p>
 <p>For <code>HashRange</code> partitions:</p>
 <ul>
-<li class="">the ranges must be adjacent- the survivor absorbs the source range- the source partition is drained and then removed.</li>
+<li class="">the ranges must be adjacent</li>
+<li class="">the survivor absorbs the source range</li>
+<li class="">the source partition is drained and then removed.</li>
 </ul>
 <p>Kommander does not merge the system partition. Partition <code>0</code> is reserved and cannot participate in user merges.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="leadership-requirement">Leadership Requirement<a href="#leadership-requirement" class="hash-link" aria-label="Direct link to Leadership Requirement" title="Direct link to Leadership Requirement" translate="no">​</a></h2>
 <p>Unlike create and remove, merge needs leadership on <strong>both</strong> partitions involved.</p>
 <p>That means the local node must be leader for:</p>
 <ul>
-<li class="">the survivor partition- the source partition.</li>
+<li class="">the survivor partition</li>
+<li class="">the source partition.</li>
 </ul>
 <p>If leadership is split across nodes, move leadership first or call the merge from the node that already leads both partitions.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="basic-merge-example">Basic Merge Example<a href="#basic-merge-example" class="hash-link" aria-label="Direct link to Basic Merge Example" title="Direct link to Basic Merge Example" translate="no">​</a></h2>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token class-name">RaftPartitionLifecycleResult</span><span class="token plain"> result </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> </span><span class="token keyword" style="color:#00009f">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">MergePartitionsAsync</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">survivorPartitionId</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">2</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">sourcePartitionId</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">3</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">plan</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token keyword" style="color:#00009f">new</span><span class="token plain"> </span><span class="token constructor-invocation class-name">RaftMergePlan</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        SurvivorPartitionId </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">2</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        SourcePartitionId </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">3</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">}</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">ct</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> cancellationToken</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
 <p>In this example:</p>
 <ul>
-<li class="">partition <code>2</code> survives- partition <code>3</code> is drained- the final active hash range belongs to partition <code>2</code>.</li>
+<li class="">partition <code>2</code> survives</li>
+<li class="">partition <code>3</code> is drained</li>
+<li class="">the final active hash range belongs to partition <code>2</code>.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-changes-for-callers">What Changes For Callers<a href="#what-changes-for-callers" class="hash-link" aria-label="Direct link to What Changes For Callers" title="Direct link to What Changes For Callers" translate="no">​</a></h2>
 <p>After a merge:</p>
 <ol>
-<li class="">refresh the partition map2. stop routing new work to the removed source partition3. retry stale writes that fail with <code>PartitionMoved</code>4. rebalance any local workers or caches keyed by partition id.</li>
+<li class="">refresh the partition map</li>
+<li class="">stop routing new work to the removed source partition</li>
+<li class="">retry stale writes that fail with <code>PartitionMoved</code></li>
+<li class="">rebalance any local workers or caches keyed by partition id.</li>
 </ol>
 <p>If your application caches <code>partitionId -&gt; worker</code> assignments, this is the moment to tear down the source worker and move traffic to the survivor.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="state-transfer-considerations">State Transfer Considerations<a href="#state-transfer-considerations" class="hash-link" aria-label="Direct link to State Transfer Considerations" title="Direct link to State Transfer Considerations" translate="no">​</a></h2>
@@ -51,17 +62,26 @@
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">RegisterStateMachineTransfer</span><span class="token punctuation" style="color:#393A34">(</span><span class="token keyword" style="color:#00009f">new</span><span class="token plain"> </span><span class="token constructor-invocation class-name">MyStateMachineTransfer</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
 <p>Treat the merge as both:</p>
 <ul>
-<li class="">a partition-map change- an application-state movement event.</li>
+<li class="">a partition-map change</li>
+<li class="">an application-state movement event.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="a-safe-merge-workflow">A Safe Merge Workflow<a href="#a-safe-merge-workflow" class="hash-link" aria-label="Direct link to A Safe Merge Workflow" title="Direct link to A Safe Merge Workflow" translate="no">​</a></h2>
 <p>For most applications, this is the practical sequence:</p>
 <ol>
-<li class="">verify both partitions are lightly loaded2. verify the local node leads both partitions3. call <code>MergePartitionsAsync</code>4. refresh partition routing everywhere5. watch for <code>PartitionMoved</code> retries to settle6. verify only the survivor remains active.</li>
+<li class="">verify both partitions are lightly loaded</li>
+<li class="">verify the local node leads both partitions</li>
+<li class="">call <code>MergePartitionsAsync</code></li>
+<li class="">refresh partition routing everywhere</li>
+<li class="">watch for <code>PartitionMoved</code> retries to settle</li>
+<li class="">verify only the survivor remains active.</li>
 </ol>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="good-fit">Good Fit<a href="#good-fit" class="hash-link" aria-label="Direct link to Good Fit" title="Direct link to Good Fit" translate="no">​</a></h2>
 <p>Merges are a good fit when:</p>
 <ul>
-<li class="">earlier splits left too many mostly idle partitions- the cluster has unnecessary leadership overhead- adjacent ranges can be recombined cleanly- the application can update routing and state ownership after the change.</li>
+<li class="">earlier splits left too many mostly idle partitions</li>
+<li class="">the cluster has unnecessary leadership overhead</li>
+<li class="">adjacent ranges can be recombined cleanly</li>
+<li class="">the application can update routing and state ownership after the change.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="related-reading">Related Reading<a href="#related-reading" class="hash-link" aria-label="Direct link to Related Reading" title="Direct link to Related Reading" translate="no">​</a></h2>
 <ul>

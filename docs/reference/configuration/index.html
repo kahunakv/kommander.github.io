@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Configuration | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/reference/configuration/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Configuration | Kommander"><meta data-rh="true" name="description" content="RaftConfiguration controls node identity, network behavior, election timing, and fair WAL scheduler workers."><meta data-rh="true" property="og:description" content="RaftConfiguration controls node identity, network behavior, election timing, and fair WAL scheduler workers."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/reference/configuration/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/reference/configuration/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/reference/configuration/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Configuration","item":"https://kahunakv.github.io/kommander.github.io/docs/reference/configuration"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -34,7 +34,9 @@
 <p>For SQLite, partitions are distributed across a fixed shard pool. The scheduler still submits one cross-partition <code>IWAL.Write</code> call, and <code>SqliteWAL</code> groups that call by shard before writing. A batch with <code>P</code> partitions across <code>S</code> SQLite shards costs <code>S</code> transactions and fsyncs, not <code>P</code>. When <code>shardCount</code> is <code>1</code>, every partition shares one shard and the whole scheduler group can commit in one SQLite transaction.</p>
 <p>That creates a practical tuning tradeoff:</p>
 <ul>
-<li class="">fewer SQLite shards improve batching and reduce fsync pressure- more SQLite shards allow more independent read/write concurrency- the shard count is fixed for a WAL data directory after initialization because changing it would remap partitions to different database files.</li>
+<li class="">fewer SQLite shards improve batching and reduce fsync pressure</li>
+<li class="">more SQLite shards allow more independent read/write concurrency</li>
+<li class="">the shard count is fixed for a WAL data directory after initialization because changing it would remap partitions to different database files.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="dynamic-membership">Dynamic Membership<a href="#dynamic-membership" class="hash-link" aria-label="Direct link to Dynamic Membership" title="Direct link to Dynamic Membership" translate="no">​</a></h2>
 <p>Kommander supports runtime cluster membership management with learners, promotion, gossip dissemination, and SWIM-based failure detection.</p>
@@ -46,7 +48,10 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="executor-drain-quanta">Executor Drain Quanta<a href="#executor-drain-quanta" class="hash-link" aria-label="Direct link to Executor Drain Quanta" title="Direct link to Executor Drain Quanta" translate="no">​</a></h2>
 <p>The <code>MaxDrainQuantum*</code> settings tune how many operations each partition executor drains per wake cycle for each work class:</p>
 <ul>
-<li class="">control- replication- client- maintenance.</li>
+<li class="">control</li>
+<li class="">replication</li>
+<li class="">client</li>
+<li class="">maintenance.</li>
 </ul>
 <p>Higher control and replication quanta help Raft protocol traffic stay ahead of client floods. In most deployments, the defaults are the right starting point.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="timing-notes">Timing Notes<a href="#timing-notes" class="hash-link" aria-label="Direct link to Timing Notes" title="Direct link to Timing Notes" translate="no">​</a></h2>

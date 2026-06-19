@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Adapters | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/reference/adapters/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Adapters | Kommander"><meta data-rh="true" name="description" content="Kommander keeps persistence, transport, and discovery pluggable."><meta data-rh="true" property="og:description" content="Kommander keeps persistence, transport, and discovery pluggable."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/reference/adapters/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/reference/adapters/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/reference/adapters/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Adapters","item":"https://kahunakv.github.io/kommander.github.io/docs/reference/adapters"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -36,18 +36,31 @@
 <p>Custom transports implement <code>ICommunication</code>.</p>
 <p>At minimum, production transports should cover:</p>
 <ul>
-<li class="">core Raft RPCs: <code>Handshake</code>, <code>RequestVotes</code>, <code>Vote</code>, <code>AppendLogs</code>, <code>CompleteAppendLogs</code>, <code>BatchRequests</code>- dynamic membership RPCs: <code>SendJoin</code>, <code>SendLeave</code>- SWIM liveness RPCs: <code>SendPing</code>, <code>SendPingReq</code>- learner and backfill support: <code>GetRemoteFollowerLag</code>, <code>SendInstallSnapshot</code>- optional membership anti-entropy: <code>SendGossip</code>- join failure notification: <code>NotifyJoinBlocked</code>.</li>
+<li class="">core Raft RPCs: <code>Handshake</code>, <code>RequestVotes</code>, <code>Vote</code>, <code>AppendLogs</code>, <code>CompleteAppendLogs</code>, <code>BatchRequests</code></li>
+<li class="">dynamic membership RPCs: <code>SendJoin</code>, <code>SendLeave</code></li>
+<li class="">SWIM liveness RPCs: <code>SendPing</code>, <code>SendPingReq</code></li>
+<li class="">learner and backfill support: <code>GetRemoteFollowerLag</code>, <code>SendInstallSnapshot</code></li>
+<li class="">optional membership anti-entropy: <code>SendGossip</code></li>
+<li class="">join failure notification: <code>NotifyJoinBlocked</code>.</li>
 </ul>
 <p>Some methods have default no-op or failure-returning implementations, but relying on those defaults disables the corresponding runtime behavior.</p>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="dynamic-membership-support">Dynamic Membership Support<a href="#dynamic-membership-support" class="hash-link" aria-label="Direct link to Dynamic Membership Support" title="Direct link to Dynamic Membership Support" translate="no">​</a></h3>
 <p>Current dynamic membership support is not identical across transports.</p>
 <p>Practical state today:</p>
 <ul>
-<li class="">membership roster commits and join flow work on <code>InMemoryCommunication</code>, <code>GrpcCommunication</code>, and <code>RestCommunication</code>- graceful leave RPCs are wired on <code>InMemoryCommunication</code>, <code>GrpcCommunication</code>, and <code>RestCommunication</code>- cross-partition remote lag lookup for learner promotion is wired on <code>InMemoryCommunication</code>, <code>GrpcCommunication</code>, and <code>RestCommunication</code>- SWIM direct and indirect ping probing is wired on <code>InMemoryCommunication</code>, <code>GrpcCommunication</code>, and <code>RestCommunication</code>- gossip anti-entropy is currently only wired on <code>InMemoryCommunication</code>.</li>
+<li class="">membership roster commits and join flow work on <code>InMemoryCommunication</code>, <code>GrpcCommunication</code>, and <code>RestCommunication</code></li>
+<li class="">graceful leave RPCs are wired on <code>InMemoryCommunication</code>, <code>GrpcCommunication</code>, and <code>RestCommunication</code></li>
+<li class="">cross-partition remote lag lookup for learner promotion is wired on <code>InMemoryCommunication</code>, <code>GrpcCommunication</code>, and <code>RestCommunication</code></li>
+<li class="">SWIM direct and indirect ping probing is wired on <code>InMemoryCommunication</code>, <code>GrpcCommunication</code>, and <code>RestCommunication</code></li>
+<li class="">gossip anti-entropy is currently only wired on <code>InMemoryCommunication</code>.</li>
 </ul>
 <p>That means:</p>
 <ul>
-<li class="">gRPC and REST can still run membership commits and joins through Raft replication- gRPC and REST can use graceful leave through their transport RPCs- gRPC and REST can use remote follower lag lookups for learner promotion- gRPC and REST can use SWIM probing and partition quiescence- gossip anti-entropy is still more limited than in-process transport.</li>
+<li class="">gRPC and REST can still run membership commits and joins through Raft replication</li>
+<li class="">gRPC and REST can use graceful leave through their transport RPCs</li>
+<li class="">gRPC and REST can use remote follower lag lookups for learner promotion</li>
+<li class="">gRPC and REST can use SWIM probing and partition quiescence</li>
+<li class="">gossip anti-entropy is still more limited than in-process transport.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="discovery-adapters">Discovery Adapters<a href="#discovery-adapters" class="hash-link" aria-label="Direct link to Discovery Adapters" title="Direct link to Discovery Adapters" translate="no">​</a></h2>
 <table><thead><tr><th>Adapter</th><th>Use case</th></tr></thead><tbody><tr><td><code>StaticDiscovery</code></td><td>Fixed seed/contact list. Useful for bootstrap, not as the live membership authority.</td></tr><tr><td><code>DynamicDiscovery</code></td><td>Mutable in-memory contact list controlled by the application. Useful for tests and programmatic bootstrap.</td></tr><tr><td><code>MulticastDiscovery</code></td><td>UDP multicast discovery on local networks.</td></tr></tbody></table>

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Leader Election Internals | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/internals/leader-election/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Leader Election Internals | Kommander"><meta data-rh="true" name="description" content="Each partition elects its own leader."><meta data-rh="true" property="og:description" content="Each partition elects its own leader."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/internals/leader-election/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/leader-election/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/leader-election/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Leader Election Internals","item":"https://kahunakv.github.io/kommander.github.io/docs/internals/leader-election"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -37,11 +37,16 @@
 <p>Before a follower increments its term or becomes a candidate, it first runs a side-effect-free pre-vote round for <code>currentTerm + 1</code>.</p>
 <p>During this phase the follower:</p>
 <ol>
-<li class="">stays a follower2. does not bump <code>currentTerm</code>3. does not record a real vote4. asks peers whether they would vote for it if a real election started.</li>
+<li class="">stays a follower</li>
+<li class="">does not bump <code>currentTerm</code></li>
+<li class="">does not record a real vote</li>
+<li class="">asks peers whether they would vote for it if a real election started.</li>
 </ol>
 <p>Peers only grant a pre-vote when:</p>
 <ul>
-<li class="">they do not consider a current leader fresh- the proposed term is not stale- the candidate&#x27;s log is at least as up to date as their own.</li>
+<li class="">they do not consider a current leader fresh</li>
+<li class="">the proposed term is not stale</li>
+<li class="">the candidate&#x27;s log is at least as up to date as their own.</li>
 </ul>
 <p>Pre-vote requests and replies carry a <code>PreVote</code> flag on the vote RPCs so the transport can distinguish probes from real elections.</p>
 <p>This matters because an isolated or stale node can no longer keep inflating terms and disrupting a healthy leader. If it cannot win a quorum, it never gets promoted into a real election.</p>
@@ -49,7 +54,11 @@
 <p>Before becoming a candidate, a node checks whether it appears outdated compared with known commit indexes from other nodes. If it is behind, it does not start leadership and backs off.</p>
 <p>When a follower reaches pre-vote quorum, Kommander promotes it into a real election. At that point it:</p>
 <ol>
-<li class="">it clears the known leader2. increments the term3. votes for itself4. asks peers for votes5. waits for <code>VotingTimeout</code>.</li>
+<li class="">it clears the known leader</li>
+<li class="">increments the term</li>
+<li class="">votes for itself</li>
+<li class="">asks peers for votes</li>
+<li class="">waits for <code>VotingTimeout</code>.</li>
 </ol>
 <p>If pre-vote does not reach quorum, the node remains a follower and no real election state is mutated.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="becoming-leader">Becoming Leader<a href="#becoming-leader" class="hash-link" aria-label="Direct link to Becoming Leader" title="Direct link to Becoming Leader" translate="no">​</a></h2>

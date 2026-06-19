@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Partitions And Splitting | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/internals/partitions-and-splitting/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Partitions And Splitting | Kommander"><meta data-rh="true" name="description" content="Partitions divide the keyspace into independent Raft groups."><meta data-rh="true" property="og:description" content="Partitions divide the keyspace into independent Raft groups."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/internals/partitions-and-splitting/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/partitions-and-splitting/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/partitions-and-splitting/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Partitions And Splitting","item":"https://kahunakv.github.io/kommander.github.io/docs/internals/partitions-and-splitting"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -19,7 +19,8 @@
 <p>When user partitions are initialized, <code>RaftSystemCoordinator</code> divides the positive <code>int</code> hash space across <code>InitialPartitions</code> ranges. It starts with partition id <code>1</code>.</p>
 <p>Application routing uses:</p>
 <ul>
-<li class=""><code>GetPartitionKey</code>, which hashes the prefix before the last <code>/</code>- <code>GetPrefixPartitionKey</code>, which hashes the complete provided string.</li>
+<li class=""><code>GetPartitionKey</code>, which hashes the prefix before the last <code>/</code></li>
+<li class=""><code>GetPrefixPartitionKey</code>, which hashes the complete provided string.</li>
 </ul>
 <p><code>RaftManager</code> then finds the partition whose range contains the hash value.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="why-ranges-are-replicated">Why Ranges Are Replicated<a href="#why-ranges-are-replicated" class="hash-link" aria-label="Direct link to Why Ranges Are Replicated" title="Direct link to Why Ranges Are Replicated" translate="no">​</a></h2>
@@ -28,11 +29,19 @@
 <p><code>RaftManager.SplitPartition(partitionId)</code> queues a split request through the system coordinator.</p>
 <p>The caller must satisfy three conditions:</p>
 <ul>
-<li class="">the node is initialized- the target partition is not <code>0</code>- the local node is leader for the target partition.</li>
+<li class="">the node is initialized</li>
+<li class="">the target partition is not <code>0</code></li>
+<li class="">the local node is leader for the target partition.</li>
 </ul>
 <p>The split process:</p>
 <ol>
-<li class="">reads the current partition range map from system configuration2. finds the target range3. computes the midpoint4. shrinks the existing range to the lower half5. creates a new partition id for the upper half6. replicates the new range map through the system partition7. starts or updates local partitions from the replicated map.</li>
+<li class="">reads the current partition range map from system configuration</li>
+<li class="">finds the target range</li>
+<li class="">computes the midpoint</li>
+<li class="">shrinks the existing range to the lower half</li>
+<li class="">creates a new partition id for the upper half</li>
+<li class="">replicates the new range map through the system partition</li>
+<li class="">starts or updates local partitions from the replicated map.</li>
 </ol>
 <p>The new partition id is one greater than the highest current partition id.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="current-scope">Current Scope<a href="#current-scope" class="hash-link" aria-label="Direct link to Current Scope" title="Direct link to Current Scope" translate="no">​</a></h2>

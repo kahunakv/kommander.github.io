@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Scheduler Internals | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/internals/scheduler/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Scheduler Internals | Kommander"><meta data-rh="true" name="description" content="Kommander separates state-machine execution from blocking storage work."><meta data-rh="true" property="og:description" content="Kommander separates state-machine execution from blocking storage work."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/internals/scheduler/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/scheduler/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/scheduler/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Scheduler Internals","item":"https://kahunakv.github.io/kommander.github.io/docs/internals/scheduler"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -23,7 +23,13 @@
 <p><code>FairWalScheduler</code> handles synchronous writes to <code>IWAL</code>.</p>
 <p>Its goals are:</p>
 <ul>
-<li class="">preserve FIFO write order inside each partition- allow different partitions to write concurrently- prevent one hot partition from starving others- batch compatible writes within a drain cycle- coalesce ready partitions into cross-partition group commits- apply per-partition backpressure instead of allowing unbounded queues- drain accepted work on shutdown.</li>
+<li class="">preserve FIFO write order inside each partition</li>
+<li class="">allow different partitions to write concurrently</li>
+<li class="">prevent one hot partition from starving others</li>
+<li class="">batch compatible writes within a drain cycle</li>
+<li class="">coalesce ready partitions into cross-partition group commits</li>
+<li class="">apply per-partition backpressure instead of allowing unbounded queues</li>
+<li class="">drain accepted work on shutdown.</li>
 </ul>
 <p>Each partition has its own pending queue. A global ready queue contains partition ids, not individual writes. A partition appears at most once in the ready queue, so workers rotate across active partitions instead of being monopolized by one partition.</p>
 <p>When several partitions are ready at the same time, one worker can drain up to <code>MaxWalGroupBatchPartitions</code> partition queues and issue one <code>IWAL.Write</code> call that spans all of them. Within each partition, it drains up to <code>MaxWalBatchSize</code> operations and preserves FIFO order.</p>
@@ -33,7 +39,11 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="fair-read-scheduler">Fair Read Scheduler<a href="#fair-read-scheduler" class="hash-link" aria-label="Direct link to Fair Read Scheduler" title="Direct link to Fair Read Scheduler" translate="no">​</a></h2>
 <p><code>FairReadScheduler</code> handles synchronous WAL reads. It uses the same broad model:</p>
 <ul>
-<li class="">partition-tagged read queues- FIFO order within a partition- fair dispatch across partitions- bounded per-partition queue depth- task completion when the synchronous read returns.</li>
+<li class="">partition-tagged read queues</li>
+<li class="">FIFO order within a partition</li>
+<li class="">fair dispatch across partitions</li>
+<li class="">bounded per-partition queue depth</li>
+<li class="">task completion when the synchronous read returns.</li>
 </ul>
 <p>Reads that semantically depend on prior writes are submitted after the write completion callback fires. That preserves the expected write-then-read ordering for a partition.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="backpressure">Backpressure<a href="#backpressure" class="hash-link" aria-label="Direct link to Backpressure" title="Direct link to Backpressure" translate="no">​</a></h2>

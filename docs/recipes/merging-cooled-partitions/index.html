@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Merging Cooled Partitions | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/recipes/merging-cooled-partitions/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Merging Cooled Partitions | Kommander"><meta data-rh="true" name="description" content="Use partition merges when traffic has cooled down and the cluster is carrying more user partitions than it needs."><meta data-rh="true" property="og:description" content="Use partition merges when traffic has cooled down and the cluster is carrying more user partitions than it needs."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/recipes/merging-cooled-partitions/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/recipes/merging-cooled-partitions/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/recipes/merging-cooled-partitions/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Merging Cooled Partitions","item":"https://kahunakv.github.io/kommander.github.io/docs/recipes/merging-cooled-partitions"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -18,12 +18,18 @@
 <p>After a scale event, promotion, migration, or temporary traffic spike, a cluster can be left with many lightly used partitions.</p>
 <p>That usually means:</p>
 <ul>
-<li class="">extra leaders to monitor- more partition-local workers or caches- more routing entries than the workload justifies- more operational noise than necessary.</li>
+<li class="">extra leaders to monitor</li>
+<li class="">more partition-local workers or caches</li>
+<li class="">more routing entries than the workload justifies</li>
+<li class="">more operational noise than necessary.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="when-this-is-a-good-fit">When This Is a Good Fit<a href="#when-this-is-a-good-fit" class="hash-link" aria-label="Direct link to When This Is a Good Fit" title="Direct link to When This Is a Good Fit" translate="no">​</a></h2>
 <p>Use this pattern when:</p>
 <ul>
-<li class="">adjacent hash-range partitions are both quiet- a previous split is no longer justified- fewer active leaders would simplify operations- the application can consolidate work under one survivor partition.</li>
+<li class="">adjacent hash-range partitions are both quiet</li>
+<li class="">a previous split is no longer justified</li>
+<li class="">fewer active leaders would simplify operations</li>
+<li class="">the application can consolidate work under one survivor partition.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="kommander-pattern">Kommander Pattern<a href="#kommander-pattern" class="hash-link" aria-label="Direct link to Kommander Pattern" title="Direct link to Kommander Pattern" translate="no">​</a></h2>
 <p>Merge the quiet source partition into a survivor partition that will continue serving the combined range.</p>
@@ -32,14 +38,20 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="applying-state">Applying State<a href="#applying-state" class="hash-link" aria-label="Direct link to Applying State" title="Direct link to Applying State" translate="no">​</a></h2>
 <p>After the merge:</p>
 <ol>
-<li class="">refresh the partition map2. stop routing new requests to the removed source partition3. retry stale requests that return <code>PartitionMoved</code>4. consolidate local state under the survivor partition.</li>
+<li class="">refresh the partition map</li>
+<li class="">stop routing new requests to the removed source partition</li>
+<li class="">retry stale requests that return <code>PartitionMoved</code></li>
+<li class="">consolidate local state under the survivor partition.</li>
 </ol>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">OnPartitionMapChanged </span><span class="token operator" style="color:#393A34">+=</span><span class="token plain"> ranges </span><span class="token operator" style="color:#393A34">=&gt;</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    routingCache</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">Replace</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">ranges</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    workerAssignments</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">Rebalance</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">ranges</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">}</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
 <p>If the application keeps per-partition projections or workers, this is the point where the source partition&#x27;s local state should be folded into the survivor or rebuilt there.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-your-application-owns">What Your Application Owns<a href="#what-your-application-owns" class="hash-link" aria-label="Direct link to What Your Application Owns" title="Direct link to What Your Application Owns" translate="no">​</a></h2>
 <p>Kommander coordinates the replicated merge. Your application still owns:</p>
 <ul>
-<li class="">deciding that the partitions are quiet enough to merge- ensuring the right node initiates the merge- tearing down source-partition local workers- consolidating application state and read models.</li>
+<li class="">deciding that the partitions are quiet enough to merge</li>
+<li class="">ensuring the right node initiates the merge</li>
+<li class="">tearing down source-partition local workers</li>
+<li class="">consolidating application state and read models.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="notes">Notes<a href="#notes" class="hash-link" aria-label="Direct link to Notes" title="Direct link to Notes" translate="no">​</a></h2>
 <ul>

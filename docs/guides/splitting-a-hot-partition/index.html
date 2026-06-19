@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Splitting A Hot Partition | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/splitting-a-hot-partition/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Splitting A Hot Partition | Kommander"><meta data-rh="true" name="description" content="Split a partition when one user partition is doing too much work compared with the rest of the cluster."><meta data-rh="true" property="og:description" content="Split a partition when one user partition is doing too much work compared with the rest of the cluster."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/splitting-a-hot-partition/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/splitting-a-hot-partition/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/splitting-a-hot-partition/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Splitting A Hot Partition","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/splitting-a-hot-partition"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -15,33 +15,47 @@
 <p>Split a partition when one user partition is doing too much work compared with the rest of the cluster.</p>
 <p>Typical signals:</p>
 <ul>
-<li class="">one tenant or key range dominates request volume- one partition&#x27;s queue depth stays high- one partition&#x27;s leader is much hotter than the others- latency for a specific key range grows while the rest of the cluster stays healthy.</li>
+<li class="">one tenant or key range dominates request volume</li>
+<li class="">one partition&#x27;s queue depth stays high</li>
+<li class="">one partition&#x27;s leader is much hotter than the others</li>
+<li class="">latency for a specific key range grows while the rest of the cluster stays healthy.</li>
 </ul>
 <p>This guide focuses on the operational flow for a split. For the full API surface, see <a class="" href="/kommander.github.io/docs/guides/elastic-partitions/">Elastic Partitions</a>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-a-split-does">What A Split Does<a href="#what-a-split-does" class="hash-link" aria-label="Direct link to What A Split Does" title="Direct link to What A Split Does" translate="no">​</a></h2>
 <p>For a <code>HashRange</code> partition, a split creates a second partition and divides the original hash range in two.</p>
 <p>In plain terms:</p>
 <ul>
-<li class="">the source partition keeps part of the keyspace- the target partition receives the other part- new writes must eventually route using the updated partition map.</li>
+<li class="">the source partition keeps part of the keyspace</li>
+<li class="">the target partition receives the other part</li>
+<li class="">new writes must eventually route using the updated partition map.</li>
 </ul>
 <p>Kommander can auto-assign the target partition id when you pass <code>0</code>.</p>
 <p>Partition <code>0</code> remains reserved for system metadata and can never be used as a user split target.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="before-you-split">Before You Split<a href="#before-you-split" class="hash-link" aria-label="Direct link to Before You Split" title="Direct link to Before You Split" translate="no">​</a></h2>
 <p>Check these conditions first:</p>
 <ul>
-<li class="">the source partition is a user partition with id greater than <code>0</code>- the local node is leader for the source partition- your application is prepared to refresh routing state- your application has registered state-transfer behavior if split data must move with the new partition.</li>
+<li class="">the source partition is a user partition with id greater than <code>0</code></li>
+<li class="">the local node is leader for the source partition</li>
+<li class="">your application is prepared to refresh routing state</li>
+<li class="">your application has registered state-transfer behavior if split data must move with the new partition.</li>
 </ul>
 <p>The split request itself is easy. The hard part is usually application state transfer and rerouting cached keys cleanly.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="basic-split-example">Basic Split Example<a href="#basic-split-example" class="hash-link" aria-label="Direct link to Basic Split Example" title="Direct link to Basic Split Example" translate="no">​</a></h2>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token class-name">RaftPartitionLifecycleResult</span><span class="token plain"> result </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> </span><span class="token keyword" style="color:#00009f">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">SplitPartitionAsync</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">sourcePartitionId</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">2</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">targetPartitionId</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token number" style="color:#36acaa">0</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">plan</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token keyword" style="color:#00009f">new</span><span class="token plain"> </span><span class="token constructor-invocation class-name">RaftSplitPlan</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        HashBoundary </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> </span><span class="token keyword" style="color:#00009f">null</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        TargetRoutingMode </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> RaftRoutingMode</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">HashRange</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token punctuation" style="color:#393A34">}</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token named-parameter punctuation" style="color:#393A34">ct</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> cancellationToken</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
 <p>What this means:</p>
 <ul>
-<li class=""><code>sourcePartitionId: 2</code> splits partition <code>2</code>- <code>targetPartitionId: 0</code> asks Kommander to assign a new user partition id- <code>HashBoundary = null</code> uses the midpoint of the current hash range- <code>TargetRoutingMode = HashRange</code> keeps the new partition in normal hash-based routing.</li>
+<li class=""><code>sourcePartitionId: 2</code> splits partition <code>2</code></li>
+<li class=""><code>targetPartitionId: 0</code> asks Kommander to assign a new user partition id</li>
+<li class=""><code>HashBoundary = null</code> uses the midpoint of the current hash range</li>
+<li class=""><code>TargetRoutingMode = HashRange</code> keeps the new partition in normal hash-based routing.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="after-the-split-completes">After The Split Completes<a href="#after-the-split-completes" class="hash-link" aria-label="Direct link to After The Split Completes" title="Direct link to After The Split Completes" translate="no">​</a></h2>
 <p>After a successful split:</p>
 <ol>
-<li class="">refresh your partition map2. update any routing caches3. expect some callers using stale generation information to get <code>PartitionMoved</code>4. re-route those requests using the latest map.</li>
+<li class="">refresh your partition map</li>
+<li class="">update any routing caches</li>
+<li class="">expect some callers using stale generation information to get <code>PartitionMoved</code></li>
+<li class="">re-route those requests using the latest map.</li>
 </ol>
 <p>Example:</p>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token class-name">IReadOnlyList</span><span class="token class-name punctuation" style="color:#393A34">&lt;</span><span class="token class-name">RaftPartitionRange</span><span class="token class-name punctuation" style="color:#393A34">&gt;</span><span class="token plain"> map </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">GetPartitionMap</span><span class="token punctuation" style="color:#393A34">(</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
@@ -54,12 +68,19 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="a-simple-operating-pattern">A Simple Operating Pattern<a href="#a-simple-operating-pattern" class="hash-link" aria-label="Direct link to A Simple Operating Pattern" title="Direct link to A Simple Operating Pattern" translate="no">​</a></h2>
 <p>For a beginner-friendly first implementation:</p>
 <ol>
-<li class="">detect a hot partition from metrics or queue depth2. split it at the leader3. refresh the partition map on all application nodes4. retry <code>PartitionMoved</code> writes using the new map5. verify the hot key range is now spread across two leaders.</li>
+<li class="">detect a hot partition from metrics or queue depth</li>
+<li class="">split it at the leader</li>
+<li class="">refresh the partition map on all application nodes</li>
+<li class="">retry <code>PartitionMoved</code> writes using the new map</li>
+<li class="">verify the hot key range is now spread across two leaders.</li>
 </ol>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="good-fit">Good Fit<a href="#good-fit" class="hash-link" aria-label="Direct link to Good Fit" title="Direct link to Good Fit" translate="no">​</a></h2>
 <p>Splits are a good fit when:</p>
 <ul>
-<li class="">traffic is skewed toward one partition- keys can be cleanly divided- the application can tolerate rerouting during the topology change- you want to spread leadership and write load across more partitions.</li>
+<li class="">traffic is skewed toward one partition</li>
+<li class="">keys can be cleanly divided</li>
+<li class="">the application can tolerate rerouting during the topology change</li>
+<li class="">you want to spread leadership and write load across more partitions.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="related-reading">Related Reading<a href="#related-reading" class="hash-link" aria-label="Direct link to Related Reading" title="Direct link to Related Reading" translate="no">​</a></h2>
 <ul>

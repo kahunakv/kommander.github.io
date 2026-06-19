@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Dynamic Cluster Membership | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Dynamic Cluster Membership | Kommander"><meta data-rh="true" name="description" content="Kommander can change the cluster roster at runtime."><meta data-rh="true" property="og:description" content="Kommander can change the cluster roster at runtime."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dynamic Cluster Membership","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -15,7 +15,12 @@
 <p>Kommander can change the cluster roster at runtime.</p>
 <p>That means a node can:</p>
 <ul>
-<li class="">join an existing cluster- start as a non-voting learner- catch up- be promoted automatically to a voter- leave gracefully- be evicted later if failure detection is enabled and supported by the transport.</li>
+<li class="">join an existing cluster</li>
+<li class="">start as a non-voting learner</li>
+<li class="">catch up</li>
+<li class="">be promoted automatically to a voter</li>
+<li class="">leave gracefully</li>
+<li class="">be evicted later if failure detection is enabled and supported by the transport.</li>
 </ul>
 <p>This page covers the user-facing behavior.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="the-core-idea">The Core Idea<a href="#the-core-idea" class="hash-link" aria-label="Direct link to The Core Idea" title="Direct link to The Core Idea" translate="no">​</a></h2>
@@ -23,7 +28,10 @@
 <p>That roster is a committed Raft record, not just a discovery snapshot and not just gossip state.</p>
 <p>The practical implication is:</p>
 <ul>
-<li class="">quorum is computed from the committed roster- learners do not count toward quorum- discovery helps nodes find contact points but does not define live membership- gossip can spread the roster faster but does not decide who may vote.</li>
+<li class="">quorum is computed from the committed roster</li>
+<li class="">learners do not count toward quorum</li>
+<li class="">discovery helps nodes find contact points but does not define live membership</li>
+<li class="">gossip can spread the roster faster but does not decide who may vote.</li>
 </ul>
 <p>If you only remember one thing, remember this: membership truth comes from Raft, not from discovery or gossip.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="member-roles">Member Roles<a href="#member-roles" class="hash-link" aria-label="Direct link to Member Roles" title="Direct link to Member Roles" translate="no">​</a></h2>
@@ -57,7 +65,9 @@
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">OnMembershipChanged </span><span class="token operator" style="color:#393A34">+=</span><span class="token plain"> membership </span><span class="token operator" style="color:#393A34">=&gt;</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token keyword" style="color:#00009f">foreach</span><span class="token plain"> </span><span class="token punctuation" style="color:#393A34">(</span><span class="token class-name">ClusterMember</span><span class="token plain"> member </span><span class="token keyword" style="color:#00009f">in</span><span class="token plain"> membership</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">Members</span><span class="token punctuation" style="color:#393A34">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">        Console</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">WriteLine</span><span class="token punctuation" style="color:#393A34">(</span><span class="token interpolation-string string" style="color:#e3116c">$&quot;</span><span class="token interpolation-string interpolation punctuation" style="color:#393A34">{</span><span class="token interpolation-string interpolation expression language-csharp">member</span><span class="token interpolation-string interpolation expression language-csharp punctuation" style="color:#393A34">.</span><span class="token interpolation-string interpolation expression language-csharp">Endpoint</span><span class="token interpolation-string interpolation punctuation" style="color:#393A34">}</span><span class="token interpolation-string string" style="color:#e3116c"> -&gt; </span><span class="token interpolation-string interpolation punctuation" style="color:#393A34">{</span><span class="token interpolation-string interpolation expression language-csharp">member</span><span class="token interpolation-string interpolation expression language-csharp punctuation" style="color:#393A34">.</span><span class="token interpolation-string interpolation expression language-csharp">Role</span><span class="token interpolation-string interpolation punctuation" style="color:#393A34">}</span><span class="token interpolation-string string" style="color:#e3116c">&quot;</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">}</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
 <p>Important behavior:</p>
 <ul>
-<li class="">the callback receives a snapshot of the full roster- it fires when this node advances to a newer committed membership version- handlers must stay quick and must not block the system coordinator loop.</li>
+<li class="">the callback receives a snapshot of the full roster</li>
+<li class="">it fires when this node advances to a newer committed membership version</li>
+<li class="">handlers must stay quick and must not block the system coordinator loop.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="joining-a-cluster">Joining A Cluster<a href="#joining-a-cluster" class="hash-link" aria-label="Direct link to Joining A Cluster" title="Direct link to Joining A Cluster" translate="no">​</a></h2>
 <p>You can join either through discovery or through explicit seed endpoints.</p>
@@ -67,7 +77,10 @@
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token keyword" style="color:#00009f">using</span><span class="token plain"> </span><span class="token class-name">CancellationTokenSource</span><span class="token plain"> joinTimeout </span><span class="token operator" style="color:#393A34">=</span><span class="token plain"> </span><span class="token keyword" style="color:#00009f">new</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">TimeSpan</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">FromSeconds</span><span class="token punctuation" style="color:#393A34">(</span><span class="token number" style="color:#36acaa">30</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token keyword" style="color:#00009f">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">JoinCluster</span><span class="token punctuation" style="color:#393A34">(</span><span class="token plain">joinTimeout</span><span class="token punctuation" style="color:#393A34">.</span><span class="token plain">Token</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
 <p>What happens conceptually:</p>
 <ol>
-<li class="">the existing cluster commits <code>AddMember</code> for the new endpoint2. the new node enters as a <code>Learner</code>3. the leader replicates state to it4. once it stays sufficiently caught up, the leader promotes it to <code>Voter</code>.</li>
+<li class="">the existing cluster commits <code>AddMember</code> for the new endpoint</li>
+<li class="">the new node enters as a <code>Learner</code></li>
+<li class="">the leader replicates state to it</li>
+<li class="">once it stays sufficiently caught up, the leader promotes it to <code>Voter</code>.</li>
 </ol>
 <p><code>JoinCluster(...)</code> does not return as soon as the node is merely known. It waits until the node becomes a committed voter, or until timeout/cancellation triggers.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="graceful-leave">Graceful Leave<a href="#graceful-leave" class="hash-link" aria-label="Direct link to Graceful Leave" title="Direct link to Graceful Leave" translate="no">​</a></h2>
@@ -75,7 +88,10 @@
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token keyword" style="color:#00009f">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">LeaveCluster</span><span class="token punctuation" style="color:#393A34">(</span><span class="token named-parameter punctuation" style="color:#393A34">dispose</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token boolean" style="color:#36acaa">true</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
 <p>Behavior:</p>
 <ol>
-<li class="">the node marks itself <code>Leaving</code>2. it stops campaigning immediately3. the cluster commits <code>RemoveMember(self)</code> on partition <code>0</code>4. the node shuts down.</li>
+<li class="">the node marks itself <code>Leaving</code></li>
+<li class="">it stops campaigning immediately</li>
+<li class="">the cluster commits <code>RemoveMember(self)</code> on partition <code>0</code></li>
+<li class="">the node shuts down.</li>
 </ol>
 <p>If the node is the system-partition leader, it removes itself under the old quorum and then steps down.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="automatic-promotion">Automatic Promotion<a href="#automatic-promotion" class="hash-link" aria-label="Direct link to Automatic Promotion" title="Direct link to Automatic Promotion" translate="no">​</a></h2>
@@ -91,13 +107,19 @@
 <p>That works only while the learner still needs entries above the current compaction floor. If the WAL has already compacted away the history a fresh learner needs, there is not yet a snapshot-install path wired into learner catch-up.</p>
 <p>In practical terms:</p>
 <ul>
-<li class="">joining works for learners that can still be caught up from retained log history- a heavily compacted cluster may prevent a fresh learner from reaching voter status- a join timeout can therefore mean the learner could not catch up from the retained WAL.</li>
+<li class="">joining works for learners that can still be caught up from retained log history</li>
+<li class="">a heavily compacted cluster may prevent a fresh learner from reaching voter status</li>
+<li class="">a join timeout can therefore mean the learner could not catch up from the retained WAL.</li>
 </ul>
 <p>See <a class="" href="/kommander.github.io/docs/guides/log-backfill-and-catch-up/">Log Backfill And Catch-Up</a> for the follower catch-up path, <code>GetFollowerLagAsync</code>, and the <code>SnapshotRequired</code> handoff.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="failure-detection-and-eviction">Failure Detection And Eviction<a href="#failure-detection-and-eviction" class="hash-link" aria-label="Direct link to Failure Detection And Eviction" title="Direct link to Failure Detection And Eviction" translate="no">​</a></h2>
 <p>Kommander also has a SWIM-style failure detector:</p>
 <ul>
-<li class="">direct ping- indirect ping through peers- <code>Suspect</code>- then <code>Dead</code>- then eventual eviction by the system-partition leader.</li>
+<li class="">direct ping</li>
+<li class="">indirect ping through peers</li>
+<li class=""><code>Suspect</code></li>
+<li class="">then <code>Dead</code></li>
+<li class="">then eventual eviction by the system-partition leader.</li>
 </ul>
 <p>For the full liveness model, see <a class="" href="/kommander.github.io/docs/guides/swim-failure-detection/">SWIM Failure Detection</a>.</p>
 <p>Kommander enables SWIM by default:</p>
@@ -107,11 +129,20 @@
 <p>Dynamic membership is not equally complete across transports.</p>
 <p>Current practical state:</p>
 <ul>
-<li class="">roster commits and join flow work on <code>InMemory</code>, <code>gRPC</code>, and <code>REST</code>- graceful leave RPCs are wired on <code>InMemory</code>, <code>gRPC</code>, and <code>REST</code>- cross-partition remote lag checks for learner promotion are wired on <code>InMemory</code>, <code>gRPC</code>, and <code>REST</code>- SWIM direct and indirect ping probing is wired on <code>InMemory</code>, <code>gRPC</code>, and <code>REST</code>- gossip anti-entropy is only wired on <code>InMemory</code>.</li>
+<li class="">roster commits and join flow work on <code>InMemory</code>, <code>gRPC</code>, and <code>REST</code></li>
+<li class="">graceful leave RPCs are wired on <code>InMemory</code>, <code>gRPC</code>, and <code>REST</code></li>
+<li class="">cross-partition remote lag checks for learner promotion are wired on <code>InMemory</code>, <code>gRPC</code>, and <code>REST</code></li>
+<li class="">SWIM direct and indirect ping probing is wired on <code>InMemory</code>, <code>gRPC</code>, and <code>REST</code></li>
+<li class="">gossip anti-entropy is only wired on <code>InMemory</code>.</li>
 </ul>
 <p>What that means for gRPC and REST clusters today:</p>
 <ul>
-<li class="">joining works- graceful leave works through the transport RPC path- learner promotion can use remote follower lag checks instead of relying only on local observations- committed membership changes still replicate through Raft- SWIM failure detection works through the transport- gossip-based convergence is slower or inert.</li>
+<li class="">joining works</li>
+<li class="">graceful leave works through the transport RPC path</li>
+<li class="">learner promotion can use remote follower lag checks instead of relying only on local observations</li>
+<li class="">committed membership changes still replicate through Raft</li>
+<li class="">SWIM failure detection works through the transport</li>
+<li class="">gossip-based convergence is slower or inert.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="important-status-values">Important Status Values<a href="#important-status-values" class="hash-link" aria-label="Direct link to Important Status Values" title="Direct link to Important Status Values" translate="no">​</a></h2>
 <p>Membership operations can surface these relevant statuses:</p>

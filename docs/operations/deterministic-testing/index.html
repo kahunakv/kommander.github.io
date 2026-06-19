@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Deterministic Testing | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Deterministic Testing | Kommander"><meta data-rh="true" name="description" content="Kommander includes a non-production test toolchain for deterministic and timing-sensitive scenarios."><meta data-rh="true" property="og:description" content="Kommander includes a non-production test toolchain for deterministic and timing-sensitive scenarios."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Deterministic Testing","item":"https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -16,16 +16,22 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="simulation-runtime">Simulation Runtime<a href="#simulation-runtime" class="hash-link" aria-label="Direct link to Simulation Runtime" title="Direct link to Simulation Runtime" translate="no">​</a></h2>
 <p>The source tree includes a deterministic simulation runtime with:</p>
 <ul>
-<li class="">seeded randomness- replay logs- virtual time- reproducible failure scenarios.</li>
+<li class="">seeded randomness</li>
+<li class="">replay logs</li>
+<li class="">virtual time</li>
+<li class="">reproducible failure scenarios.</li>
 </ul>
 <p>This is useful when a timing-sensitive failure is hard to reproduce in ordinary multi-process tests.</p>
 <p>Several timing controls help reproducibility directly in the runtime:</p>
 <ul>
-<li class=""><code>ElectionTimeoutSeed</code> can make partition election timeouts deterministic- <code>WaitForLeaderStableAsync</code> lets tests wait for a leader that stays stable for a minimum duration.</li>
+<li class=""><code>ElectionTimeoutSeed</code> can make partition election timeouts deterministic</li>
+<li class=""><code>WaitForLeaderStableAsync</code> lets tests wait for a leader that stays stable for a minimum duration.</li>
 </ul>
 <p>The election tests include targeted pre-vote coverage:</p>
 <ul>
-<li class="">state-machine tests verify that pre-vote stays side-effect free until quorum is reached- transport tests verify the <code>PreVote</code> RPC flag survives gRPC serialization- multi-node tests cover the stale follower rejoin case that pre-vote is meant to stabilize.</li>
+<li class="">state-machine tests verify that pre-vote stays side-effect free until quorum is reached</li>
+<li class="">transport tests verify the <code>PreVote</code> RPC flag survives gRPC serialization</li>
+<li class="">multi-node tests cover the stale follower rejoin case that pre-vote is meant to stabilize.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="focused-test-areas">Focused Test Areas<a href="#focused-test-areas" class="hash-link" aria-label="Direct link to Focused Test Areas" title="Direct link to Focused Test Areas" translate="no">​</a></h2>
 <p>The current test tree includes several useful slices:</p>

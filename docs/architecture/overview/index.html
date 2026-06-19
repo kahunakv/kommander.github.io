@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Architecture Overview | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/architecture/overview/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Architecture Overview | Kommander"><meta data-rh="true" name="description" content="Kommander is an embedded Raft runtime for .NET services."><meta data-rh="true" property="og:description" content="Kommander is an embedded Raft runtime for .NET services."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/architecture/overview/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/architecture/overview/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/architecture/overview/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Architecture Overview","item":"https://kahunakv.github.io/kommander.github.io/docs/architecture/overview"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.86a498e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.937c1f9e.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bc37b698.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.9af13fa4.js" defer="defer"></script>
 </head>
 <body>
@@ -20,34 +20,52 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="startup-flow">Startup Flow<a href="#startup-flow" class="hash-link" aria-label="Direct link to Startup Flow" title="Direct link to Startup Flow" translate="no">​</a></h2>
 <p>When a node starts:</p>
 <ol>
-<li class="">the application constructs a <code>RaftManager</code>2. <code>JoinCluster</code> starts discovery, transport, schedulers, and partitions3. each partition restores its WAL4. committed entries are replayed through <code>OnLogRestored</code>5. timers begin6. leaders are elected per partition.</li>
+<li class="">the application constructs a <code>RaftManager</code></li>
+<li class=""><code>JoinCluster</code> starts discovery, transport, schedulers, and partitions</li>
+<li class="">each partition restores its WAL</li>
+<li class="">committed entries are replayed through <code>OnLogRestored</code></li>
+<li class="">timers begin</li>
+<li class="">leaders are elected per partition.</li>
 </ol>
 <p>When dynamic membership is used, a new node joins as a learner first. It catches up before it is promoted to voter, so the existing quorum is not weakened during catch-up.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="write-flow">Write Flow<a href="#write-flow" class="hash-link" aria-label="Direct link to Write Flow" title="Direct link to Write Flow" translate="no">​</a></h2>
 <p>For a normal <code>ReplicateLogs</code> call:</p>
 <ol>
-<li class="">the application calls the leader for the target partition2. the leader assigns the next log index and current term3. the leader writes the proposed entry to its own WAL4. followers receive <code>AppendLogs</code> and write the entry to their WALs5. the leader commits after quorum acknowledgement6. committed entries are delivered to <code>OnReplicationReceived</code>.</li>
+<li class="">the application calls the leader for the target partition</li>
+<li class="">the leader assigns the next log index and current term</li>
+<li class="">the leader writes the proposed entry to its own WAL</li>
+<li class="">followers receive <code>AppendLogs</code> and write the entry to their WALs</li>
+<li class="">the leader commits after quorum acknowledgement</li>
+<li class="">committed entries are delivered to <code>OnReplicationReceived</code>.</li>
 </ol>
 <p>With <code>autoCommit: true</code>, the leader commits as soon as quorum is reached. With <code>autoCommit: false</code>, the caller uses the returned proposal ticket with <code>CommitLogs</code> or <code>RollbackLogs</code>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="restore-flow">Restore Flow<a href="#restore-flow" class="hash-link" aria-label="Direct link to Restore Flow" title="Direct link to Restore Flow" translate="no">​</a></h2>
 <p>The WAL is the durable source of truth after a restart.</p>
 <p>During restore:</p>
 <ol>
-<li class="">Kommander reads retained logs for the partition2. proposed and rolled-back entries are ignored for application restore3. committed application entries are delivered through <code>OnLogRestored</code>4. system entries rebuild the partition map and membership state5. the partition becomes available for normal Raft operation.</li>
+<li class="">Kommander reads retained logs for the partition</li>
+<li class="">proposed and rolled-back entries are ignored for application restore</li>
+<li class="">committed application entries are delivered through <code>OnLogRestored</code></li>
+<li class="">system entries rebuild the partition map and membership state</li>
+<li class="">the partition becomes available for normal Raft operation.</li>
 </ol>
 <p>Your application should treat <code>OnLogRestored</code> as the path that rebuilds local state from committed history.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="system-partition">System Partition<a href="#system-partition" class="hash-link" aria-label="Direct link to System Partition" title="Direct link to System Partition" translate="no">​</a></h2>
 <p>Partition <code>0</code> is reserved for Kommander system state.</p>
 <p>It stores cluster-wide metadata such as:</p>
 <ul>
-<li class="">the partition map- dynamic membership roster- split and merge lifecycle records.</li>
+<li class="">the partition map</li>
+<li class="">dynamic membership roster</li>
+<li class="">split and merge lifecycle records.</li>
 </ul>
 <p>Application data must use user partitions <code>1</code> and above.</p>
 <p>The common rule is: anything that affects safety is committed through Raft. Partition ownership and cluster membership are not decided by local discovery snapshots or gossip.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="pluggable-layers">Pluggable Layers<a href="#pluggable-layers" class="hash-link" aria-label="Direct link to Pluggable Layers" title="Direct link to Pluggable Layers" translate="no">​</a></h2>
 <p>Kommander keeps three major layers pluggable:</p>
 <ul>
-<li class="">storage through <code>IWAL</code>- transport through <code>ICommunication</code>- bootstrap discovery through <code>IDiscovery</code>.</li>
+<li class="">storage through <code>IWAL</code></li>
+<li class="">transport through <code>ICommunication</code></li>
+<li class="">bootstrap discovery through <code>IDiscovery</code>.</li>
 </ul>
 <p>That lets the same Raft runtime run in production over durable WALs and network transports, or inside deterministic tests with in-memory adapters.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="related-reading">Related Reading<a href="#related-reading" class="hash-link" aria-label="Direct link to Related Reading" title="Direct link to Related Reading" translate="no">​</a></h2>
