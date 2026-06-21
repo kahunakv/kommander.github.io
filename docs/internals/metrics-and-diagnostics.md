@@ -2,14 +2,14 @@
 
 Kommander exposes runtime diagnostics through two main channels:
 
-- metrics from the `Kommander` .NET `Meter`,
+- metrics from the `Kommander` .NET `Meter`
 - structured logs from the Raft runtime.
 
 Together, they help answer practical questions such as:
 
-- why a proposal is slow,
-- whether a partition is overloaded,
-- whether scheduler fairness is holding under load,
+- why a proposal is slow
+- whether a partition is overloaded
+- whether scheduler fairness is holding under load
 - whether leadership churn is causing stale completions or elections.
 
 ## Meter Name
@@ -74,13 +74,16 @@ Histogram:
 
 - `raft.wal.batch_size`
 
-`raft.wal.batch_size` records how many WAL write operations were grouped into one storage flush.
+`raft.wal.batches_total` increments once per scheduler group write. A group write may span more than one partition.
+
+`raft.wal.batch_size` records the number of WAL write operations drained for each partition inside that group write. It is a per-partition batch-size distribution, not the number of partitions included in the group.
 
 This helps validate scheduler fairness and batching efficiency under load:
 
-- very small batches can mean poor batching opportunities or low traffic,
-- consistently large batches can mean good amortization,
+- very small batches can mean poor batching opportunities or low traffic
+- consistently large batches can mean good amortization
 - large batches paired with rising latency can mean the system is absorbing bursts but paying for them in per-flush delay.
+- increasing `raft.wal.operations_total` faster than `raft.wal.batches_total` usually means batching is reducing storage calls.
 
 ## Stale Completion Drops
 
@@ -90,8 +93,8 @@ Counter:
 
 This counts WAL completions that were discarded because they were stale, such as:
 
-- wrong partition,
-- wrong term,
+- wrong partition
+- wrong term
 - mismatched operation id.
 
 A sustained rise here usually points to leadership churn, delayed completions, or retries arriving after the partition has already moved on.
@@ -111,10 +114,28 @@ Histogram:
 
 This is the direct delay metric currently exported in the codebase. The current `KommanderMetrics` implementation does not expose a separate `heartbeat delay` histogram by name. Heartbeat behavior is instead observed through:
 
-- `raft.heartbeats_sent_total`,
-- `raft.election_delay_ms`,
-- slow-dispatch logs,
+- `raft.heartbeats_sent_total`
+- `raft.election_delay_ms`
+- slow-dispatch logs
 - proposal and append latency patterns.
+
+## Leader Balancing
+
+When automatic leader balancing is enabled, Kommander exports:
+
+Counters:
+
+- `raft.balancer.moves_total`, tagged with `outcome=planned`, `succeeded`, or `timed_out`
+- `raft.balancer.skipped_passes_total`
+
+Observable gauges:
+
+- `raft.balancer.count_imbalance`
+- `raft.balancer.load_imbalance`
+
+Planned moves followed by successful moves and falling imbalance gauges indicate normal convergence. Frequent timeouts can mean suggestions are rejected or `SuggestionTimeout` is too short for transfer and gossip propagation. Frequent skipped passes mean the system-partition leader is missing a fresh report from at least one live voter.
+
+The imbalance gauges are meaningful on the process hosting the system-partition leader. See [Automatic Leader Balancing](../operations/leader-balancing.md) for the full operational model.
 
 ## What The Logs Add
 
@@ -129,10 +150,10 @@ After the actor runtime removal, the state machine still runs behind the serial 
 
 Typical useful log patterns include:
 
-- slow dispatch warnings from the partition executor,
-- election start warnings that include time since last heartbeat,
-- stale WAL completion warnings,
-- WAL restore and proposal completion timing,
+- slow dispatch warnings from the partition executor
+- election start warnings that include time since last heartbeat
+- stale WAL completion warnings
+- WAL restore and proposal completion timing
 - WAL write timing logs in the storage path.
 
 ## How To Reason About Slow Operations
@@ -148,9 +169,9 @@ When an operation is slow, check the signals in this order:
 
 That usually lets you distinguish between:
 
-- client admission pressure,
-- WAL batching or storage pressure,
-- election churn,
+- client admission pressure
+- WAL batching or storage pressure
+- election churn
 - stale-completion cleanup after leadership changes.
 
 ## Validating Scheduler Fairness

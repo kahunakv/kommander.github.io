@@ -1,27 +1,27 @@
 # Deterministic Testing
 
-Recent Kommander additions significantly strengthened the non-production test toolchain.
+Kommander includes a non-production test toolchain for deterministic and timing-sensitive scenarios.
 
 ## Simulation Runtime
 
-The source tree now includes a deterministic simulation runtime with:
+The source tree includes a deterministic simulation runtime with:
 
-- seeded randomness,
-- replay logs,
-- virtual time,
+- seeded randomness
+- replay logs
+- virtual time
 - reproducible failure scenarios.
 
 This is useful when a timing-sensitive failure is hard to reproduce in ordinary multi-process tests.
 
-Recent timing changes also help reproducibility directly in the runtime:
+Several timing controls help reproducibility directly in the runtime:
 
-- `ElectionTimeoutSeed` can make partition election timeouts deterministic,
+- `ElectionTimeoutSeed` can make partition election timeouts deterministic
 - `WaitForLeaderStableAsync` lets tests wait for a leader that stays stable for a minimum duration.
 
-Recent election changes also added targeted pre-vote coverage:
+The election tests include targeted pre-vote coverage:
 
-- state-machine tests verify that pre-vote stays side-effect free until quorum is reached,
-- transport tests verify the `PreVote` RPC flag survives gRPC serialization,
+- state-machine tests verify that pre-vote stays side-effect free until quorum is reached
+- transport tests verify the `PreVote` RPC flag survives gRPC serialization
 - multi-node tests cover the stale follower rejoin case that pre-vote is meant to stabilize.
 
 ## Focused Test Areas

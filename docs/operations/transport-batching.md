@@ -1,14 +1,14 @@
 # Transport Batching
 
-Recent Kommander transport code relies more heavily on `BatchRequests`.
+Kommander transport code uses `BatchRequests` for grouped transport work.
 
 ## What Gets Batched
 
 Batched transport traffic includes:
 
-- append-log traffic,
-- append completions,
-- vote and handshake traffic,
+- append-log traffic
+- append completions
+- vote and handshake traffic
 - control-plane messages such as step-down notices and leadership-transfer requests.
 
 This reduces per-message overhead and gives transports one place to send mixed Raft traffic efficiently.
@@ -33,4 +33,4 @@ Current adapters use that contract in different ways:
 
 ## Operational Meaning
 
-You do not usually call `BatchRequests` directly from application code. It is part of the transport layer. The important operational change is that more internal Raft traffic now shares the same batching path, which reduces transport churn under load.
+You do not usually call `BatchRequests` directly from application code. It is part of the transport layer. Internal Raft traffic shares this batching path, which reduces transport churn under load.

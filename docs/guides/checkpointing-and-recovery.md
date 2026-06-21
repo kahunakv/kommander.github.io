@@ -16,23 +16,23 @@ That does **not** mean Kommander serializes your domain state for you. Your appl
 
 What Kommander provides is:
 
-- replicated checkpoint entries,
-- restore that starts from the latest committed checkpoint boundary in the WAL,
+- replicated checkpoint entries
+- restore that starts from the latest committed checkpoint boundary in the WAL
 - automatic compaction eligibility for older log history.
 
 ## When To Write A Checkpoint
 
 Good times to write a checkpoint:
 
-- after a meaningful batch of committed work,
-- after rebuilding or refreshing a derived local snapshot,
-- after a workflow phase where replaying older history is no longer useful,
+- after a meaningful batch of committed work
+- after rebuilding or refreshing a derived local snapshot
+- after a workflow phase where replaying older history is no longer useful
 - before expecting a partition to accumulate a large amount of additional traffic.
 
 Less useful patterns:
 
-- writing a checkpoint after every single command,
-- never writing checkpoints at all,
+- writing a checkpoint after every single command
+- never writing checkpoints at all
 - treating checkpoints as a replacement for application restore logic.
 
 If you never write checkpoints, compaction has little or nothing to reclaim.
@@ -41,9 +41,9 @@ If you never write checkpoints, compaction has little or nothing to reclaim.
 
 The usual sequence is:
 
-1. replicate normal application entries,
-2. apply them through your state machine,
-3. periodically replicate a checkpoint,
+1. replicate normal application entries
+2. apply them through your state machine
+3. periodically replicate a checkpoint
 4. let automatic compaction remove older WAL history over time.
 
 Example:
@@ -73,8 +73,8 @@ On restore, Kommander replays the WAL from the latest committed checkpoint bound
 
 From the application's point of view, the important implication is simple:
 
-- newer checkpoints reduce how much history may need to be replayed,
-- older history may disappear after compaction,
+- newer checkpoints reduce how much history may need to be replayed
+- older history may disappear after compaction
 - your restore code must still be correct from the retained checkpoint boundary onward.
 
 If you need deterministic rebuild behavior, keep your restore path compatible with starting from the newest retained checkpoint and replaying the remaining committed entries.
@@ -91,8 +91,8 @@ The main settings are:
 
 When compaction runs, Kommander:
 
-1. finds the last committed checkpoint for the partition,
-2. removes entries older than that checkpoint in batches,
+1. finds the last committed checkpoint for the partition
+2. removes entries older than that checkpoint in batches
 3. stops when there is no more eligible work or the pass limit is reached.
 
 This means checkpoints influence **how much** old WAL can be removed, while the compaction settings influence **how fast** that removal happens.
@@ -101,16 +101,16 @@ This means checkpoints influence **how much** old WAL can be removed, while the 
 
 For most applications, start with this approach:
 
-- write normal commands freely,
-- add checkpoints at stable milestones rather than every write,
-- observe WAL growth and restore time,
+- write normal commands freely
+- add checkpoints at stable milestones rather than every write
+- observe WAL growth and restore time
 - increase checkpoint frequency only if replay or storage growth becomes a problem.
 
 Examples of stable milestones:
 
-- every few hundred or few thousand applied operations,
-- after closing an accounting period,
-- after finishing a tenant import,
+- every few hundred or few thousand applied operations
+- after closing an accounting period
+- after finishing a tenant import
 - after completing a durable workflow stage.
 
 ## What Your Application Still Owns
@@ -119,9 +119,9 @@ Kommander does not automatically create a business snapshot file or serialize yo
 
 Your application still decides:
 
-- what state is reconstructed during `OnLogRestored`,
-- whether you maintain your own local snapshot representation,
-- when a checkpoint is meaningful for your domain,
+- what state is reconstructed during `OnLogRestored`
+- whether you maintain your own local snapshot representation
+- when a checkpoint is meaningful for your domain
 - whether restore time or WAL growth is acceptable.
 
 ## Related Reading

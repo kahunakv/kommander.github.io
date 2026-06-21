@@ -16,6 +16,22 @@ IWAL sqlite = new SqliteWAL("./data", "node-1", logger);
 IWAL memory = new InMemoryWAL(logger);
 ```
 
+`SqliteWAL` uses a fixed pool of SQLite shard databases. Partitions map to shards with `partitionId mod shardCount`, so `FairWalScheduler` group batches can be committed as one transaction per shard instead of one transaction per partition.
+
+You can choose the shard count for a fresh WAL directory:
+
+```csharp
+IWAL sqlite = new SqliteWAL(
+    path: "./data",
+    revision: "node-1",
+    logger: logger,
+    syncWrites: true,
+    shardCount: 4
+);
+```
+
+Use fewer shards when write batching and fsync reduction matter most. Use more shards when independent SQLite shard concurrency matters more. The shard count is persisted the first time the directory is initialized; changing it later would remap partitions, so reopening an existing directory with a different non-zero shard count fails fast.
+
 Both durable adapters also support `syncWrites: false` for benchmarks and some CI scenarios:
 
 ```csharp
@@ -61,41 +77,38 @@ The counting methods are useful for tests, diagnostics, and compaction visibilit
 | `RestCommunication` | Networked clusters using REST/JSON endpoints. |
 | `InMemoryCommunication` | Unit tests and in-process simulations. |
 
-Recent versions batch outbound Raft transport messages through `BatchRequests`. That includes append traffic and control traffic such as step-down notices and leadership-transfer requests.
+Outbound Raft transport messages can be batched through `BatchRequests`. That includes append traffic and control traffic such as step-down notices and leadership-transfer requests.
 
 Custom transports implement `ICommunication`.
 
-```csharp
-public interface ICommunication
-{
-    Task<HandshakeResponse> Handshake(RaftManager manager, RaftNode node, HandshakeRequest request);
-    Task<RequestVotesResponse> RequestVotes(RaftManager manager, RaftNode node, RequestVotesRequest request);
-    Task<VoteResponse> Vote(RaftManager manager, RaftNode node, VoteRequest request);
-    Task<AppendLogsResponse> AppendLogs(RaftManager manager, RaftNode node, AppendLogsRequest request);
-    Task<CompleteAppendLogsResponse> CompleteAppendLogs(RaftManager manager, RaftNode node, CompleteAppendLogsRequest request);
-    Task<BatchRequestsResponse> BatchRequests(RaftManager manager, RaftNode node, BatchRequestsRequest request);
-}
-```
+At minimum, production transports should cover:
+
+- core Raft RPCs: `Handshake`, `RequestVotes`, `Vote`, `AppendLogs`, `CompleteAppendLogs`, `BatchRequests`
+- dynamic membership RPCs: `SendJoin`, `SendLeave`
+- SWIM liveness RPCs: `SendPing`, `SendPingReq`
+- learner and backfill support: `GetRemoteFollowerLag`, `SendInstallSnapshot`
+- optional membership anti-entropy: `SendGossip`
+- join failure notification: `NotifyJoinBlocked`.
+
+Some methods have default no-op or failure-returning implementations, but relying on those defaults disables the corresponding runtime behavior.
 
 ### Dynamic Membership Support
 
-Current dynamic membership support is not identical across transports.
-
 Practical state today:
 
-- membership roster commits and join flow work on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`,
-- graceful leave RPCs are wired on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`,
-- cross-partition remote lag lookup for learner promotion is wired on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`,
-- gossip anti-entropy is currently only wired on `InMemoryCommunication`,
-- SWIM ping probing is currently only wired on `InMemoryCommunication`.
+- membership roster commits and join flow work on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`
+- graceful leave RPCs are wired on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`
+- cross-partition remote lag lookup for learner promotion is wired on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`
+- SWIM direct and indirect ping probing is wired on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`
+- gossip anti-entropy and leader-balancer load reports are wired on `InMemoryCommunication`, `GrpcCommunication`, and `RestCommunication`.
 
 That means:
 
-- gRPC and REST can still run membership commits and joins through Raft replication,
-- gRPC and REST can use graceful leave through their transport RPCs,
-- gRPC and REST can use remote follower lag lookups for learner promotion,
-- gRPC and REST should keep `PingInterval = 0`,
-- gossip and SWIM behavior are still more limited than in-process transport.
+- gRPC and REST can still run membership commits and joins through Raft replication
+- gRPC and REST can use graceful leave through their transport RPCs
+- gRPC and REST can use remote follower lag lookups for learner promotion
+- gRPC and REST can use SWIM probing and partition quiescence
+- gRPC and REST can exchange membership gossip and leader-balancer load reports.
 
 ## Discovery Adapters
 

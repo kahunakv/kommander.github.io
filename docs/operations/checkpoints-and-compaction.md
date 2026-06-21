@@ -1,6 +1,6 @@
 # Checkpoints And Compaction
 
-Checkpoint replication is now part of the main application-facing flow.
+Checkpoint replication is part of the main application-facing flow.
 
 ## Replicating A Checkpoint
 
@@ -27,7 +27,7 @@ Think of a checkpoint as a marker that says: the application has a stable point 
 
 ## Automatic Compaction
 
-Recent Kommander versions can trigger automatic WAL compaction per partition after a configured number of committed operations.
+Kommander can trigger automatic WAL compaction per partition after a configured number of committed operations.
 
 The relevant settings are:
 
@@ -37,8 +37,8 @@ The relevant settings are:
 
 The compaction pass:
 
-1. reads the last committed checkpoint,
-2. asks the WAL adapter to remove entries older than that checkpoint,
+1. reads the last committed checkpoint
+2. asks the WAL adapter to remove entries older than that checkpoint
 3. repeats in batches until there is no more eligible work or the configured pass limit is reached.
 
 This keeps one compaction trigger from monopolizing the partition indefinitely.

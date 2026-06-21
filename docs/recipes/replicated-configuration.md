@@ -8,10 +8,10 @@ In this recipe, configuration is not edited independently on every node. Instead
 
 Service replicas often need a consistent view of runtime settings:
 
-- feature flags,
-- routing weights,
-- throttling limits,
-- cluster-local service metadata,
+- feature flags
+- routing weights
+- throttling limits
+- cluster-local service metadata
 - maintenance-mode switches.
 
 If every node updates independently, requests can see inconsistent behavior.

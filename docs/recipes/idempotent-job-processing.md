@@ -8,8 +8,8 @@ In this recipe, Kommander is the shared memory of the job lifecycle. It does not
 
 Distributed workers can crash at awkward times:
 
-- after claiming a job but before persisting ownership,
-- after calling an external API but before marking the job complete,
+- after claiming a job but before persisting ownership
+- after calling an external API but before marking the job complete
 - after timing out while another node takes over.
 
 Without a replicated decision log, nodes may disagree about whether a job is pending, running, completed, or failed.

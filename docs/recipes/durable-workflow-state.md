@@ -8,10 +8,10 @@ In this recipe, a workflow is a sequence of named states such as `Created`, `Pay
 
 Long-running workflows often span multiple process lifetimes:
 
-- order fulfillment,
-- billing retries,
-- deployment rollouts,
-- approval flows,
+- order fulfillment
+- billing retries
+- deployment rollouts
+- approval flows
 - data import pipelines.
 
 If workflow state lives only in memory, a crash loses progress. If several nodes update the same workflow independently, they can make conflicting decisions.

@@ -4,9 +4,9 @@ Kommander can change the user partition layout at runtime.
 
 That means an application can:
 
-- create a new partition,
-- split a hot partition into two,
-- merge lightly loaded partitions,
+- create a new partition
+- split a hot partition into two
+- merge lightly loaded partitions
 - remove a partition that is no longer needed.
 
 This page documents the user-facing APIs and the application behavior you need to plan for.
@@ -24,9 +24,9 @@ Elastic partitions are useful when the right partition count is not known up fro
 
 Typical cases:
 
-- one tenant or key range becomes much hotter than the others,
-- a new workload segment should be isolated in its own partition,
-- two partitions are mostly idle and can be merged,
+- one tenant or key range becomes much hotter than the others
+- a new workload segment should be isolated in its own partition
+- two partitions are mostly idle and can be merged
 - an unrouted, application-managed partition is no longer needed.
 
 ## Routing Modes
@@ -96,8 +96,8 @@ RaftPartitionLifecycleResult created = await raft.CreatePartitionAsync(
 
 Important behavior:
 
-- leader-only,
-- idempotent when the partition already exists in `Active` state,
+- leader-only
+- idempotent when the partition already exists in `Active` state
 - rejects overlapping `HashRange` ranges.
 
 ### Remove a Partition
@@ -111,9 +111,9 @@ RaftPartitionLifecycleResult removed = await raft.RemovePartitionAsync(
 
 Important behavior:
 
-- leader-only,
-- idempotent when the partition is already `Removed`,
-- re-attempts WAL reclamation on repeated removal calls,
+- leader-only
+- idempotent when the partition is already `Removed`
+- re-attempts WAL reclamation on repeated removal calls
 - rejects removal while the partition is mid-split or mid-merge.
 
 ### Split a Partition
@@ -133,14 +133,14 @@ RaftPartitionLifecycleResult split = await raft.SplitPartitionAsync(
 
 Key points:
 
-- leader-only,
-- `targetPartitionId = 0` means auto-assign the next available id,
-- `HashBoundary = null` means split at the midpoint,
+- leader-only
+- `targetPartitionId = 0` means auto-assign the next available id
+- `HashBoundary = null` means split at the midpoint
 - the new partition inherits or uses the requested routing mode.
 
 For `HashRange` partitions:
 
-- the source becomes the left half,
+- the source becomes the left half
 - the target becomes the right half.
 
 ### Merge Partitions
@@ -160,10 +160,10 @@ RaftPartitionLifecycleResult merged = await raft.MergePartitionsAsync(
 
 Key points:
 
-- the caller must be leader of both partitions,
-- the partitions must both be `Active`,
-- for `HashRange`, they must be adjacent,
-- the source is drained and removed,
+- the caller must be leader of both partitions
+- the partitions must both be `Active`
+- for `HashRange`, they must be adjacent
+- the source is drained and removed
 - the survivor absorbs the source's range.
 
 ## Return Type
@@ -181,8 +181,8 @@ public sealed class RaftPartitionLifecycleResult
 
 In practice:
 
-- `Success` tells you whether the operation finished successfully,
-- `Status` explains the failure or success condition,
+- `Success` tells you whether the operation finished successfully
+- `Status` explains the failure or success condition
 - `Generation` is the committed generation of the partition entry after the change.
 
 ## Reading the Partition Map
@@ -225,10 +225,10 @@ raft.OnPartitionMapChanged += ranges =>
 
 This fires every time a new partition map is applied, including:
 
-- startup restore,
-- system configuration replication,
-- split phase transitions,
-- merge phase transitions,
+- startup restore
+- system configuration replication
+- split phase transitions
+- merge phase transitions
 - create and remove operations.
 
 Use it when your application needs to refresh routing caches, rebalance local workers, or update operational views of the current partition layout.
@@ -261,8 +261,8 @@ That protects callers that cached an old partition id before a split or merge co
 
 The application response should be:
 
-1. refresh the partition map or generation,
-2. re-route the key,
+1. refresh the partition map or generation
+2. re-route the key
 3. retry against the current owner.
 
 ## State Transfer During Split
@@ -279,8 +279,8 @@ through `IRaftStateMachineTransfer`.
 
 If registered, the coordinator can:
 
-1. export a source range snapshot,
-2. import it into the target partition,
+1. export a source range snapshot
+2. import it into the target partition
 3. replicate a checkpoint into the target partition.
 
 If no transfer implementation is registered, the coordinator falls back to log-shipping behavior, and your application is responsible for moving state before phase 2 completes.
@@ -289,10 +289,10 @@ If no transfer implementation is registered, the coordinator falls back to log-s
 
 Elastic partitions change Kommander's partition map and WAL ownership boundaries. Your application still owns:
 
-- how state is moved during split,
-- whether direct partition ids or routed keys are used,
-- how local caches are refreshed,
-- how to retry after `PartitionMoved`,
+- how state is moved during split
+- whether direct partition ids or routed keys are used
+- how local caches are refreshed
+- how to retry after `PartitionMoved`
 - any external indexes or projections that must follow the new partition layout.
 
 ## Practical Rules

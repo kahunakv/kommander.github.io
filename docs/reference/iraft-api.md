@@ -21,7 +21,7 @@ The transport entry points are intended for communication adapters and HTTP/gRPC
 
 ## Lifecycle Notes
 
-`JoinCluster` now accepts an optional cancellation token:
+`JoinCluster` accepts an optional cancellation token:
 
 ```csharp
 using CancellationTokenSource joinTimeout = new(TimeSpan.FromSeconds(30));
@@ -141,7 +141,7 @@ string stableLeader = await raft.WaitForLeaderStableAsync(
 
 ## Test Hooks
 
-Recent Kommander builds expose several advanced members on `IRaft` marked with `EditorBrowsable(EditorBrowsableState.Never)`:
+`IRaft` exposes several advanced members marked with `EditorBrowsable(EditorBrowsableState.Never)`:
 
 - `ForceLeaderForTestingAsync`
 - `StepDownAsync`
@@ -198,7 +198,7 @@ See [Elastic Partitions](../guides/elastic-partitions.md) for the full behavior 
 
 ## Replication Signature Note
 
-`ReplicateLogs` now takes `expectedGeneration` before `cancellationToken` in the optional-parameter list.
+`ReplicateLogs` takes `expectedGeneration` before `cancellationToken` in the optional-parameter list.
 
 That makes named arguments the safest style for most callers:
 

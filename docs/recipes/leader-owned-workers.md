@@ -8,9 +8,9 @@ In this recipe, a "coordinator" is a loop that decides what should happen next. 
 
 Many systems need background workers that should not run everywhere at once:
 
-- polling an external API for one customer,
-- assigning queue partitions,
-- scheduling jobs for a tenant,
+- polling an external API for one customer
+- assigning queue partitions
+- scheduling jobs for a tenant
 - refreshing derived data for a resource group.
 
 Running the worker on every node can duplicate work. Running it on one fixed node creates a single point of failure.

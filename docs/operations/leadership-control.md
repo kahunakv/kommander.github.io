@@ -1,6 +1,6 @@
 # Leadership Control
 
-Recent Kommander builds added more leadership-control support in the runtime and tests.
+Kommander includes leadership-control support in the runtime and tests.
 
 ## Stable Leader Waiting
 

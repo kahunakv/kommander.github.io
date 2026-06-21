@@ -24,11 +24,11 @@ Kommander is also partitioned: each user partition is its own Raft group with it
 
 When a node starts:
 
-1. the application constructs a `RaftManager`,
-2. `JoinCluster` starts discovery, transport, schedulers, and partitions,
-3. each partition restores its WAL,
-4. committed entries are replayed through `OnLogRestored`,
-5. timers begin,
+1. the application constructs a `RaftManager`
+2. `JoinCluster` starts discovery, transport, schedulers, and partitions
+3. each partition restores its WAL
+4. committed entries are replayed through `OnLogRestored`
+5. timers begin
 6. leaders are elected per partition.
 
 When dynamic membership is used, a new node joins as a learner first. It catches up before it is promoted to voter, so the existing quorum is not weakened during catch-up.
@@ -37,11 +37,11 @@ When dynamic membership is used, a new node joins as a learner first. It catches
 
 For a normal `ReplicateLogs` call:
 
-1. the application calls the leader for the target partition,
-2. the leader assigns the next log index and current term,
-3. the leader writes the proposed entry to its own WAL,
-4. followers receive `AppendLogs` and write the entry to their WALs,
-5. the leader commits after quorum acknowledgement,
+1. the application calls the leader for the target partition
+2. the leader assigns the next log index and current term
+3. the leader writes the proposed entry to its own WAL
+4. followers receive `AppendLogs` and write the entry to their WALs
+5. the leader commits after quorum acknowledgement
 6. committed entries are delivered to `OnReplicationReceived`.
 
 With `autoCommit: true`, the leader commits as soon as quorum is reached. With `autoCommit: false`, the caller uses the returned proposal ticket with `CommitLogs` or `RollbackLogs`.
@@ -52,10 +52,10 @@ The WAL is the durable source of truth after a restart.
 
 During restore:
 
-1. Kommander reads retained logs for the partition,
-2. proposed and rolled-back entries are ignored for application restore,
-3. committed application entries are delivered through `OnLogRestored`,
-4. system entries rebuild the partition map and membership state,
+1. Kommander reads retained logs for the partition
+2. proposed and rolled-back entries are ignored for application restore
+3. committed application entries are delivered through `OnLogRestored`
+4. system entries rebuild the partition map and membership state
 5. the partition becomes available for normal Raft operation.
 
 Your application should treat `OnLogRestored` as the path that rebuilds local state from committed history.
@@ -66,8 +66,8 @@ Partition `0` is reserved for Kommander system state.
 
 It stores cluster-wide metadata such as:
 
-- the partition map,
-- dynamic membership roster,
+- the partition map
+- dynamic membership roster
 - split and merge lifecycle records.
 
 Application data must use user partitions `1` and above.
@@ -78,8 +78,8 @@ The common rule is: anything that affects safety is committed through Raft. Part
 
 Kommander keeps three major layers pluggable:
 
-- storage through `IWAL`,
-- transport through `ICommunication`,
+- storage through `IWAL`
+- transport through `ICommunication`
 - bootstrap discovery through `IDiscovery`.
 
 That lets the same Raft runtime run in production over durable WALs and network transports, or inside deterministic tests with in-memory adapters.
@@ -91,3 +91,4 @@ That lets the same Raft runtime run in production over durable WALs and network 
 - [Dynamic Cluster Membership](../guides/dynamic-cluster-membership.md)
 - [Elastic Partitions](../guides/elastic-partitions.md)
 - [Log Backfill And Catch-Up](../guides/log-backfill-and-catch-up.md)
+- [Partition Quiescence](../guides/partition-quiescence.md)

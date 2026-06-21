@@ -12,10 +12,10 @@ If the leader has committed entries `1..10` and a follower only has `1..3`, the 
 
 Backfill fills the missing range in bounded chunks:
 
-1. the leader detects that a follower is behind,
-2. it reads a slice of missing committed entries from its WAL,
-3. it sends that slice with a log-matching anchor,
-4. the follower accepts only if the anchor matches,
+1. the leader detects that a follower is behind
+2. it reads a slice of missing committed entries from its WAL
+3. it sends that slice with a log-matching anchor
+4. the follower accepts only if the anchor matches
 5. the process repeats until the follower is close enough for normal live replication.
 
 ## Live Replication vs Backfill
@@ -56,8 +56,8 @@ long? lag = await raft.GetFollowerLagAsync(
 
 A backfill batch carries:
 
-- `PrevLogIndex`,
-- `PrevLogTerm`,
+- `PrevLogIndex`
+- `PrevLogTerm`
 - the missing committed entries after that index.
 
 The follower checks:
@@ -99,8 +99,8 @@ This matters for dynamic membership: a brand-new learner joining a heavily compa
 
 Compaction settings also affect catch-up indirectly:
 
-- `CompactEveryOperations`,
-- `CompactNumberEntries`,
+- `CompactEveryOperations`
+- `CompactNumberEntries`
 - `MaxEntriesPerCompaction`.
 
 More aggressive compaction can make `SnapshotRequired` more likely for far-behind followers.

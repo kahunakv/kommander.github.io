@@ -10,9 +10,9 @@ A partitioned system usually scales well until one partition becomes disproporti
 
 Typical signs:
 
-- one tenant receives far more traffic than the others,
-- one partition leader has much higher latency,
-- queue depth grows mainly on one partition,
+- one tenant receives far more traffic than the others
+- one partition leader has much higher latency
+- queue depth grows mainly on one partition
 - one key range causes repeated backpressure while other partitions stay idle.
 
 At that point, simply adding more nodes may not help enough if the hot range still routes to one partition.
@@ -21,9 +21,9 @@ At that point, simply adding more nodes may not help enough if the hot range sti
 
 Use this pattern when:
 
-- workload is skewed, not uniform,
-- the hot data can be divided into smaller key ranges,
-- your application already routes by stable keys,
+- workload is skewed, not uniform
+- the hot data can be divided into smaller key ranges
+- your application already routes by stable keys
 - callers can refresh routing when the partition map changes.
 
 ## Kommander Pattern
@@ -49,9 +49,9 @@ Passing `targetPartitionId: 0` tells Kommander to assign a new user partition id
 
 Once the split finishes, your application should:
 
-1. refresh the partition map,
-2. update any cached routing decisions,
-3. retry stale writes that fail with `PartitionMoved`,
+1. refresh the partition map
+2. update any cached routing decisions
+3. retry stale writes that fail with `PartitionMoved`
 4. move or rebuild local state for the new partition if needed.
 
 ```csharp
@@ -67,9 +67,9 @@ If your state machine keeps partition-local data, register a state transfer impl
 
 Kommander changes the replicated partition map. Your application still owns:
 
-- the decision that a partition is hot enough to split,
-- the routing cache refresh,
-- any state transfer needed for the new partition,
+- the decision that a partition is hot enough to split
+- the routing cache refresh
+- any state transfer needed for the new partition
 - client retry behavior when stale generation information is rejected.
 
 ## Notes

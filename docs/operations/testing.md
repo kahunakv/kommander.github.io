@@ -26,7 +26,7 @@ dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~K
 
 For fast local simulations, use `InMemoryWAL` with `InMemoryCommunication`.
 
-Recent test additions are worth knowing about:
+The test suite includes several areas worth knowing about:
 
 - `Kommander.Tests.Simulation`: deterministic simulation runtime with seeded randomness, replay logs, virtual time, and reproducible failure scenarios.
 - `Kommander.Tests.Scheduler`: focused tests for partition executors, fair read/write schedulers, timer behavior, transport batching, and the system coordinator.

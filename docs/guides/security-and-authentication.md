@@ -53,12 +53,12 @@ That is convenient for local development and in-memory testing, but it is not ap
 
 In this mode, Kommander signs node-to-node requests using a cluster secret and validates:
 
-- the signature,
-- the sender node id,
-- the timestamp,
-- the nonce,
-- the allowed clock skew,
-- replay protection,
+- the signature
+- the sender node id
+- the timestamp
+- the nonce
+- the allowed clock skew
+- replay protection
 - and, when configured, the presence of TLS.
 
 This is the practical production-ready authentication mode in the current codebase.
@@ -73,11 +73,11 @@ That means the docs should treat `MutualTls` as declared API surface, not as a w
 
 ## Legacy Bearer Token Compatibility
 
-`HttpAuthBearerToken` still exists on `RaftConfiguration`, but it is now a legacy compatibility setting.
+`HttpAuthBearerToken` still exists on `RaftConfiguration`, but it is a legacy compatibility setting.
 
 Internally, `GetEffectiveTransportSecurity()` falls back to `HttpAuthBearerToken` when:
 
-- `TransportSecurity.SharedSecret` is empty,
+- `TransportSecurity.SharedSecret` is empty
 - and `HttpAuthBearerToken` is set.
 
 That fallback is there to preserve older REST-based configurations. New configurations should prefer `TransportSecurity.SharedSecret`.
@@ -86,11 +86,11 @@ That fallback is there to preserve older REST-based configurations. New configur
 
 For authenticated network requests, Kommander signs and validates fields that include:
 
-- HTTP method or gRPC method,
-- request path or RPC name,
-- sender node,
-- timestamp,
-- nonce,
+- HTTP method or gRPC method
+- request path or RPC name
+- sender node
+- timestamp
+- nonce
 - request body bytes for REST.
 
 Validation can fail with statuses such as:
@@ -104,10 +104,10 @@ Validation can fail with statuses such as:
 
 This gives the runtime basic protection against:
 
-- unsigned requests,
-- forged signatures,
-- badly formed authentication data,
-- clock-skewed requests,
+- unsigned requests
+- forged signatures
+- badly formed authentication data
+- clock-skewed requests
 - and replayed requests.
 
 ## TLS Requirements
@@ -132,7 +132,7 @@ That is useful for self-signed development certificates, but it should not be en
 
 This is applied when shared gRPC channels are created.
 
-`TrustedClientCertificateThumbprints` exists in the configuration object as an allow-list for trusted client certificates, but the current codebase does not yet provide a complete mutual-TLS implementation around it. Treat it as future-facing configuration surface for now.
+`TrustedClientCertificateThumbprints` exists in the configuration object as an allow-list for trusted client certificates, but the implementation does not provide complete mutual-TLS support around it. Treat it as reserved configuration surface.
 
 ## REST Authentication Flow
 
@@ -140,10 +140,10 @@ For REST, `MapRestRaftRoutes()` installs middleware that authenticates `/v1/raft
 
 When authentication is enabled:
 
-- the request body is buffered,
-- the configured signature header is read,
-- sender node, timestamp, and nonce headers are read,
-- the request is validated by `RaftTransportAuthenticator`,
+- the request body is buffered
+- the configured signature header is read
+- sender node, timestamp, and nonce headers are read
+- the request is validated by `RaftTransportAuthenticator`
 - unauthenticated requests return `401 Unauthorized`.
 
 This means REST authentication is enforced at the hosting layer, not manually inside each endpoint handler.
@@ -154,9 +154,9 @@ For gRPC, `RaftService` calls `ValidateAuth()` at the beginning of each RPC hand
 
 When authentication is enabled:
 
-- metadata is read from the request,
-- the current transport security settings are resolved,
-- the request is validated by `RaftTransportAuthenticator`,
+- metadata is read from the request
+- the current transport security settings are resolved
+- the request is validated by `RaftTransportAuthenticator`
 - failed authentication raises `RpcException` with `StatusCode.Unauthenticated`.
 
 On the client side, gRPC request metadata is also signed when the mode is `SharedSecret`.

@@ -18,7 +18,7 @@ Without a consensus protocol, two nodes can both believe they are allowed to mak
 
 Followers monitor leader heartbeats. When a heartbeat is not received within the configured election window, a follower does not jump straight into a real election anymore.
 
-Current Kommander builds first run a pre-vote round. In that round, the follower asks peers whether they would support an election for `currentTerm + 1` without actually incrementing the term or recording a real vote yet. Only if that pre-vote reaches quorum does the node become a candidate, increment the term, and request real votes.
+Kommander first runs a pre-vote round. In that round, the follower asks peers whether they would support an election for `currentTerm + 1` without actually incrementing the term or recording a real vote yet. Only if that pre-vote reaches quorum does the node become a candidate, increment the term, and request real votes.
 
 This reduces disruption from stale or partitioned nodes. A node that is isolated, behind on logs, or cut off from quorum can fail pre-vote without forcing the rest of the cluster into unnecessary term churn.
 
@@ -31,6 +31,10 @@ The partition leader accepts proposals, assigns log indexes, writes the proposal
 The log index is the committed position of an entry in the partition's ordered history. If two nodes have committed entry `25`, they should agree on the earlier committed entries that led there.
 
 Followers that fall behind are repaired through bounded log backfill. The live replication path handles followers that are keeping up; the backfill path sends missing committed entries with a log-matching anchor so a follower cannot grow gaps or keep a divergent uncommitted tail. See [Log Backfill And Catch-Up](../guides/log-backfill-and-catch-up.md).
+
+## Idle Partitions
+
+When partition quiescence is enabled, an idle partition can stop sending per-partition heartbeats after `QuiesceAfter`. The leader sends a quiesce marker, followers stay quiet while SWIM reports the leader node as alive, and any real write wakes the partition. See [Partition Quiescence](../guides/partition-quiescence.md).
 
 ## State Machine Integration
 

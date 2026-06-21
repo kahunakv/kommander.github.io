@@ -36,21 +36,21 @@ If an election fails to find quorum, Kommander increases the timeout using:
 
 ## PreVote Phase
 
-Recent Kommander builds implement the Raft pre-vote pattern from section 9.6 of the Raft paper.
+Kommander implements the Raft pre-vote pattern from section 9.6 of the Raft paper.
 
 Before a follower increments its term or becomes a candidate, it first runs a side-effect-free pre-vote round for `currentTerm + 1`.
 
 During this phase the follower:
 
-1. stays a follower,
-2. does not bump `currentTerm`,
-3. does not record a real vote,
+1. stays a follower
+2. does not bump `currentTerm`
+3. does not record a real vote
 4. asks peers whether they would vote for it if a real election started.
 
 Peers only grant a pre-vote when:
 
-- they do not consider a current leader fresh,
-- the proposed term is not stale,
+- they do not consider a current leader fresh
+- the proposed term is not stale
 - the candidate's log is at least as up to date as their own.
 
 Pre-vote requests and replies carry a `PreVote` flag on the vote RPCs so the transport can distinguish probes from real elections.
@@ -63,10 +63,10 @@ Before becoming a candidate, a node checks whether it appears outdated compared 
 
 When a follower reaches pre-vote quorum, Kommander promotes it into a real election. At that point it:
 
-1. it clears the known leader,
-2. increments the term,
-3. votes for itself,
-4. asks peers for votes,
+1. it clears the known leader
+2. increments the term
+3. votes for itself
+4. asks peers for votes
 5. waits for `VotingTimeout`.
 
 If pre-vote does not reach quorum, the node remains a follower and no real election state is mutated.
@@ -87,4 +87,4 @@ One concrete case is a follower that becomes isolated while the other two nodes 
 
 Leaders throttle repeated heartbeats with the `RecentHeartbeat` window.
 
-Recent Kommander builds scope that throttle key by both node and partition. That matters because one node can host many partitions at once. If throttling were keyed only by node, one active partition could suppress heartbeats for every other partition on the same follower and trigger avoidable elections.
+Kommander scopes that throttle key by both node and partition. That matters because one node can host many partitions at once. If throttling were keyed only by node, one active partition could suppress heartbeats for every other partition on the same follower and trigger avoidable elections.

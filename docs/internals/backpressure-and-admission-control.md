@@ -10,8 +10,8 @@ Without admission control, a leader could keep accepting more client proposals t
 
 Kommander addresses that in three places:
 
-1. the partition executor admission gate for client proposals,
-2. the WAL write scheduler queue limits,
+1. the partition executor admission gate for client proposals
+2. the WAL write scheduler queue limits
 3. the read scheduler queue limits.
 
 ## Layer 1: Client Proposal Admission
@@ -20,9 +20,9 @@ The first gate is inside `RaftPartitionExecutor`.
 
 Each partition executor has four work classes:
 
-- control,
-- replication,
-- client,
+- control
+- replication
+- client
 - maintenance.
 
 Only the client queue is admission-limited. Control, replication, and maintenance work remain structurally separate so client traffic cannot starve Raft protocol traffic.
@@ -52,14 +52,16 @@ Relevant configuration:
 - `MaxWalQueueDepthPerPartition`
 - `MaxGlobalWalQueueDepth`
 - `MaxWalBatchSize`
+- `MaxWalGroupBatchPartitions`
 
 `FairWalScheduler` enforces:
 
-- a per-partition pending-write depth limit,
-- an optional global pending-write depth limit across all partitions,
-- FIFO write order within each partition,
-- fair rotation across active partitions,
-- batching of compatible writes up to `MaxWalBatchSize`.
+- a per-partition pending-write depth limit
+- an optional global pending-write depth limit across all partitions
+- FIFO write order within each partition
+- fair rotation across active partitions
+- batching of compatible writes up to `MaxWalBatchSize` per partition
+- cross-partition group commits across up to `MaxWalGroupBatchPartitions` ready partitions.
 
 If the scheduler cannot accept more write work, it throws `BackpressureExceededException`.
 
@@ -83,12 +85,12 @@ Admission control works together with weighted draining in `RaftPartitionExecuto
 
 The executor drains work in this priority order:
 
-1. control,
-2. replication,
-3. client,
+1. control
+2. replication
+3. client
 4. maintenance.
 
-Recent configuration fields let you tune how many operations each class drains per wake cycle:
+Configuration fields let you tune how many operations each class drains per wake cycle:
 
 - `MaxDrainQuantumControl`
 - `MaxDrainQuantumReplication`
@@ -99,8 +101,8 @@ These settings do not replace admission control. They control how accepted work 
 
 In practice:
 
-- higher control and replication quanta help heartbeats and append processing stay ahead of client floods,
-- a lower client quantum helps prevent proposal bursts from delaying follower catch-up,
+- higher control and replication quanta help heartbeats and append processing stay ahead of client floods
+- a lower client quantum helps prevent proposal bursts from delaying follower catch-up
 - maintenance stays lowest priority so normal consensus traffic keeps moving.
 
 ## Typical Flow Under Load

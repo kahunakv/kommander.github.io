@@ -10,18 +10,18 @@ After a scale event, promotion, migration, or temporary traffic spike, a cluster
 
 That usually means:
 
-- extra leaders to monitor,
-- more partition-local workers or caches,
-- more routing entries than the workload justifies,
+- extra leaders to monitor
+- more partition-local workers or caches
+- more routing entries than the workload justifies
 - more operational noise than necessary.
 
 ## When This Is a Good Fit
 
 Use this pattern when:
 
-- adjacent hash-range partitions are both quiet,
-- a previous split is no longer justified,
-- fewer active leaders would simplify operations,
+- adjacent hash-range partitions are both quiet
+- a previous split is no longer justified
+- fewer active leaders would simplify operations
 - the application can consolidate work under one survivor partition.
 
 ## Kommander Pattern
@@ -47,9 +47,9 @@ The source partition is drained and removed. The survivor remains the active par
 
 After the merge:
 
-1. refresh the partition map,
-2. stop routing new requests to the removed source partition,
-3. retry stale requests that return `PartitionMoved`,
+1. refresh the partition map
+2. stop routing new requests to the removed source partition
+3. retry stale requests that return `PartitionMoved`
 4. consolidate local state under the survivor partition.
 
 ```csharp
@@ -66,9 +66,9 @@ If the application keeps per-partition projections or workers, this is the point
 
 Kommander coordinates the replicated merge. Your application still owns:
 
-- deciding that the partitions are quiet enough to merge,
-- ensuring the right node initiates the merge,
-- tearing down source-partition local workers,
+- deciding that the partitions are quiet enough to merge
+- ensuring the right node initiates the merge
+- tearing down source-partition local workers
 - consolidating application state and read models.
 
 ## Notes

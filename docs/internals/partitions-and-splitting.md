@@ -12,7 +12,7 @@ When user partitions are initialized, `RaftSystemCoordinator` divides the positi
 
 Application routing uses:
 
-- `GetPartitionKey`, which hashes the prefix before the last `/`,
+- `GetPartitionKey`, which hashes the prefix before the last `/`
 - `GetPrefixPartitionKey`, which hashes the complete provided string.
 
 `RaftManager` then finds the partition whose range contains the hash value.
@@ -27,18 +27,18 @@ Every node must agree on which partition owns which hash range. That map is repl
 
 The caller must satisfy three conditions:
 
-- the node is initialized,
-- the target partition is not `0`,
+- the node is initialized
+- the target partition is not `0`
 - the local node is leader for the target partition.
 
 The split process:
 
-1. reads the current partition range map from system configuration,
-2. finds the target range,
-3. computes the midpoint,
-4. shrinks the existing range to the lower half,
-5. creates a new partition id for the upper half,
-6. replicates the new range map through the system partition,
+1. reads the current partition range map from system configuration
+2. finds the target range
+3. computes the midpoint
+4. shrinks the existing range to the lower half
+5. creates a new partition id for the upper half
+6. replicates the new range map through the system partition
 7. starts or updates local partitions from the replicated map.
 
 The new partition id is one greater than the highest current partition id.

@@ -12,6 +12,7 @@ const proofPoints = [
   'Elastic partitions',
   'Embedded in your .NET service',
   'gRPC, REST, or in-memory transport',
+  'MIT-licensed for commercial and internal use',
 ];
 
 const heroSnippet = `// Only the leader for a partition can propose. The change is
@@ -62,6 +63,11 @@ const advantageCards = [
     title: 'Change cluster membership safely',
     description:
       'Add nodes as learners, promote them after catch-up, and remove members through the committed system partition roster instead of trusting discovery snapshots.',
+  },
+  {
+    title: 'Balance leadership automatically',
+    description:
+      'Redistribute partition leaders by count and measured load with conservative cooldowns, stability gates, and bounded Raft leadership transfers.',
   },
   {
     title: 'Debug real runtime behavior',

@@ -8,10 +8,10 @@ In this recipe, "metadata" means small control-plane data your service uses to m
 
 Metadata services often need stronger ordering than a cache but more control than a general database abstraction:
 
-- tenant placement,
-- resource ownership,
-- service discovery metadata,
-- shard maps,
+- tenant placement
+- resource ownership
+- service discovery metadata
+- shard maps
 - routing tables.
 
 The data model is application-specific, but updates still need to be ordered and replicated.

@@ -10,9 +10,9 @@ A projection can be correct and still become expensive to rebuild if a busy part
 
 Common symptoms:
 
-- node restart takes too long,
-- restore callbacks replay a large amount of old history,
-- WAL storage keeps growing even though older state is no longer useful,
+- node restart takes too long
+- restore callbacks replay a large amount of old history
+- WAL storage keeps growing even though older state is no longer useful
 - recovery time becomes harder to predict.
 
 ## When This Is a Good Fit
@@ -21,10 +21,10 @@ Use this pattern when your application state is naturally incremental and older 
 
 Good examples:
 
-- counters and quotas,
-- tenant metadata indexes,
-- job status tables,
-- workflow summaries,
+- counters and quotas
+- tenant metadata indexes
+- job status tables
+- workflow summaries
 - leader-owned coordination state.
 
 ## Kommander Pattern
@@ -73,9 +73,9 @@ After restart, Kommander restores from the latest committed checkpoint boundary 
 
 Kommander records the checkpoint entry. Your application still owns:
 
-- the projection structure,
-- the rule for deciding when a checkpoint is worth writing,
-- restore behavior in `OnLogRestored`,
+- the projection structure
+- the rule for deciding when a checkpoint is worth writing
+- restore behavior in `OnLogRestored`
 - any local snapshot or persisted read-model format.
 
 ## Notes

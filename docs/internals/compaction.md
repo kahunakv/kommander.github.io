@@ -16,10 +16,10 @@ Checkpoints do not replace application snapshots by themselves. They are markers
 
 `RaftWriteAhead.Compact`:
 
-1. reads the last checkpoint for the partition through `ReadScheduler`,
-2. returns immediately if no checkpoint exists,
-3. calls `IWAL.CompactLogsOlderThan`,
-4. asks the adapter to remove up to `CompactNumberEntries` entries older than the checkpoint,
+1. reads the last checkpoint for the partition through `ReadScheduler`
+2. returns immediately if no checkpoint exists
+3. calls `IWAL.CompactLogsOlderThan`
+4. asks the adapter to remove up to `CompactNumberEntries` entries older than the checkpoint
 5. repeats adapter calls until there is no more eligible work, the adapter removes fewer than `CompactNumberEntries`, or `MaxEntriesPerCompaction` is reached.
 
 The relevant configuration values are:
