@@ -10,6 +10,7 @@
 | Leadership | `AmILeaderQuick`, `AmILeader`, `WaitForLeader`, `WaitForLeaderStableAsync` |
 | Replication | `ReplicateLogs`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
 | Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetPartitionGeneration`, `GetPartitionMap`, `RegisterStateMachineTransfer` |
+| Partition load | `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, `GetPartitionCommitWaitMs` |
 | Partition routing | `GetPartitionKey`, `GetPrefixPartitionKey` |
 | Transport entry points | `Handshake`, `RequestVote`, `Vote`, `AppendLogs`, `CompleteAppendLogs` |
 | Components | `WalAdapter`, `Communication`, `Discovery`, `Configuration`, `HybridLogicalClock`, `ReadScheduler`, `WalScheduler` |
@@ -88,6 +89,22 @@ long? lag = await raft.GetFollowerLagAsync(
 ```
 
 `null` means there is no recorded lag value for that follower and partition on this node.
+
+## Partition Load Signals
+
+Use the partition-load accessors to observe leader-side replicated-log throughput and WAL saturation:
+
+```csharp
+double rate = raft.GetPartitionLogOpsPerSecond(partitionId);
+int depth = raft.GetPartitionWalQueueDepth(partitionId);
+double waitMs = raft.GetPartitionCommitWaitMs(partitionId);
+```
+
+The local leader reads live in-process values. Other nodes read the latest gossiped leader report, which requires `EnableLeaderBalancer = true` and can lag by one report interval plus propagation time.
+
+All three methods return `0` for an unknown partition or when no leader report is available. `CommitWaitMs` retains its last value while idle, so use it with a nonzero log rate rather than as a standalone trigger.
+
+See [Partition Load Signals](../guides/partition-load-signals.md) for signal semantics and split-trigger guidance.
 
 ## Events
 

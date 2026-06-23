@@ -11,6 +11,8 @@ Typical signals:
 
 This guide focuses on the operational flow for a split. For the full API surface, see [Elastic Partitions](./elastic-partitions.md).
 
+Kommander exposes `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, and `GetPartitionCommitWaitMs` to help distinguish a busy partition from a saturated one. See [Partition Load Signals](./partition-load-signals.md) before building an automatic split trigger.
+
 ## What A Split Does
 
 For a `HashRange` partition, a split creates a second partition and divides the original hash range in two.
@@ -91,11 +93,14 @@ Without state transfer, a split may change routing but leave the new partition w
 
 For a beginner-friendly first implementation:
 
-1. detect a hot partition from metrics or queue depth
+1. detect sustained high replicated-log rate and WAL saturation
 2. split it at the leader
 3. refresh the partition map on all application nodes
 4. retry `PartitionMoved` writes using the new map
-5. verify the hot key range is now spread across two leaders.
+5. verify the two partitions are led on different nodes when relieving fsync pressure
+6. verify rate, queue depth, and latency improve after routing settles.
+
+Because WAL group commit can combine writes from multiple partitions on one node, splitting in place does not necessarily add fsync capacity. The new partition should ultimately have a leader on another node when disk saturation is the problem.
 
 ## Good Fit
 
@@ -109,5 +114,6 @@ Splits are a good fit when:
 ## Related Reading
 
 - [Elastic Partitions](./elastic-partitions.md)
+- [Partition Load Signals](./partition-load-signals.md)
 - [Partitioning](../architecture/partitioning.md)
 - [Partitions And Splitting Internals](../internals/partitions-and-splitting.md)

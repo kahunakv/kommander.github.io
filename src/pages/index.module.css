@@ -1,6 +1,5 @@
 .heroBanner {
   padding: 5rem 0 4rem;
-  text-align: center;
   position: relative;
   overflow: hidden;
   background:
@@ -8,6 +7,17 @@
     radial-gradient(circle at 85% 22%, rgba(8, 145, 178, 0.18), transparent 28%),
     linear-gradient(135deg, #0f172a 0%, #162235 52%, #133447 100%);
   color: #fff;
+}
+
+.heroInner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  gap: 2rem;
+  align-items: center;
+}
+
+.heroContent {
+  text-align: left;
 }
 
 .heroEyebrow {
@@ -20,50 +30,41 @@
 }
 
 .heroTitle {
-  font-size: 4.1rem;
+  font-size: 4rem;
   line-height: 0.96;
   letter-spacing: 0;
-  max-width: 13ch;
-  margin: 0 auto;
+  max-width: 12ch;
+  margin: 0;
 }
 
 .heroSubtitle {
-  font-size: 1.35rem;
-  margin: 1rem auto 0;
-  max-width: 48rem;
+  font-size: 1.28rem;
+  margin: 1rem 0 0;
+  max-width: 42rem;
   color: #dbeafe;
 }
 
 .buttons {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0.75rem;
   flex-wrap: wrap;
   margin-top: 2rem;
 }
 
-.heroCode {
-  text-align: left;
-  max-width: 46rem;
-  margin: 2.5rem auto 0;
-  padding: 1.4rem 1.6rem;
-  border-radius: 12px;
-  border: 1px solid rgba(191, 219, 254, 0.18);
-  background: rgba(2, 6, 23, 0.55);
-  color: #e2e8f0;
-  font-size: 0.92rem;
-  line-height: 1.5;
-  overflow-x: auto;
-  box-shadow: 0 18px 40px rgba(2, 6, 23, 0.35);
+.heroMedia {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 0;
 }
 
-.heroCode code {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  color: inherit;
-  font-family: var(--ifm-font-family-monospace);
+.heroLogo {
+  display: block;
+  width: min(100%, 34rem);
+  height: auto;
+  filter: drop-shadow(0 28px 48px rgba(2, 6, 23, 0.38));
 }
 
 .proofGrid {
@@ -183,14 +184,41 @@
     padding: 3rem 1rem;
   }
 
+  .heroInner {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .heroContent {
+    text-align: center;
+    max-width: none;
+    padding-right: 0;
+  }
+
   .heroTitle {
     font-size: 3rem;
     max-width: none;
+    margin: 0 auto;
   }
 
-  .heroCode {
-    font-size: 0.82rem;
-    padding: 1.1rem;
+  .heroSubtitle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .buttons {
+    justify-content: center;
+  }
+
+  .heroLogo {
+    width: min(100%, 20rem);
+  }
+
+  .heroMedia {
+    position: static;
+    transform: none;
+    width: auto;
+    margin-top: 1.5rem;
   }
 
   .proofGrid,

@@ -6,6 +6,8 @@ At a high level, it keeps the same ordered log on several nodes. Your applicatio
 
 Kommander is also partitioned: each user partition is its own Raft group with its own leader and log. A node can lead one partition and follow another, which spreads coordination work across the cluster.
 
+Large partition counts are handled with a shared executor pool and hot-set leader checks, so idle partitions do not each require a dedicated thread or high-frequency timer work. See [Partition Scaling](../operations/partition-scaling.md).
+
 ## Main Components
 
 | Component | Role |
@@ -92,3 +94,4 @@ That lets the same Raft runtime run in production over durable WALs and network 
 - [Elastic Partitions](../guides/elastic-partitions.md)
 - [Log Backfill And Catch-Up](../guides/log-backfill-and-catch-up.md)
 - [Partition Quiescence](../guides/partition-quiescence.md)
+- [Partition Scaling](../operations/partition-scaling.md)

@@ -34,3 +34,18 @@ Current adapters use that contract in different ways:
 ## Operational Meaning
 
 You do not usually call `BatchRequests` directly from application code. It is part of the transport layer. Internal Raft traffic shares this batching path, which reduces transport churn under load.
+
+## gRPC Append-Log Coalescing
+
+The gRPC transport can also coalesce append-log stream writes.
+
+When `GrpcEnableAppendLogsCoalescing = true`, Kommander watches each outbound append-log stream. If a write to that stream is already in flight, later append-log items queue behind it. When the stream becomes available, the flusher drains up to `GrpcAppendLogsMaxCoalesceBatch` queued items into one `GrpcBatchRequestsRequest`.
+
+This is driven by natural backpressure. Kommander does not delay an idle stream to wait for a larger batch. A single isolated append still sends immediately as a batch of one.
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `GrpcEnableAppendLogsCoalescing` | `false` | Enables per-stream append-log coalescing for gRPC transport. |
+| `GrpcAppendLogsMaxCoalesceBatch` | `256` | Maximum append-log items included in one coalesced gRPC batch frame. |
+
+Enable this for write-heavy clusters where per-peer gRPC stream writes or HTTP/2 frame overhead show up in profiling. If log entries are large, lower `GrpcAppendLogsMaxCoalesceBatch` so a batch does not approach the receiver's maximum message size.

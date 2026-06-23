@@ -74,6 +74,12 @@ Histogram:
 
 - `raft.wal.batch_size`
 
+Observable gauge:
+
+- `raft.wal.queue_depth`, tagged by `partition_id`
+
+`raft.wal.queue_depth` reports pending or in-flight WAL operations for each partition. A sustained rise while replicated-log throughput plateaus indicates WAL or fsync saturation. The same advisory value is available through `IRaft.GetPartitionWalQueueDepth`.
+
 `raft.wal.batches_total` increments once per scheduler group write. A group write may span more than one partition.
 
 `raft.wal.batch_size` records the number of WAL write operations drained for each partition inside that group write. It is a per-partition batch-size distribution, not the number of partitions included in the group.
@@ -108,13 +114,17 @@ Counters:
 
 Histogram:
 
+- `raft.heartbeat_delay_ms`
 - `raft.election_delay_ms`
+
+`raft.heartbeat_delay_ms` records the interval between consecutive heartbeats sent by a leader partition. High values can indicate scheduler pressure or CPU starvation.
 
 `raft.election_delay_ms` records how long it had been since the last received heartbeat when an election started.
 
-This is the direct delay metric currently exported in the codebase. The current `KommanderMetrics` implementation does not expose a separate `heartbeat delay` histogram by name. Heartbeat behavior is instead observed through:
+Heartbeat behavior can also be correlated through:
 
 - `raft.heartbeats_sent_total`
+- `raft.heartbeat_delay_ms`
 - `raft.election_delay_ms`
 - slow-dispatch logs
 - proposal and append latency patterns.
@@ -163,9 +173,11 @@ When an operation is slow, check the signals in this order:
 1. `raft.executor.client_queue_depth`
 2. `raft.executor.rejections_total`
 3. `raft.executor.operation_duration_ms`
-4. `raft.wal.batch_size`
-5. `raft.stale_completions_total`
-6. `raft.election_delay_ms`
+4. `raft.wal.queue_depth`
+5. `raft.wal.batch_size`
+6. `raft.stale_completions_total`
+7. `raft.heartbeat_delay_ms`
+8. `raft.election_delay_ms`
 
 That usually lets you distinguish between:
 
@@ -185,11 +197,6 @@ Scheduler fairness is not one single metric. You validate it by looking at the s
 
 In load tests, the important question is not “did the queue grow?” but “did control-plane work stay healthy while load increased?”
 
-## Important Limits
+## Partition Load Accessors
 
-Two distinctions matter when reading the current diagnostics surface:
-
-- Kommander currently exports direct metrics for partition executor queue depth, not a full family of per-scheduler queue-depth gauges.
-- Kommander currently exports direct election-delay telemetry, but not a separate heartbeat-delay histogram.
-
-That still gives enough visibility to diagnose most overload and fairness problems when you combine the metrics with slow-dispatch and election logs.
+`IRaft` also exposes `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, and `GetPartitionCommitWaitMs`. Log rate and commit wait do not currently have dedicated meter instruments. See [Partition Load Signals](../guides/partition-load-signals.md) for local versus remote behavior, freshness, and the ambiguous `0` sentinel.

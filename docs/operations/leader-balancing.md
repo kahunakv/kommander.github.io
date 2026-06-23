@@ -37,8 +37,8 @@ Partition `0`, the system partition, coordinates the cluster. Only its current l
 Every node periodically reports:
 
 - which partitions it currently leads
-- recent operations per second for each led partition
-- pending partition work used to estimate queue pressure
+- recent leader-side replicated-log operations per second for each led partition
+- client and WAL queue depth used to estimate pending pressure
 - how long each leadership has been stable.
 
 Reports are advisory and remain in memory. They are not appended to the Raft log. Reports older than `LeaderBalancerReportTtl` are ignored.
@@ -46,11 +46,11 @@ Reports are advisory and remain in memory. They are not appended to the Raft log
 The load score for a partition is:
 
 ```text
-load = LeaderBalancerOpsWeight * operations/second
-     + LeaderBalancerQueueWeight * queue depth
+load = LeaderBalancerOpsWeight * log operations/second
+     + LeaderBalancerQueueWeight * (client queue depth + WAL queue depth)
 ```
 
-Operations per second uses an exponentially weighted moving average (EWMA). This smooths short spikes while still adapting when a partition stays busy or becomes idle.
+Log operations per second uses an exponentially weighted moving average (EWMA). It counts the leader-side `ReplicateLogs` path and smooths short spikes while still adapting when a partition stays busy or becomes idle. See [Partition Load Signals](../guides/partition-load-signals.md) for the related public accessors.
 
 ## How A Balancing Pass Works
 

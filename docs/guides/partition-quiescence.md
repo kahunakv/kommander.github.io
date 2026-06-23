@@ -27,6 +27,8 @@ For a cluster with many mostly idle partitions, that can produce a large amount 
 
 Quiescence changes the idle case from "heartbeat every partition forever" to "watch node liveness once through SWIM."
 
+For the CPU and timer side of many-partition scaling, see [Partition Scaling](../operations/partition-scaling.md).
+
 ## How A Partition Quiesces
 
 A leader may quiesce a partition when all of these are true:
@@ -104,6 +106,7 @@ The defaults are valid:
 ## Related Reading
 
 - [Dynamic Cluster Membership](./dynamic-cluster-membership.md)
+- [Partition Scaling](../operations/partition-scaling.md)
 - [SWIM Failure Detection](./swim-failure-detection.md)
 - [Leader Election Internals](../internals/leader-election.md)
 - [Configuration](../reference/configuration.md)

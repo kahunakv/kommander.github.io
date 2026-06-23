@@ -10,6 +10,7 @@
 | `Port` | `0` | Port advertised as part of the node endpoint. |
 | `InitialPartitions` | `1` | Number of initial user partitions. Partition `0` is reserved; application partitions start at `1`. |
 | `HttpScheme` | `https://` | Scheme used by `RestCommunication`. |
+| `GrpcScheme` | `https://` | Scheme prepended to peer endpoints when opening gRPC channels. Use `http://` only for cleartext HTTP/2 test environments. |
 | `TransportSecurity` | new options object | Transport security and node authentication settings for network transports. |
 | `HttpAuthBearerToken` | empty | Legacy bearer token for REST requests. Prefer `TransportSecurity.SharedSecret` or other `TransportSecurity` settings instead. |
 | `HttpTimeout` | `5` | REST request timeout in seconds. |
@@ -33,11 +34,19 @@
 | `MaxWalQueueDepthPerPartition` | `4096` | Per-partition WAL scheduler pending-write depth limit. When exceeded, WAL backpressure is propagated instead of allowing unbounded growth. |
 | `MaxGlobalWalQueueDepth` | `0` | Global WAL scheduler pending-write depth limit across all partitions. `0` disables the global cap and keeps only per-partition limits. |
 | `MaxWalBatchSize` | `256` | Maximum WAL write operations grouped into one storage flush. Larger batches reduce call overhead but can increase individual write latency. |
+| `SqliteWalShardCount` | `0` | SQLite shard databases used to distribute partitions. `0` resolves to `Environment.ProcessorCount` when initializing a new WAL directory or accepts the persisted value when reopening one. |
 | `MaxWalGroupBatchPartitions` | `64` | Maximum number of ready partitions coalesced into one cross-partition WAL write call. For RocksDB this can reduce many partition writes to one `db.Write` / fsync. For SQLite this allows the adapter to group writes by shard. |
 | `MaxDrainQuantumControl` | `8` | Maximum control-plane operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumReplication` | `4` | Maximum replication operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumClient` | `2` | Maximum client operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumMaintenance` | `1` | Maximum maintenance operations drained per partition-executor wake cycle. |
+| `GrpcChannelsPerNode` | `4` | Pooled gRPC channels and streaming calls created per peer. Values are clamped to the range `1` through `64`. |
+| `GrpcEnableMultipleHttp2Connections` | `false` | Allows each pooled gRPC channel to open additional HTTP/2 connections when stream capacity is saturated. |
+| `GrpcEnableSnapshotCompression` | `false` | Enables gzip for gRPC snapshot installation. Hot replication streams remain uncompressed. |
+| `GrpcEnableAppendLogsCoalescing` | `false` | Enables backpressure-driven coalescing of queued append-log stream writes into bounded gRPC batch frames. |
+| `GrpcAppendLogsMaxCoalesceBatch` | `256` | Maximum append-log items sent in one coalesced gRPC batch frame. Only applies when `GrpcEnableAppendLogsCoalescing` is enabled. |
+| `EnableSharedExecutorPool` | `true` | Lets user partitions share a bounded executor pool instead of each partition owning a dedicated OS thread. Also enables hot-set `CheckLeader` ticks. |
+| `PartitionExecutorPoolSize` | `0` | Worker count for the shared partition executor pool. `0` resolves to `Environment.ProcessorCount`; values below `0` are clamped to `1`. |
 | `EnableQuiescence` | `true` | Allows idle partitions to suppress per-partition heartbeats and rely on SWIM node liveness until new work arrives. |
 | `QuiesceAfter` | `1500 ms` | Idle duration before a leader quiesces a partition. Requires no active proposals. |
 | `BackfillThreshold` | `10` | Follower lag threshold that switches the leader from empty heartbeats to active committed-log backfill. |
@@ -85,6 +94,38 @@
 
 The configuration still supports `HttpAuthBearerToken` for legacy compatibility. Internally, `GetEffectiveTransportSecurity()` falls back to that bearer token when `TransportSecurity.SharedSecret` is not set.
 
+## gRPC Transport
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `GrpcScheme` | `https://` | URL scheme used when opening channels to peers. Cleartext test clusters can use `http://` when unencrypted HTTP/2 support is enabled by the host. |
+| `GrpcChannelsPerNode` | `4` | Number of long-lived channels and matching streaming calls per peer URL. Values below `1` become `1`; values above `64` become `64` and produce a warning. |
+| `GrpcEnableMultipleHttp2Connections` | `false` | Lets each channel's handler open more than one HTTP/2 connection to a peer instead of multiplexing every stream over one connection. |
+| `GrpcEnableSnapshotCompression` | `false` | Requests gzip encoding for unary snapshot installation and registers the matching server provider. Normal replication streams explicitly remain uncompressed. |
+| `GrpcEnableAppendLogsCoalescing` | `false` | Coalesces append-log items that naturally queue behind an in-flight stream write into one `GrpcBatchRequestsRequest`. |
+| `GrpcAppendLogsMaxCoalesceBatch` | `256` | Maximum append-log items drained into one coalesced batch frame. Reduce this if entries are large enough to approach gRPC receive-message limits. |
+
+More channels increase per-peer concurrency, but every channel owns a long-lived `SocketsHttpHandler` and TCP/HTTP/2 connection. Increase `GrpcChannelsPerNode` only when measurements show stream saturation. `GrpcEnableMultipleHttp2Connections` can raise concurrency further, with a corresponding increase in connections.
+
+Snapshot compression trades CPU for lower network use during `SendInstallSnapshot`. It does not compress the hot append-log stream.
+
+Append-log coalescing is backpressure-driven. An idle stream sends immediately as a batch of one; Kommander does not add a delay to wait for more work. Under sustained write load, queued append-log items are grouped after the in-flight stream write completes, reducing semaphore acquisitions and HTTP/2 frame churn.
+
+## Partition Scaling
+
+Kommander can run many partitions on a fixed shared executor pool.
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `EnableSharedExecutorPool` | `true` | Master switch for the shared partition executor pool. When enabled, active partitions are drained by a bounded pool and fast `CheckLeader` ticks target the hot set instead of every user partition. |
+| `PartitionExecutorPoolSize` | `0` | Number of pool worker threads. `0` uses `Environment.ProcessorCount`; values below `0` are clamped to `1`. |
+| `CheckLeaderInterval` | `250 ms` | Fast leader-check cadence for the system partition and hot user partitions. |
+| `UpdateNodesInterval` | `5000 ms` | Approximate full safety-sweep cadence for checking every partition. |
+
+The pool is fixed for the lifetime of the `RaftManager`; changing its size requires changing configuration and restarting the node. Size it for simultaneously busy partitions and CPU availability, not for the total partition count.
+
+See [Partition Scaling](../operations/partition-scaling.md) for sizing guidance and the relationship with quiescence.
+
 ## Queueing And Backpressure
 
 Kommander uses explicit admission control so client traffic and WAL pressure cannot grow without bound.
@@ -105,10 +146,13 @@ If a client proposal limit is hit, the runtime can reject new work with `RaftOpe
 | `MaxWalBatchSize` | `256` | Maximum operations drained from one partition into a single WAL batch. |
 | `MaxWalGroupBatchPartitions` | `64` | Maximum ready partitions coalesced into one `IWAL.Write` call. |
 | `WriteIOThreads` | `4` | Number of scheduler workers. Each worker can process one cross-partition group batch at a time. |
+| `SqliteWalShardCount` | `0` | Desired SQLite shard count when creating a new WAL directory. |
 
 For RocksDB, a group batch spanning many partitions is written through one `WriteBatch`, which can reduce fsync pressure significantly in many-partition deployments.
 
 For SQLite, partitions are distributed across a fixed shard pool. The scheduler still submits one cross-partition `IWAL.Write` call, and `SqliteWAL` groups that call by shard before writing. A batch with `P` partitions across `S` SQLite shards costs `S` transactions and fsyncs, not `P`. When `shardCount` is `1`, every partition shares one shard and the whole scheduler group can commit in one SQLite transaction.
+
+`SqliteWalShardCount` is used to seed a new WAL directory. With the default `0`, a new directory uses `Environment.ProcessorCount`. The resolved value is persisted in the directory's metadata database and becomes authoritative. When reopening an existing directory, `0` accepts that persisted value; a nonzero value that differs from it fails startup because changing the count would remap partitions to different database files.
 
 That creates a practical tuning tradeoff:
 

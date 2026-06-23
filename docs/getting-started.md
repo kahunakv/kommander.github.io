@@ -4,6 +4,10 @@ sidebar_position: 2
 
 # Getting Started
 
+:::tip Ready for a complete application?
+If you already understand the minimal setup and want to go deeper, jump to [Advanced Tutorial: Build A Replicated Key/Value Service](guides/advanced-replicated-simpledb.md). It covers a three-node service, partition routing, leader redirects, durable application state, recovery, and failure testing.
+:::
+
 Install Kommander from NuGet:
 
 ```shell
@@ -121,3 +125,4 @@ If you omit the `JoinCluster` cancellation token, Kommander still applies an int
 - Create and configure a node in [Creating A Node](guides/creating-a-node.md).
 - Replicate proposals in [Replicating Logs](guides/replicating-logs.md).
 - Expose transport routes in [Hosting Endpoints](guides/hosting-endpoints.md).
+- Build a complete three-node service in [Advanced Tutorial: Replicated SimpleDB](guides/advanced-replicated-simpledb.md).
