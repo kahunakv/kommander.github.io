@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Architecture Overview | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/architecture/overview/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Architecture Overview | Kommander"><meta data-rh="true" name="description" content="Kommander is an embedded Raft runtime for .NET services."><meta data-rh="true" property="og:description" content="Kommander is an embedded Raft runtime for .NET services."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/architecture/overview/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/architecture/overview/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/architecture/overview/" hreflang="x-default"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Architecture Overview","item":"https://kahunakv.github.io/kommander.github.io/docs/architecture/overview"}]}</script><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.54c268e5.css">
-<script src="/kommander.github.io/assets/js/runtime~main.6a6d32b8.js" defer="defer"></script>
-<script src="/kommander.github.io/assets/js/main.529d53c6.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.e643dbfa.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/main.82bc81d9.js" defer="defer"></script>
 </head>
 <body>
 <svg style="display: none;"><defs>
@@ -59,7 +59,8 @@
 <li class="">dynamic membership roster</li>
 <li class="">split and merge lifecycle records.</li>
 </ul>
-<p>Application data must use user partitions <code>1</code> and above.</p>
+<p>Applications may also store small cluster-wide control state on partition <code>0</code> under their own log type. The <code>_RaftSystem</code> log type is reserved for Kommander. If those application entries are deltas, register <code>IRaftSystemStateTransfer</code> so compacted followers can be repaired with a whole-state snapshot.</p>
+<p>Application data that belongs to normal workload partitions must use user partitions <code>1</code> and above.</p>
 <p>The common rule is: anything that affects safety is committed through Raft. Partition ownership and cluster membership are not decided by local discovery snapshots or gossip.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="pluggable-layers">Pluggable Layers<a href="#pluggable-layers" class="hash-link" aria-label="Direct link to Pluggable Layers" title="Direct link to Pluggable Layers" translate="no">​</a></h2>
 <p>Kommander keeps three major layers pluggable:</p>
@@ -74,6 +75,7 @@
 <li class=""><a class="" href="/kommander.github.io/docs/architecture/raft/">Raft In Kommander</a></li>
 <li class=""><a class="" href="/kommander.github.io/docs/internals/runtime/">Runtime Internals</a></li>
 <li class=""><a class="" href="/kommander.github.io/docs/guides/dynamic-cluster-membership/">Dynamic Cluster Membership</a></li>
+<li class=""><a class="" href="/kommander.github.io/docs/guides/system-partition-state-snapshots/">System Partition State Snapshots</a></li>
 <li class=""><a class="" href="/kommander.github.io/docs/guides/elastic-partitions/">Elastic Partitions</a></li>
 <li class=""><a class="" href="/kommander.github.io/docs/guides/log-backfill-and-catch-up/">Log Backfill And Catch-Up</a></li>
 <li class=""><a class="" href="/kommander.github.io/docs/guides/partition-quiescence/">Partition Quiescence</a></li>
