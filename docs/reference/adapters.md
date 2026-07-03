@@ -16,6 +16,33 @@ IWAL sqlite = new SqliteWAL("./data", "node-1", logger);
 IWAL memory = new InMemoryWAL(logger);
 ```
 
+### RocksDB Shared Memory Resources
+
+Hosts that also open their own RocksDB database can share RocksDB memory resources with Kommander's `RocksDbWAL`.
+
+```csharp
+using Kommander.WAL;
+
+RocksDbSharedResources shared = RocksDbSharedResources.CreateWithUnifiedBudget(
+    totalBytes: 512L * 1024 * 1024,
+    memtableBudgetBytes: 128L * 1024 * 1024
+);
+
+IWAL rocks = new RocksDbWAL(
+    path: "./data",
+    revision: "node-1",
+    logger: logger,
+    syncWrites: true,
+    sharedResources: shared
+);
+```
+
+The bundle contains one shared RocksDB block cache and one shared write-buffer manager. `RocksDbWAL` borrows the bundle; the host owns it and disposes it after all databases that use it have closed.
+
+There is no `RaftConfiguration` flag for this. Sharing is configured by passing `sharedResources` to the `RocksDbWAL` constructor and wiring the same cache/write-buffer manager into the host application's own RocksDB options before opening that database.
+
+See [Shared RocksDB Memory](../operations/shared-rocksdb-memory.md) for sizing, ownership, and observability guidance.
+
 `SqliteWAL` uses a fixed pool of SQLite shard databases. Partitions map to shards with `partitionId mod shardCount`, so `FairWalScheduler` group batches can be committed as one transaction per shard instead of one transaction per partition.
 
 You can choose the shard count for a fresh WAL directory:

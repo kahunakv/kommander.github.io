@@ -36,6 +36,8 @@
 | `MaxWalBatchSize` | `256` | Maximum WAL write operations grouped into one storage flush. Larger batches reduce call overhead but can increase individual write latency. |
 | `SqliteWalShardCount` | `0` | SQLite shard databases used to distribute partitions. `0` resolves to `Environment.ProcessorCount` when initializing a new WAL directory or accepts the persisted value when reopening one. |
 | `MaxWalGroupBatchPartitions` | `64` | Maximum number of ready partitions coalesced into one cross-partition WAL write call. For RocksDB this can reduce many partition writes to one `db.Write` / fsync. For SQLite this allows the adapter to group writes by shard. |
+| `WalGroupCommitLingerMs` | `0` | Adaptive WAL group-commit linger window in milliseconds. Values above `0` let a write worker briefly gather more ready partitions before issuing one storage sync. |
+| `WalSingleFsyncCommit` | `false` | Enables the auto-commit single-fsync fast path. Acknowledges when the proposed entry is quorum-durable and writes the committed marker lazily. |
 | `MaxDrainQuantumControl` | `8` | Maximum control-plane operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumReplication` | `4` | Maximum replication operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumClient` | `2` | Maximum client operations drained per partition-executor wake cycle. |
@@ -145,10 +147,16 @@ If a client proposal limit is hit, the runtime can reject new work with `RaftOpe
 | --- | ---: | --- |
 | `MaxWalBatchSize` | `256` | Maximum operations drained from one partition into a single WAL batch. |
 | `MaxWalGroupBatchPartitions` | `64` | Maximum ready partitions coalesced into one `IWAL.Write` call. |
+| `WalGroupCommitLingerMs` | `0` | Adaptive wait window that lets a WAL worker gather more ready partitions into one sync before writing. |
+| `WalSingleFsyncCommit` | `false` | Removes the committed-marker sync from the client-visible `autoCommit` path by acknowledging after propose quorum durability. |
 | `WriteIOThreads` | `4` | Number of scheduler workers. Each worker can process one cross-partition group batch at a time. |
 | `SqliteWalShardCount` | `0` | Desired SQLite shard count when creating a new WAL directory. |
 
 For RocksDB, a group batch spanning many partitions is written through one `WriteBatch`, which can reduce fsync pressure significantly in many-partition deployments.
+
+`WalGroupCommitLingerMs` can improve batch density when ready work arrives staggered. Start with a small value such as `2` ms and measure. The linger is adaptive; workers stop waiting when no additional ready partition appears.
+
+`WalSingleFsyncCommit` is a latency lever for durable auto-commit writes. When enabled, Kommander acknowledges after the proposed entry is durable on a quorum, then writes the committed marker lazily. Explicit two-phase writes using `autoCommit: false` keep their separate durable commit behavior.
 
 For SQLite, partitions are distributed across a fixed shard pool. The scheduler still submits one cross-partition `IWAL.Write` call, and `SqliteWAL` groups that call by shard before writing. A batch with `P` partitions across `S` SQLite shards costs `S` transactions and fsyncs, not `P`. When `shardCount` is `1`, every partition shares one shard and the whole scheduler group can commit in one SQLite transaction.
 
@@ -159,6 +167,8 @@ That creates a practical tuning tradeoff:
 - fewer SQLite shards improve batching and reduce fsync pressure
 - more SQLite shards allow more independent read/write concurrency
 - the shard count is fixed for a WAL data directory after initialization because changing it would remap partitions to different database files.
+
+See [WAL Commit Durability](../operations/wal-commit-durability.md) for the single-fsync fast path, group commit linger, crash recovery behavior, and tuning guidance.
 
 ## Dynamic Membership
 

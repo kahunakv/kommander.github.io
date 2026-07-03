@@ -50,6 +50,8 @@ const sidebars = {
         'guides/swim-failure-detection',
         'operations/checkpoints-and-compaction',
         'operations/wal-diagnostics',
+        'operations/wal-commit-durability',
+        'operations/shared-rocksdb-memory',
       ],
     },
     {

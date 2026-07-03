@@ -91,6 +91,8 @@ This helps validate scheduler fairness and batching efficiency under load:
 - large batches paired with rising latency can mean the system is absorbing bursts but paying for them in per-flush delay.
 - increasing `raft.wal.operations_total` faster than `raft.wal.batches_total` usually means batching is reducing storage calls.
 
+For WAL durability tuning, `FairWalScheduler` also maintains internal counters such as `TotalBatchesWritten`, `TotalSyncBatchesWritten`, and `TotalPartitionsBatched`. They help validate whether `WalSingleFsyncCommit` is reducing true sync batches and whether `WalGroupCommitLingerMs` is increasing partitions per group write.
+
 ## Stale Completion Drops
 
 Counter:

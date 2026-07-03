@@ -64,6 +64,37 @@ For SQLite, partitions are mapped into a fixed set of shard databases. The adapt
 
 If one shard write fails, the scheduler reports the group status as errored to all operations in that group. Retries are safe because WAL writes are idempotent.
 
+`WalGroupCommitLingerMs` can make group commits denser. When it is greater than `0`, a write worker may wait briefly after finding the first ready partition so more partitions can join the same storage sync. This is adaptive and bounded by `MaxWalGroupBatchPartitions`.
+
+## Single-Fsync Auto-Commit Path
+
+By default, an auto-commit write syncs both the proposed entry and the committed marker.
+
+With `WalSingleFsyncCommit` enabled, Kommander can release an auto-commit proposal when the proposed entry is durable on a quorum. The committed marker is still written, but it can ride a later sync.
+
+The recovery path preserves the durable proposed tail and reconstructs the committed frontier conservatively. A follower that restarted with missing committed markers can be re-supplied by the leader through normal catch-up and backfill.
+
+This does not affect explicit two-phase writes where the caller proposes with `autoCommit: false` and later calls `CommitLogs` or `RollbackLogs`.
+
+See [WAL Commit Durability](../operations/wal-commit-durability.md) for operator-facing tuning guidance.
+
+## RocksDB Shared Memory Resources
+
+`RocksDbWAL` can borrow a `RocksDbSharedResources` bundle supplied by the host application.
+
+The bundle contains:
+
+- one RocksDB block cache
+- one native RocksDB write-buffer manager.
+
+When the bundle is passed to the `RocksDbWAL` constructor, the WAL applies the write-buffer manager to its `DbOptions` and applies the block cache to every RocksDB column family before opening the database. The same bundle can be wired into a host application's own RocksDB database so both databases draw from one memory budget.
+
+This is memory sharing only. The WAL database path, column families, Raft log format, and recovery behavior stay unchanged.
+
+`RocksDbWAL` does not own or dispose the bundle. The host must dispose every database that borrowed the bundle first, then dispose `RocksDbSharedResources`.
+
+See [Shared RocksDB Memory](../operations/shared-rocksdb-memory.md) for the user-facing setup and sizing model.
+
 ## SQLite Shard Batching
 
 `SqliteWAL` stores logs in files named like `raft_shard{shardId}_{revision}.db`. A partition maps to a shard with `partitionId mod shardCount`.
