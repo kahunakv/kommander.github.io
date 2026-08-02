@@ -37,7 +37,7 @@
 | `SqliteWalShardCount` | `0` | SQLite shard databases used to distribute partitions. `0` resolves to `Environment.ProcessorCount` when initializing a new WAL directory or accepts the persisted value when reopening one. |
 | `MaxWalGroupBatchPartitions` | `64` | Maximum number of ready partitions coalesced into one cross-partition WAL write call. For RocksDB this can reduce many partition writes to one `db.Write` / fsync. For SQLite this allows the adapter to group writes by shard. |
 | `WalGroupCommitLingerMs` | `0` | Adaptive WAL group-commit linger window in milliseconds. Values above `0` let a write worker briefly gather more ready partitions before issuing one storage sync. |
-| `WalSingleFsyncCommit` | `false` | Enables the auto-commit single-fsync fast path. Acknowledges when the proposed entry is quorum-durable and writes the committed marker lazily. |
+| `WalSingleFsyncCommit` | `true` | Enables the auto-commit single-fsync fast path. Acknowledges when the proposed entry is quorum-durable and writes the committed marker lazily. |
 | `MaxDrainQuantumControl` | `8` | Maximum control-plane operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumReplication` | `4` | Maximum replication operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumClient` | `2` | Maximum client operations drained per partition-executor wake cycle. |
@@ -53,6 +53,10 @@
 | `QuiesceAfter` | `1500 ms` | Idle duration before a leader quiesces a partition. Requires no active proposals. |
 | `BackfillThreshold` | `10` | Follower lag threshold that switches the leader from empty heartbeats to active committed-log backfill. |
 | `MaxBackfillEntriesPerRound` | `128` | Maximum committed log entries shipped to one stale follower per backfill round. |
+| `SnapshotReceiveSessionTtl` | `30 s` | Idle timeout for an incomplete snapshot receive session. Expiry runs lazily on later snapshot receives. |
+| `SnapshotMaxPendingSessions` | `8` | Maximum concurrent snapshot receive sessions buffered by one node. |
+| `SnapshotMaxPendingBytes` | `512 MiB` | Maximum total bytes buffered by active and installing snapshot receive sessions. |
+| `AllowLegacySnapshotSenders` | `false` | Compatibility switch for peers that do not send snapshot leader and boundary metadata. Keep disabled for normal clusters. |
 | `LearnerPromotionLag` | `10` | Maximum lag a learner may have on any partition and still be considered caught up enough for promotion. |
 | `LearnerPromotionStableWindow` | `3 s` | How long a learner must remain within `LearnerPromotionLag` before promotion to voter. |
 | `GossipInterval` | `5 s` | Interval between membership gossip rounds. |
@@ -148,7 +152,7 @@ If a client proposal limit is hit, the runtime can reject new work with `RaftOpe
 | `MaxWalBatchSize` | `256` | Maximum operations drained from one partition into a single WAL batch. |
 | `MaxWalGroupBatchPartitions` | `64` | Maximum ready partitions coalesced into one `IWAL.Write` call. |
 | `WalGroupCommitLingerMs` | `0` | Adaptive wait window that lets a WAL worker gather more ready partitions into one sync before writing. |
-| `WalSingleFsyncCommit` | `false` | Removes the committed-marker sync from the client-visible `autoCommit` path by acknowledging after propose quorum durability. |
+| `WalSingleFsyncCommit` | `true` | Removes the committed-marker sync from the client-visible `autoCommit` path by acknowledging after propose quorum durability. |
 | `WriteIOThreads` | `4` | Number of scheduler workers. Each worker can process one cross-partition group batch at a time. |
 | `SqliteWalShardCount` | `0` | Desired SQLite shard count when creating a new WAL directory. |
 
@@ -156,7 +160,7 @@ For RocksDB, a group batch spanning many partitions is written through one `Writ
 
 `WalGroupCommitLingerMs` can improve batch density when ready work arrives staggered. Start with a small value such as `2` ms and measure. The linger is adaptive; workers stop waiting when no additional ready partition appears.
 
-`WalSingleFsyncCommit` is a latency lever for durable auto-commit writes. When enabled, Kommander acknowledges after the proposed entry is durable on a quorum, then writes the committed marker lazily. Explicit two-phase writes using `autoCommit: false` keep their separate durable commit behavior.
+`WalSingleFsyncCommit` is enabled by default as the latency lever for durable auto-commit writes. Kommander acknowledges after the proposed entry is durable on a quorum, then writes the committed marker lazily. Explicit two-phase writes using `autoCommit: false` keep their separate durable commit behavior.
 
 For SQLite, partitions are distributed across a fixed shard pool. The scheduler still submits one cross-partition `IWAL.Write` call, and `SqliteWAL` groups that call by shard before writing. A batch with `P` partitions across `S` SQLite shards costs `S` transactions and fsyncs, not `P`. When `shardCount` is `1`, every partition shares one shard and the whole scheduler group can commit in one SQLite transaction.
 
@@ -178,6 +182,10 @@ Kommander supports runtime cluster membership management with learners, promotio
 | --- | ---: | --- |
 | `BackfillThreshold` | `10` | Follower lag threshold that switches the leader from empty heartbeats to active committed-log backfill. |
 | `MaxBackfillEntriesPerRound` | `128` | Maximum committed log entries shipped to one stale follower per backfill round. |
+| `SnapshotReceiveSessionTtl` | `30 s` | How long an incomplete snapshot receive session may sit idle before the receiver drops its buffered state. |
+| `SnapshotMaxPendingSessions` | `8` | Maximum concurrent snapshot receive sessions on one node. |
+| `SnapshotMaxPendingBytes` | `512 MiB` | Maximum live bytes used by snapshot receive buffers, including completed buffers still installing. |
+| `AllowLegacySnapshotSenders` | `false` | Accepts snapshot chunks that omit `LeaderTerm`, `LeaderEndpoint`, or `LastIncludedTerm`. Use only during a controlled compatibility window. |
 | `LearnerPromotionLag` | `10` | Maximum lag a learner may have on any partition and still be considered caught up enough for promotion. |
 | `LearnerPromotionStableWindow` | `3 s` | How long a learner must remain within `LearnerPromotionLag` before promotion to voter. |
 | `GossipInterval` | `5 s` | Interval between membership gossip rounds. |
@@ -189,6 +197,21 @@ Kommander supports runtime cluster membership management with learners, promotio
 | `DeadMemberEvictionGrace` | `30 s` | How long a node remains `Dead` before the system-partition leader evicts it. |
 
 The built-in in-memory, gRPC, and REST transports all implement direct and indirect SWIM pings. If you disable SWIM by setting `PingInterval` to `0`, also set `EnableQuiescence = false`.
+
+## Snapshot Installation
+
+The snapshot receive path is bounded and term-aware.
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `SnapshotReceiveSessionTtl` | `30 s` | Idle timeout for an incomplete snapshot receive session. The sweep is lazy and runs when another snapshot chunk arrives. |
+| `SnapshotMaxPendingSessions` | `8` | Maximum number of concurrent receive sessions buffered across all partitions on one node. |
+| `SnapshotMaxPendingBytes` | `512 MiB` | Maximum total buffered snapshot bytes. Completed buffers still count while their partition-executor install is running. |
+| `AllowLegacySnapshotSenders` | `false` | Allows peers that omit the snapshot leader-term and boundary-term fields. Keep disabled unless you are rolling through an older wire contract. |
+
+The final snapshot chunk is installed on the partition's single-writer executor. That serializes stale-leader rejection, application import, durable checkpoint-boundary writes, and apply-frontier seeding with the rest of the partition state machine.
+
+See [Snapshot Installation](../operations/snapshot-installation.md) for the receive contract and import requirements.
 
 ## Automatic Leader Balancing
 
@@ -239,5 +262,6 @@ Higher control and replication quanta help Raft protocol traffic stay ahead of c
 
 Two timing behaviors matter for operators and test authors:
 
+- `HeartbeatInterval` and `CheckLeaderInterval` must both stay below `StartElectionTimeout`. Heartbeats are sent from the `CheckLeader` timer pass, so either interval at or above the lower election timeout causes followers to time out before the next heartbeat and leadership churns indefinitely.
 - `ElectionTimeoutSeed` lets each partition derive its election timeout randomness from a deterministic seed combined with the partition id. That makes election behavior reproducible in tests without making every partition use the exact same sequence.
 - `RecentHeartbeat` throttles heartbeats per `(node, partition)` pair. That avoids one busy partition suppressing heartbeats for every other partition on the same follower.

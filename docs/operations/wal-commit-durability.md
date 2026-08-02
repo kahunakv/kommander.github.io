@@ -2,12 +2,14 @@
 
 Kommander persists Raft log entries through the configured write-ahead log, or WAL.
 
-For durable backends such as RocksDB and SQLite, the default write path favors conservative durability and simple recovery. A normal auto-commit write usually performs two durable storage syncs:
+For durable backends such as RocksDB and SQLite, Kommander keeps the Raft durability invariant while avoiding an unnecessary client-visible sync on the common auto-commit path.
+
+Without the single-fsync fast path, a normal auto-commit write performs two durable storage syncs:
 
 1. write the proposed entry and sync it
 2. after quorum acknowledgement, write the committed marker and sync it.
 
-That default is safe and predictable, but storage sync latency can dominate write latency. Kommander exposes two WAL settings that reduce the cost in different ways:
+That older two-sync path is safe and predictable, but storage sync latency can dominate write latency. Kommander exposes two WAL settings that reduce the cost in different ways:
 
 - `WalGroupCommitLingerMs` improves batching density and throughput under staggered concurrent writes
 - `WalSingleFsyncCommit` removes the second sync from the client-visible auto-commit path.
@@ -25,9 +27,9 @@ Kommander's default WAL representation stores both:
 
 The second marker makes restart recovery cheaper because the WAL describes the committed prefix directly. It is not what makes the entry durable on a quorum. The quorum-durable proposed entry is the Raft commit point.
 
-## Default Path
+## Two-Sync Path
 
-With default settings:
+With `WalSingleFsyncCommit = false`:
 
 ```text
 leader proposed entry -> fsync
@@ -58,11 +60,13 @@ Start with a small value such as `2 ms` and measure. `0` keeps the default purel
 
 The linger window is adaptive. If another ready partition does not arrive, the worker does not sit through the whole window. A full group batch also syncs immediately.
 
+`ReplicateEntries` can reduce proposal and transport overhead before work reaches the WAL scheduler. An auto-commit-only heterogeneous batch is one proposal, while a batch with a trailing manual group is proposed as an auto group followed by a manual suffix. The WAL scheduler still controls storage-call and fsync coalescing through the same group commit settings.
+
 ## Single-Fsync Commit Fast Path
 
 `WalSingleFsyncCommit` changes the auto-commit path.
 
-When enabled, an `autoCommit` write can acknowledge the client as soon as the proposed entry is durable on a quorum. The per-entry committed marker is still written afterward, but it is written lazily so it can ride a later sync.
+When enabled, which is the default, an `autoCommit` write can acknowledge the client as soon as the proposed entry is durable on a quorum. The per-entry committed marker is still written afterward, but it is written lazily so it can ride a later sync.
 
 ```text
 proposed entry -> fsync
@@ -92,13 +96,13 @@ The important operator-facing invariant is unchanged: a write acknowledged to th
 
 | Property | Default | Description |
 | --- | ---: | --- |
-| `WalSingleFsyncCommit` | `false` | Enables the single-fsync auto-commit fast path. Client acknowledgement happens when the proposed entry is durable on a quorum; the committed marker is written lazily. |
+| `WalSingleFsyncCommit` | `true` | Enables the single-fsync auto-commit fast path. Client acknowledgement happens when the proposed entry is durable on a quorum; the committed marker is written lazily. |
 | `WalGroupCommitLingerMs` | `0` | Bounded adaptive wait, in milliseconds, used by WAL workers to gather more ready partitions into a group commit. `0` disables the linger and keeps opportunistic batching. |
 | `MaxWalGroupBatchPartitions` | `64` | Maximum ready partitions coalesced into one scheduler group write. |
 | `MaxWalBatchSize` | `256` | Maximum WAL operations drained from one partition into one batch. |
 | `WriteIOThreads` | `4` | Number of WAL scheduler write workers. |
 
-The two new knobs are complementary:
+The two WAL durability knobs are complementary:
 
 - use `WalSingleFsyncCommit` when write latency is dominated by the second commit sync
 - use `WalGroupCommitLingerMs` when throughput or tail latency suffers because writes arrive just far enough apart to miss batching opportunities.
@@ -127,7 +131,8 @@ For group commit linger, compare average batch density before and after enabling
 ## Practical Guidance
 
 - Keep defaults when first deploying durable storage.
-- Enable `WalSingleFsyncCommit` only after measuring write latency on your storage backend.
+- Keep `WalSingleFsyncCommit` enabled when write latency is dominated by the second commit sync.
+- Disable `WalSingleFsyncCommit` only when you need the older behavior where the disk's committed markers alone identify the complete committed frontier immediately after local restart.
 - Use `WalGroupCommitLingerMs` with small values first; large values can add avoidable latency.
 - Do not use `syncWrites: false` as a substitute for these settings in production. That changes crash durability.
 - If WAL queue depth grows steadily, first determine whether the bottleneck is storage sync latency, too few `WriteIOThreads`, or a workload that needs more partitions or nodes.
@@ -135,6 +140,7 @@ For group commit linger, compare average batch density before and after enabling
 ## Related Reading
 
 - [WAL Diagnostics](./wal-diagnostics.md)
+- [Heterogeneous Write Coalescing](../guides/heterogeneous-write-coalescing.md)
 - [WAL Internals](../internals/wal.md)
 - [Backpressure And Admission Control](../internals/backpressure-and-admission-control.md)
 - [Configuration](../reference/configuration.md)

@@ -8,8 +8,9 @@
 | Membership | `GetMembership`, `LocalRole`, `OnMembershipChanged` |
 | Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes`, `GetFollowerLagAsync` |
 | Leadership | `AmILeaderQuick`, `AmILeader`, `WaitForLeader`, `WaitForLeaderStableAsync` |
-| Replication | `ReplicateLogs`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
+| Replication | `ReplicateLogs`, `ReplicateEntries`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
 | Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetPartitionGeneration`, `GetPartitionMap`, `RegisterStateMachineTransfer` |
+| System partition state | `RegisterSystemStateTransfer`, `SetMinRetainIndex`, `AcquireRetentionHold` |
 | Partition load | `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, `GetPartitionCommitWaitMs` |
 | Partition routing | `GetPartitionKey`, `GetPrefixPartitionKey` |
 | Transport entry points | `Handshake`, `RequestVote`, `Vote`, `AppendLogs`, `CompleteAppendLogs` |
@@ -106,6 +107,29 @@ All three methods return `0` for an unknown partition or when no leader report i
 
 See [Partition Load Signals](../guides/partition-load-signals.md) for signal semantics and split-trigger guidance.
 
+## Replication APIs
+
+Use `ReplicateLogs` when every payload in the call shares one type, one `autoCommit` value, and one generation fence.
+
+Use `ReplicateEntries` when a consumer has a mixed batch of per-entry-typed writes for one partition:
+
+```csharp
+RaftBatchReplicationResult result = await raft.ReplicateEntries(
+    partitionId: 1,
+    entries:
+    [
+        new RaftProposalEntry("kv", keyValueBytes),
+        new RaftProposalEntry("lock", lockBytes),
+        new RaftProposalEntry("receipt", receiptBytes),
+    ],
+    cancellationToken: cancellationToken
+);
+```
+
+`ReplicateEntries` returns one `RaftEntryResult` per input entry, index-aligned to the input list. It supports a leading auto-commit group plus one optional trailing manual group. Per-entry `ExpectedGeneration` fences let stale entries return `PartitionMoved` without necessarily failing their siblings.
+
+See [Heterogeneous Write Coalescing](../guides/heterogeneous-write-coalescing.md) for the full result contract and batching rules.
+
 ## Events
 
 Subscribe before `JoinCluster` if you need restore callbacks.
@@ -154,7 +178,22 @@ string stableLeader = await raft.WaitForLeaderStableAsync(
 );
 ```
 
+`WaitForLeader` waits for the partition restore task to complete before starting its election wait. That means a large WAL restore is bounded by your cancellation token, not by the fixed leader-election polling budget. If restore fails, the method throws a `RaftException` that wraps the underlying restore failure.
+
 `WaitForLeaderStableAsync` is especially useful in tests and operational flows where you want to avoid reacting to a leader that is still flapping.
+
+Prefer the overload that includes an overall timeout when you want a bounded wait:
+
+```csharp
+string stableLeader = await raft.WaitForLeaderStableAsync(
+    partitionId: 1,
+    minStableFor: TimeSpan.FromMilliseconds(500),
+    timeout: TimeSpan.FromSeconds(10),
+    cancellationToken: cancellationToken
+);
+```
+
+The overload without `timeout` treats `minStableFor` as a required stability window, not a deadline. It can wait indefinitely if leadership keeps changing and the cancellation token is not cancelled.
 
 ## Test Hooks
 
@@ -167,6 +206,35 @@ string stableLeader = await raft.WaitForLeaderStableAsync(
 - `ResumeHeartbeatsAsync`
 
 These are intended for deterministic tests and fault-injection scenarios, not ordinary application traffic or public API endpoints.
+
+## System Partition State
+
+Partition `0` can carry application-owned cluster-wide control state under application log types. The `_RaftSystem` log type is reserved for Kommander's own metadata and must not be used by application writes.
+
+When application entries on partition `0` are deltas instead of full snapshots, register `IRaftSystemStateTransfer` on every node:
+
+```csharp
+raft.RegisterSystemStateTransfer(new ControlStateTransfer(store));
+```
+
+The transfer lets Kommander repair a node that has fallen below the partition `0` compaction floor by exporting and importing the whole application state. Registration is local process state and is not replicated.
+
+Use `SetMinRetainIndex(0, snapshotIndex + 1)` after your application persists a local snapshot. This protects the unsnapshotted WAL tail from compaction for offline restart replay. The retain floor is in-memory and must be reasserted after restart.
+
+Use `AcquireRetentionHold(partitionId, index)` when multiple independent consumers need temporary retention at the same time:
+
+```csharp
+using IDisposable hold = raft.AcquireRetentionHold(
+    partitionId: 0,
+    index: snapshotIndex + 1
+);
+
+await backup.CopyRetainedTailAsync(cancellationToken);
+```
+
+Unlike `SetMinRetainIndex`, retention holds compose. Kommander retains down to the minimum active hold index, and disposing a handle releases exactly that hold. A hold is synchronous, local to the process, idempotent on dispose, and resets on restart.
+
+See [System Partition State Snapshots](../guides/system-partition-state-snapshots.md) for the full contract.
 
 ## Operation Status Values
 

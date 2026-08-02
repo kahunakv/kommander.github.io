@@ -25,6 +25,7 @@ The practical implication is:
 - learners do not count toward quorum
 - discovery helps nodes find contact points but does not define live membership
 - gossip can spread the roster faster but does not decide who may vote.
+- append-log and snapshot leader RPCs from endpoints outside the committed roster are rejected unless they are already the accepted leader for that term.
 
 If you only remember one thing, remember this: membership truth comes from Raft, not from discovery or gossip.
 
@@ -147,19 +148,21 @@ The leader promotes a learner only after it stays close enough to the committed 
 
 This is what lets nodes join without harming quorum availability during catch-up.
 
-## Catch-Up Limitation You Should Know
+## Catch-Up And Snapshot Repair
 
 Kommander uses bounded log backfill to catch learners up.
 
-That works only while the learner still needs entries above the current compaction floor. If the WAL has already compacted away the history a fresh learner needs, there is not yet a snapshot-install path wired into learner catch-up.
+That works while the learner still needs entries above the current compaction floor. If the WAL has already compacted away the history a learner needs, the leader switches to snapshot installation when the relevant application transfer hook is registered.
 
 In practical terms:
 
-- joining works for learners that can still be caught up from retained log history
-- a heavily compacted cluster may prevent a fresh learner from reaching voter status
-- a join timeout can therefore mean the learner could not catch up from the retained WAL.
+- learners first catch up from retained committed log history
+- partition `0` application deltas can be repaired through `IRaftSystemStateTransfer`
+- user partition state movement uses `IRaftStateMachineTransfer`
+- a heavily compacted cluster can still block promotion if the needed transfer hook is missing
+- a join timeout can mean the learner could not catch up from retained WAL and could not install a snapshot.
 
-See [Log Backfill And Catch-Up](./log-backfill-and-catch-up.md) for the follower catch-up path, `GetFollowerLagAsync`, and the `SnapshotRequired` handoff.
+See [Log Backfill And Catch-Up](./log-backfill-and-catch-up.md) for ordinary follower catch-up and [Snapshot Installation](../operations/snapshot-installation.md) for the below-floor repair path.
 
 ## Failure Detection And Eviction
 
@@ -186,6 +189,7 @@ Current practical state:
 - roster commits and join flow work on `InMemory`, `gRPC`, and `REST`
 - graceful leave RPCs are wired on `InMemory`, `gRPC`, and `REST`
 - cross-partition remote lag checks for learner promotion are wired on `InMemory`, `gRPC`, and `REST`
+- snapshot installation is wired on `InMemory`, `gRPC`, and `REST`
 - SWIM direct and indirect ping probing is wired on `InMemory`, `gRPC`, and `REST`
 - gossip anti-entropy is wired on `InMemory`, `gRPC`, and `REST`.
 
@@ -194,6 +198,7 @@ What that means for gRPC and REST clusters today:
 - joining works
 - graceful leave works through the transport RPC path
 - learner promotion can use remote follower lag checks instead of relying only on local observations
+- below-floor repair can use the snapshot install RPC when the relevant transfer hook is registered
 - committed membership changes still replicate through Raft
 - SWIM failure detection works through the transport
 - gossip-based roster convergence and leader-balancer load reports work through the transport.

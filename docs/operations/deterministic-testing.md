@@ -29,6 +29,7 @@ The election tests include targeted pre-vote coverage:
 The current test tree includes several useful slices:
 
 - `Kommander.Tests.Simulation`: simulation and replay.
+- `Kommander.Tests.Chaos`: real in-memory clusters with nemesis transport rules, hash-chain divergence checks, continuous invariants, and detailed failure reports.
 - `Kommander.Tests.Scheduler`: partition executor, fair schedulers, timer service, transport batching, and system coordinator behavior.
 - `Kommander.Tests.RaftSafety`: election safety, commit monotonicity, stale completion handling, log matching, and system restore behavior.
 - `Kommander.Tests.WAL`: RocksDB, SQLite, and automatic compaction coverage.
@@ -40,8 +41,11 @@ dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~K
 dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~Kommander.Tests.Scheduler
 dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~Kommander.Tests.RaftSafety
 dotnet test Kommander.Tests/Kommander.Tests.csproj --filter FullyQualifiedName~Kommander.Tests.WAL
+dotnet test Kommander.Tests/Kommander.Tests.csproj --filter Category=ChaosSmoke
 ```
+
+Use `Category=ChaosRandom` or `Category=Stress` only when you want the slower randomized fault-injection tier.
 
 ## Why It Matters
 
-This tooling makes it easier to verify invariants, reproduce leadership churn, test delayed I/O, validate pre-vote behavior under isolation, and replay a failure with the same random seed instead of trying to rediscover the bug by chance.
+This tooling makes it easier to verify invariants, reproduce leadership churn, test delayed I/O, validate pre-vote behavior under isolation, catch non-contiguous delivery bugs, and replay a failure with the same random seed instead of trying to rediscover the bug by chance.

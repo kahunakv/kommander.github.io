@@ -30,6 +30,10 @@ RaftReplicationResult result = await raft.ReplicateLogs(
 );
 ```
 
+Use this overload when all entries share one application `type`.
+
+If one burst contains different entry types or different generation fences, use [`ReplicateEntries`](./heterogeneous-write-coalescing.md) instead. It accepts a per-entry type and returns a per-entry result while still coalescing the work into fewer proposals.
+
 ## Result
 
 | Property | Description |

@@ -12,6 +12,7 @@ const sidebars = {
       items: [
         'guides/creating-a-node',
         'guides/replicating-logs',
+        'guides/heterogeneous-write-coalescing',
         'guides/hosting-endpoints',
         'operations/sample-server',
         'guides/advanced-replicated-simpledb',
@@ -21,6 +22,7 @@ const sidebars = {
         'guides/splitting-a-hot-partition',
         'guides/merging-idle-partitions',
         'guides/dynamic-cluster-membership',
+        'guides/system-partition-state-snapshots',
       ],
     },
     {
@@ -49,6 +51,7 @@ const sidebars = {
         'guides/partition-quiescence',
         'guides/swim-failure-detection',
         'operations/checkpoints-and-compaction',
+        'operations/snapshot-installation',
         'operations/wal-diagnostics',
         'operations/wal-commit-durability',
         'operations/shared-rocksdb-memory',

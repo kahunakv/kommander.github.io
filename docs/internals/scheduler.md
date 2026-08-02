@@ -39,6 +39,8 @@ When several partitions are ready at the same time, one worker can drain up to `
 
 This is a group-commit optimization. For RocksDB, the grouped call becomes one `WriteBatch` and one `db.Write` / fsync even when many partitions are included.
 
+Application-facing batching such as `ReplicateEntries` happens before this layer. It can turn mixed typed records into fewer Raft proposals for one partition. The WAL scheduler then treats those proposal writes like ordinary partition-tagged WAL work and may coalesce them with other ready partitions.
+
 SQLite benefits from the same scheduler behavior through shard-level batching. `SqliteWAL` maps partitions to a fixed pool of shard databases and then groups each scheduler batch by shard. If a scheduler group includes many partitions but they span only a few SQLite shards, the adapter commits one transaction per shard instead of one transaction per partition. With one SQLite shard, a full cross-partition scheduler group can commit in one SQLite transaction.
 
 Per-partition ordering is preserved with an in-flight guard. A partition included in one worker's group batch cannot be drained by another worker until that batch completes.
@@ -54,6 +56,8 @@ Per-partition ordering is preserved with an in-flight guard. A partition include
 - task completion when the synchronous read returns.
 
 Reads that semantically depend on prior writes are submitted after the write completion callback fires. That preserves the expected write-then-read ordering for a partition.
+
+The read scheduler also guards against reschedule stranding. If a partition receives more read work while a worker is between draining and clearing its in-flight marker, the scheduler requeues that partition so the new work cannot remain parked until unrelated activity wakes the scheduler. Concurrent drain races are handled the same way: at most one worker owns a partition at a time, and any work that arrives during that ownership is made visible for a later drain.
 
 ## Backpressure
 

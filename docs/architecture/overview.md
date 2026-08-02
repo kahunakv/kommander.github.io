@@ -72,9 +72,13 @@ It stores cluster-wide metadata such as:
 - dynamic membership roster
 - split and merge lifecycle records.
 
-Application data must use user partitions `1` and above.
+Applications may also store small cluster-wide control state on partition `0` under their own log type. The `_RaftSystem` log type is reserved for Kommander. If those application entries are deltas, register `IRaftSystemStateTransfer` so compacted followers can be repaired with a whole-state snapshot.
+
+Application data that belongs to normal workload partitions must use user partitions `1` and above.
 
 The common rule is: anything that affects safety is committed through Raft. Partition ownership and cluster membership are not decided by local discovery snapshots or gossip.
+
+When a follower falls below a compaction floor, snapshot installation runs through the partition's single-writer executor and writes a durable checkpoint boundary before normal backfill resumes.
 
 ## Pluggable Layers
 
@@ -91,6 +95,8 @@ That lets the same Raft runtime run in production over durable WALs and network 
 - [Raft In Kommander](./raft.md)
 - [Runtime Internals](../internals/runtime.md)
 - [Dynamic Cluster Membership](../guides/dynamic-cluster-membership.md)
+- [System Partition State Snapshots](../guides/system-partition-state-snapshots.md)
+- [Snapshot Installation](../operations/snapshot-installation.md)
 - [Elastic Partitions](../guides/elastic-partitions.md)
 - [Log Backfill And Catch-Up](../guides/log-backfill-and-catch-up.md)
 - [Partition Quiescence](../guides/partition-quiescence.md)

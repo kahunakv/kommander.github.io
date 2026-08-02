@@ -76,6 +76,16 @@ Backfill is intentionally bounded by:
 
 That keeps one slow follower from forcing the leader to read and ship a huge amount of WAL history in one operation. Large catch-ups happen across multiple rounds while normal replication and heartbeat traffic continue.
 
+## Shared Backfill Reads
+
+When several followers are behind at the same anchor in one heartbeat round, the leader reads that missing range from the WAL once and fans the same immutable batch out to each follower.
+
+For gRPC, the encoded form is also shared for the round. This reduces repeated WAL reads, repeated RocksDB decode work, and repeated Protobuf encoding when a group of learners or restarted followers is catching up from the same point.
+
+The cache is intentionally short-lived. It exists only for the current heartbeat round, so it does not need invalidation when new commits, truncation, or compaction happen later.
+
+Empty reads are shared too. If the leader has compacted past a requested range, every follower waiting at that same anchor can move to the snapshot decision without repeating the same empty WAL read.
+
 ## Compaction Floor And SnapshotRequired
 
 Backfill can only send entries that the leader still has.
@@ -86,9 +96,17 @@ If a follower needs entries below that floor, the leader cannot backfill them. I
 
 - `RaftOperationStatus.SnapshotRequired`
 
-That status means the follower needs a snapshot-style install path rather than ordinary log backfill.
+That status means the follower needs snapshot installation rather than ordinary log backfill.
 
-This matters for dynamic membership: a brand-new learner joining a heavily compacted cluster may not be able to catch up from logs alone.
+This matters for dynamic membership: a brand-new learner joining a heavily compacted cluster may need `IRaftSystemStateTransfer` for partition `0` state or `IRaftStateMachineTransfer` for user-partition range state.
+
+## Contiguous Delivery
+
+Kommander delivers committed entries to application callbacks in log order.
+
+If a follower sees a committed entry above a missing retained index, it withholds the later entry and waits for backfill to repair the gap. It does not skip forward and permanently lose the missing callback.
+
+If the missing index is at or below the checkpoint floor, the gap is treated as compacted history. Snapshot installation seeds the checkpoint boundary, and delivery resumes after that boundary.
 
 ## Configuration
 
@@ -111,11 +129,13 @@ More aggressive compaction can make `SnapshotRequired` more likely for far-behin
 - Persistent lag beyond `BackfillThreshold` should trigger backfill.
 - If lag does not shrink, inspect WAL read latency, transport failures, and follower health.
 - If `SnapshotRequired` appears, the follower needs state below the retained WAL floor.
+- If several learners join at once, shared backfill reads reduce leader-side storage and encoding work, but `MaxBackfillEntriesPerRound` still controls per-round catch-up size.
 - For learner promotion, lag must stay within `LearnerPromotionLag` for `LearnerPromotionStableWindow`.
 
 ## Related Reading
 
 - [Dynamic Cluster Membership](./dynamic-cluster-membership.md)
+- [Snapshot Installation](../operations/snapshot-installation.md)
 - [Configuration](../reference/configuration.md)
 - [WAL Internals](../internals/wal.md)
 - [Compaction Internals](../internals/compaction.md)

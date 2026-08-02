@@ -35,6 +35,8 @@ Current adapters use that contract in different ways:
 
 You do not usually call `BatchRequests` directly from application code. It is part of the transport layer. Internal Raft traffic shares this batching path, which reduces transport churn under load.
 
+The gRPC transport pools short-lived batch request objects and item lists used by this path. That pooling does not change wire behavior or configuration. It reduces allocation pressure when the cluster is sending many small Raft control and replication messages.
+
 ## gRPC Append-Log Coalescing
 
 The gRPC transport can also coalesce append-log stream writes.

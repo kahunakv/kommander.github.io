@@ -47,6 +47,8 @@ For a leader proposal:
 
 For auto-commit proposals, the leader commits after quorum completion. For manual proposals, the caller uses the proposal ticket with `CommitLogs` or `RollbackLogs`.
 
+`ReplicateEntries` uses the same proposal machinery, but it can build a heterogeneous list of `RaftLog` records where each entry carries its own application log type. An auto-commit-only batch becomes one proposal. A batch with a trailing manual group commits the auto prefix first, then proposes the manual suffix as a separate pending proposal.
+
 ## Cross-Partition Group Commit
 
 `FairWalScheduler` can batch writes from multiple ready partitions into one `IWAL.Write` call.
@@ -68,9 +70,9 @@ If one shard write fails, the scheduler reports the group status as errored to a
 
 ## Single-Fsync Auto-Commit Path
 
-By default, an auto-commit write syncs both the proposed entry and the committed marker.
+With `WalSingleFsyncCommit` enabled, which is the default, Kommander can release an auto-commit proposal when the proposed entry is durable on a quorum. The committed marker is still written, but it can ride a later sync.
 
-With `WalSingleFsyncCommit` enabled, Kommander can release an auto-commit proposal when the proposed entry is durable on a quorum. The committed marker is still written, but it can ride a later sync.
+When `WalSingleFsyncCommit` is disabled, an auto-commit write waits for both the proposed entry and the committed marker to sync before the client-visible operation completes.
 
 The recovery path preserves the durable proposed tail and reconstructs the committed frontier conservatively. A follower that restarted with missing committed markers can be re-supplied by the leader through normal catch-up and backfill.
 
@@ -108,11 +110,42 @@ The shard count controls the main SQLite batching tradeoff:
 
 For a new data directory, `new SqliteWAL(path, revision, logger, syncWrites, shardCount)` seeds the shard count. A `shardCount` of `0` uses `Environment.ProcessorCount`. After the directory is initialized, the resolved shard count is persisted in metadata and reused on later opens. Passing a different non-zero value for an existing directory fails fast because it would route existing partitions to different shard files.
 
+`SqliteWAL` keeps common statements prepared per shard for hot paths such as upsert, point lookup, range reads, checkpoint lookup, truncation, and counting. The wire format and database layout are unchanged; this reduces repeated SQL parsing and command allocation under restore, backfill, and compaction-heavy workloads.
+
+## Checkpoint Metadata
+
+WAL backends maintain the latest committed checkpoint per partition as indexed metadata.
+
+That avoids discovering the checkpoint through an unbounded scan of a large partition log during restore, compaction checks, and snapshot-boundary decisions.
+
+| Backend | Checkpoint metadata |
+| --- | --- |
+| `RocksDbWAL` | Stores `raft_last_checkpoint_p{partitionId}` in the metadata column family and updates it atomically with checkpoint writes and snapshot boundary installs. |
+| `SqliteWAL` | Stores last checkpoints in dedicated metadata tables per shard and updates them in the same transaction as checkpoint mutations. |
+| `InMemoryWAL` | Tracks last checkpoints in memory and recomputes only after operations that can remove the recorded checkpoint. |
+
+RocksDB compaction also uses a per-partition seek hint. After one compaction pass removes an old prefix, the next pass seeks near the previous boundary instead of starting from the beginning of a large retained key range.
+
 ## Follower Append Path
 
 Followers receive append-log messages from the leader. The state machine validates leadership and term expectations, then asks `RaftWriteAhead` to propose, commit, or roll back entries as needed.
 
 Committed follower entries are applied to the application callback after the WAL write succeeds.
+
+## Snapshot Boundary Install
+
+Snapshot install is routed through the partition executor rather than mutating WAL state directly from a transport thread.
+
+After the application import hook succeeds, `RaftWriteAhead.InstallSnapshotBoundaryAsync` asks the backend to install a durable `CommittedCheckpoint` at the snapshot index. The operation also applies the Raft suffix rule:
+
+| Case | WAL action |
+| --- | --- |
+| Boundary entry has the same term as the snapshot's `LastIncludedTerm`. | Keep entries above the snapshot index. |
+| Boundary entry is missing or has a different term. | Truncate entries above the snapshot index. |
+
+`RocksDbWAL` performs the suffix delete and checkpoint put in one `WriteBatch`. `SqliteWAL` performs the term probe, suffix delete, and checkpoint upsert in one transaction under the shard lock. `InMemoryWAL` applies the same rule under its partition guard.
+
+Once the boundary is durable, the partition seeds its in-memory commit and propose frontiers from the snapshot index so callbacks and backfill resume after the compacted prefix.
 
 ## WAL Completion Fencing
 
