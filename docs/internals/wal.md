@@ -26,11 +26,13 @@ When a partition executor starts, it calls WAL recovery before normal operations
 Recovery:
 
 1. reads logs for the partition through `ReadScheduler`
-2. advances local propose and commit indexes
-3. ignores proposed and rolled-back entries for application restore
-4. invokes `OnLogRestored` for committed application logs
-5. invokes system restore callbacks for committed system logs
-6. marks restore complete for the partition.
+2. reconstructs the contiguous present-log frontier and committed frontier
+3. widens replay down to `ApplicationDurabilityProvider` when configured
+4. advances local propose and commit indexes
+5. ignores proposed and rolled-back entries for application restore
+6. invokes `OnLogRestored` for committed application logs
+7. invokes system restore callbacks for committed system logs
+8. marks restore complete for the partition.
 
 If there are no logs, the commit index starts after the adapter's current max log id.
 
@@ -79,6 +81,29 @@ The recovery path preserves the durable proposed tail and reconstructs the commi
 This does not affect explicit two-phase writes where the caller proposes with `autoCommit: false` and later calls `CommitLogs` or `RollbackLogs`.
 
 See [WAL Commit Durability](../operations/wal-commit-durability.md) for operator-facing tuning guidance.
+
+## Contiguous WAL Frontier
+
+Kommander tracks two different high-water marks:
+
+| Frontier | Meaning |
+| --- | --- |
+| Raw max log id | Highest log id physically present in the backend. |
+| Contiguous present index | Highest log id durably present with no missing id below it, across any WAL entry type. |
+
+Raft election freshness uses the contiguous present index and its term, not the raw max id. This matters after reordered appends, crashes, lazy committed markers, or partial catch-up. A node with a single high log entry above a gap must not advertise itself as fresher than a node with a complete prefix.
+
+Leader promotion also checks for WAL holes before publishing leadership. If another voter may have the missing entries, the node refuses or steps down so a complete peer can win. In a sole-voter recovery case, Kommander logs the gap loudly and preserves availability because no other voter can repair the missing range.
+
+Committed apply drains never skip over unresolved gaps above the snapshot floor. They wait for the WAL write queue or leader backfill to fill the prefix, then deliver entries in order.
+
+## Application Durability Floor
+
+When `ApplicationDurabilityProvider` is configured, `RaftWriteAhead` asks the application for the highest committed index durably applied to the application's own storage.
+
+During restore, replay starts low enough to redeliver committed entries the application may not have flushed before the crash. During compaction, the effective compaction boundary is clamped so Kommander does not remove entries above the application's durable floor.
+
+This floor is independent from `SetMinRetainIndex` and retention holds. The durability provider protects restart replay for the application state machine; retain floors protect WAL history that another local process still needs.
 
 ## RocksDB Shared Memory Resources
 

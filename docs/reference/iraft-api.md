@@ -7,7 +7,7 @@
 | Lifecycle | `JoinCluster`, `LeaveCluster`, `UpdateNodes` |
 | Membership | `GetMembership`, `LocalRole`, `OnMembershipChanged` |
 | Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes`, `GetFollowerLagAsync` |
-| Leadership | `AmILeaderQuick`, `AmILeader`, `WaitForLeader`, `WaitForLeaderStableAsync` |
+| Leadership | `AmILeaderQuick`, `AmILeader`, `ConfirmLeadershipAsync`, `WaitForLeader`, `WaitForLeaderStableAsync` |
 | Replication | `ReplicateLogs`, `ReplicateEntries`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
 | Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetPartitionGeneration`, `GetPartitionMap`, `RegisterStateMachineTransfer` |
 | System partition state | `RegisterSystemStateTransfer`, `SetMinRetainIndex`, `AcquireRetentionHold` |
@@ -194,6 +194,19 @@ string stableLeader = await raft.WaitForLeaderStableAsync(
 ```
 
 The overload without `timeout` treats `minStableFor` as a required stability window, not a deadline. It can wait indefinitely if leadership keeps changing and the cancellation token is not cancelled.
+
+Use `ConfirmLeadershipAsync` before serving authoritative reads from local leader-owned state:
+
+```csharp
+if (!await raft.ConfirmLeadershipAsync(partitionId, cancellationToken))
+    throw new InvalidOperationException("Leadership could not be confirmed; retry or redirect.");
+
+OrderView order = localProjection.Get(orderId);
+```
+
+`AmILeaderQuick` and `AmILeader` report local leadership belief. They are useful for routing hints and quick checks, but a minority-partitioned leader can continue believing it is leader until it observes a higher term. `ConfirmLeadershipAsync` performs a same-term quorum acknowledgement round and waits until the local applied frontier covers the confirmed commit index. A read served after a `true` result is linearizable with respect to committed writes.
+
+Concurrent confirmations coalesce into one in-flight round, and a fresh confirmation can be reused within the heartbeat interval. A `false` result means the node is not the published leader, quorum could not be confirmed within `LeadershipConfirmationTimeout`, apply catch-up did not finish in time, or admission control rejected the request.
 
 ## Test Hooks
 

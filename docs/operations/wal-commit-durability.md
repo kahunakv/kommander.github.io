@@ -92,6 +92,36 @@ Kommander handles that conservatively:
 
 The important operator-facing invariant is unchanged: a write acknowledged to the client has reached quorum durability.
 
+## Application Durability Floor
+
+Raft durability and application durability are related, but they are not identical.
+
+Kommander's checkpoints describe the Raft log prefix that consensus has made durable. Your application may apply committed entries to its own storage synchronously inside `OnReplicationReceived`, or it may apply them to an in-memory projection first and flush that projection later.
+
+If your application flushes asynchronously, configure `ApplicationDurabilityProvider`:
+
+```csharp
+public sealed class ProjectionDurability : IApplicationDurabilityProvider
+{
+    public long GetDurablyAppliedIndex(int partitionId)
+    {
+        return durableStore.ReadAppliedRaftIndex(partitionId);
+    }
+}
+
+var config = new RaftConfiguration
+{
+    ApplicationDurabilityProvider = new ProjectionDurability(),
+};
+```
+
+The provider returns the highest WAL log id whose committed prefix has been durably applied to the application's own storage. Kommander uses that floor in two places:
+
+- restart replay widens down to the floor, so committed entries above the application's durable point are delivered again through `OnLogRestored`
+- compaction does not remove entries above the floor, even when a Raft checkpoint is higher.
+
+Return `-1` for "no opinion", which keeps checkpoint-anchored behavior. Return `0` when nothing has been durably applied yet. The value must come from durable application storage, must be cheap to read, and must never be too high. A stale-low value is safe because entries can be redelivered; a too-high value can hide entries the application still needs after restart.
+
 ## Configuration
 
 | Property | Default | Description |
@@ -100,6 +130,7 @@ The important operator-facing invariant is unchanged: a write acknowledged to th
 | `WalGroupCommitLingerMs` | `0` | Bounded adaptive wait, in milliseconds, used by WAL workers to gather more ready partitions into a group commit. `0` disables the linger and keeps opportunistic batching. |
 | `MaxWalGroupBatchPartitions` | `64` | Maximum ready partitions coalesced into one scheduler group write. |
 | `MaxWalBatchSize` | `256` | Maximum WAL operations drained from one partition into one batch. |
+| `ApplicationDurabilityProvider` | `null` | Optional application durability floor used to widen restart replay and fence compaction. |
 | `WriteIOThreads` | `4` | Number of WAL scheduler write workers. |
 
 The two WAL durability knobs are complementary:
@@ -133,6 +164,7 @@ For group commit linger, compare average batch density before and after enabling
 - Keep defaults when first deploying durable storage.
 - Keep `WalSingleFsyncCommit` enabled when write latency is dominated by the second commit sync.
 - Disable `WalSingleFsyncCommit` only when you need the older behavior where the disk's committed markers alone identify the complete committed frontier immediately after local restart.
+- Configure `ApplicationDurabilityProvider` when committed entries are applied to application storage asynchronously.
 - Use `WalGroupCommitLingerMs` with small values first; large values can add avoidable latency.
 - Do not use `syncWrites: false` as a substitute for these settings in production. That changes crash durability.
 - If WAL queue depth grows steadily, first determine whether the bottleneck is storage sync latency, too few `WriteIOThreads`, or a workload that needs more partitions or nodes.

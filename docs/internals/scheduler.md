@@ -59,6 +59,8 @@ Reads that semantically depend on prior writes are submitted after the write com
 
 The read scheduler also guards against reschedule stranding. If a partition receives more read work while a worker is between draining and clearing its in-flight marker, the scheduler requeues that partition so the new work cannot remain parked until unrelated activity wakes the scheduler. Concurrent drain races are handled the same way: at most one worker owns a partition at a time, and any work that arrives during that ownership is made visible for a later drain.
 
+Read work can also be coalesced when callers submit compatible batchable reads for the same partition. The scheduler preserves per-partition ordering, but it can execute a group of ready reads through one batch executor call instead of issuing many independent backend calls. This is useful for restore, backfill, and diagnostics paths that produce several nearby WAL reads under load.
+
 ## Backpressure
 
 The fair schedulers have per-partition queue limits. When the limit is reached, callers get a backpressure exception instead of silently creating an unbounded backlog.

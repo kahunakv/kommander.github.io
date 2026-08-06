@@ -52,13 +52,15 @@ SWIM uses an incarnation counter to avoid stale suspicion winning forever.
 
 If a healthy node learns that others marked it `Suspect`, it increments its incarnation and gossips a newer `Alive` record. Other nodes accept the newer incarnation and clear the stale suspicion.
 
-`Dead` is terminal locally. A falsely-dead node should rejoin through dynamic membership rather than trying to refute the old state.
+`Dead` is terminal for ordinary gossip refutation, but the eviction path performs a final direct probe before removal. If the node responds, Kommander resurrects the liveness entry and skips that eviction pass.
 
 ## Eviction Is Still Raft
 
 SWIM does not remove voters by itself.
 
 When a voter is `Dead` for longer than `DeadMemberEvictionGrace`, the system-partition leader may commit a `RemoveMember` entry.
+
+Before committing removal, the leader performs one direct last-chance probe bounded by `PingTimeout`. This closes the common restart race where a node becomes reachable again after being marked `Dead` but before the grace period expires.
 
 That keeps the safety boundary clear:
 
@@ -74,7 +76,8 @@ That keeps the safety boundary clear:
 | `PingTimeout` | `500 ms` | Direct or indirect probe timeout. Lower values detect failures faster but can increase false positives on slow networks. |
 | `IndirectPingFanout` | `2` | Number of relay peers used after a direct ping timeout. |
 | `SuspicionTimeout` | `5 s` | Time a node may remain `Suspect` before becoming `Dead`. |
-| `DeadMemberEvictionGrace` | `30 s` | How long a node must remain `Dead` before the system-partition leader may evict it. |
+| `DeadMemberEvictionGrace` | `2 min` | How long a node must remain `Dead` before the system-partition leader may evict it. |
+| `EnableAutoRejoin` | `true` | Lets an evicted-but-running node automatically rejoin through dynamic membership. |
 
 When `EnableQuiescence = true`, `PingInterval` must also be:
 
@@ -102,6 +105,7 @@ If a custom transport falls back to the default failure-returning implementation
 
 - Use `PingInterval` and `PingTimeout` that fit your network latency.
 - Increase `SuspicionTimeout` if transient network stalls create false `Dead` transitions.
+- Keep `DeadMemberEvictionGrace` long enough to cover routine restarts and cold WAL opens.
 - Do not disable SWIM while quiescence is enabled.
 - Watch membership changes and liveness logs together when diagnosing evictions.
 

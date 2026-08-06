@@ -151,6 +151,29 @@
   gap: 1rem;
 }
 
+.usedByGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.usedByCard {
+  display: block;
+  height: 100%;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  padding: 1.35rem;
+  background: var(--ifm-background-surface-color);
+  color: inherit;
+  text-decoration: none;
+}
+
+.usedByCard:hover {
+  color: inherit;
+  text-decoration: none;
+  border-color: var(--ifm-color-primary);
+}
+
 .fitList {
   margin: 0;
   padding-left: 1.1rem;
@@ -224,6 +247,7 @@
   .proofGrid,
   .cardGrid,
   .fitGrid,
+  .usedByGrid,
   .calloutRow {
     grid-template-columns: 1fr;
   }

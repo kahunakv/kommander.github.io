@@ -99,5 +99,5 @@ Use Kommander when you are building a replicated service and need a consensus co
 It is a good fit when correctness depends on ordered, replicated decisions. It is probably not the right fit for simple single-node applications, fire-and-forget messaging, eventually consistent caches, or workloads where losing recent writes is acceptable.
 
 :::warning
-Kommander is beta software. APIs and operational behavior may change between releases.
+Kommander is a production-oriented consensus library. As with any quorum-based storage component, validate configuration, storage, security, and operational behavior against your workload before rollout.
 :::

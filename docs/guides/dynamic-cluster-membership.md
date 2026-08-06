@@ -218,6 +218,18 @@ How to interpret them:
 - `ConcurrentMembershipChange`: another membership change is already in flight. Retry after it commits.
 - `InsufficientVoters`: removal would make the cluster unavailable. Do not retry blindly.
 
+## Eviction Races And Auto-Rejoin
+
+Dead-member eviction is intentionally conservative.
+
+`DeadMemberEvictionGrace` defaults to `2 minutes`. When a member has stayed `Dead` past that grace period, the system-partition leader performs one final direct probe before committing `RemoveMember`. If the endpoint responds, Kommander marks it alive and skips eviction for that pass.
+
+This avoids evicting a node that briefly crossed into `Dead` during a slow restart but became reachable again before removal committed.
+
+If a running node discovers that it was removed from the committed roster, `EnableAutoRejoin = true` lets it automatically run the join flow again. The node re-enters as a learner and is promoted back to voter after normal catch-up. Auto-rejoin is suppressed during graceful leave and before a node has ever finished joining.
+
+Disable auto-rejoin only when your operational model intentionally removes live nodes remotely and expects those processes to remain outside the cluster while still running.
+
 ## Configuration Knobs
 
 The main membership-related settings are:
@@ -233,6 +245,7 @@ The main membership-related settings are:
 - `IndirectPingFanout`
 - `SuspicionTimeout`
 - `DeadMemberEvictionGrace`
+- `EnableAutoRejoin`
 - `EnableQuiescence`
 - `QuiesceAfter`
 

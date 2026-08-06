@@ -87,7 +87,7 @@ Checkpoints and bounded compaction keep old recoverable history under control. P
 
 The network transports support TLS-aware configuration, shared-secret request authentication, replay protection, and certificate thumbprint controls.
 
-Metrics and structured logs expose partition queue depth, WAL queue depth and batching, operation latency by class, stale completions, heartbeat and election delay, leader-balancer behavior, and admission rejections. The goal is to make slow or unstable behavior explainable during load tests and production incidents.
+Metrics and structured logs expose partition queue depth, WAL queue depth and batching, operation latency by class, stale completions, heartbeat and election delay, leader-balancer behavior, and admission rejections. The goal is to make slow or degraded behavior explainable during load tests and production incidents.
 
 ### Testing Without A Separate Cluster
 
@@ -149,7 +149,14 @@ Kommander provides the mechanisms and diagnostics for those concerns. It does no
 
 Kommander uses the MIT license. It can be used, modified, and distributed in commercial or internal applications without a copyleft requirement, subject to the license notice and terms.
 
-Kommander is beta software. Evaluate API stability and operational behavior against your production requirements before adoption.
+Kommander is designed for production-oriented embedded coordination. Evaluate configuration, storage, security, monitoring, and operational behavior against your production requirements before adoption.
+
+## Used By
+
+Kommander is used by:
+
+- [CamusDB](https://camusdb.github.io/)
+- [Kahuna](https://kahunakv.github.io/)
 
 ## Where To Go Next
 

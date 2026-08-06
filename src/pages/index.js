@@ -83,6 +83,19 @@ const fitCards = [
   },
 ];
 
+const usedBy = [
+  {
+    name: 'CamusDB',
+    href: 'https://camusdb.github.io/',
+    description: 'A distributed database project using Kommander for replicated coordination.',
+  },
+  {
+    name: 'Kahuna',
+    href: 'https://kahunakv.github.io/',
+    description: 'A distributed key-value project using Kommander as its embedded consensus layer.',
+  },
+];
+
 function SectionHeading({eyebrow, title, subtitle}) {
   return (
     <div className={styles.sectionHeading}>
@@ -159,6 +172,31 @@ export default function Home() {
                   </Heading>
                   <p className={styles.cardDescription}>{card.description}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.bandSection}>
+          <div className="container">
+            <SectionHeading
+              eyebrow="Used by"
+              title="Built into real distributed data systems"
+              subtitle="Kommander is not only an example consensus runtime. It is used as the embedded coordination layer in projects that need replicated state, durable agreement, and operational control."
+            />
+            <div className={styles.usedByGrid}>
+              {usedBy.map((project) => (
+                <a
+                  key={project.name}
+                  className={styles.usedByCard}
+                  href={project.href}
+                  target="_blank"
+                  rel="noreferrer">
+                  <Heading as="h3" className={styles.cardTitle}>
+                    {project.name}
+                  </Heading>
+                  <p className={styles.cardDescription}>{project.description}</p>
+                </a>
               ))}
             </div>
           </div>

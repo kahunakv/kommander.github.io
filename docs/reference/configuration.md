@@ -38,6 +38,7 @@
 | `MaxWalGroupBatchPartitions` | `64` | Maximum number of ready partitions coalesced into one cross-partition WAL write call. For RocksDB this can reduce many partition writes to one `db.Write` / fsync. For SQLite this allows the adapter to group writes by shard. |
 | `WalGroupCommitLingerMs` | `0` | Adaptive WAL group-commit linger window in milliseconds. Values above `0` let a write worker briefly gather more ready partitions before issuing one storage sync. |
 | `WalSingleFsyncCommit` | `true` | Enables the auto-commit single-fsync fast path. Acknowledges when the proposed entry is quorum-durable and writes the committed marker lazily. |
+| `ApplicationDurabilityProvider` | `null` | Optional application-owned durability floor. When set, restart replay widens below checkpoints as needed and compaction is fenced so committed entries are not removed before the application has durably applied them. |
 | `MaxDrainQuantumControl` | `8` | Maximum control-plane operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumReplication` | `4` | Maximum replication operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumClient` | `2` | Maximum client operations drained per partition-executor wake cycle. |
@@ -51,6 +52,10 @@
 | `PartitionExecutorPoolSize` | `0` | Worker count for the shared partition executor pool. `0` resolves to `Environment.ProcessorCount`; values below `0` are clamped to `1`. |
 | `EnableQuiescence` | `true` | Allows idle partitions to suppress per-partition heartbeats and rely on SWIM node liveness until new work arrives. |
 | `QuiesceAfter` | `1500 ms` | Idle duration before a leader quiesces a partition. Requires no active proposals. |
+| `LeadershipBarrierTimeout` | `10 s` | Maximum time a newly elected leader waits for its internal promotion barrier to commit before reverting to follower. Must be positive. |
+| `LeadershipConfirmationTimeout` | `2 s` | Maximum time `ConfirmLeadershipAsync` waits for quorum confirmation and local apply catch-up before returning `false`. |
+| `EnableCheckQuorum` | `false` | When enabled, a leader steps down if it has not heard same-term acknowledgements from a majority for the configured check-quorum window. |
+| `CheckQuorumIntervalMultiplier` | `8` | Number of heartbeat intervals used as the check-quorum step-down window when `EnableCheckQuorum` is enabled. |
 | `BackfillThreshold` | `10` | Follower lag threshold that switches the leader from empty heartbeats to active committed-log backfill. |
 | `MaxBackfillEntriesPerRound` | `128` | Maximum committed log entries shipped to one stale follower per backfill round. |
 | `SnapshotReceiveSessionTtl` | `30 s` | Idle timeout for an incomplete snapshot receive session. Expiry runs lazily on later snapshot receives. |
@@ -64,7 +69,8 @@
 | `PingTimeout` | `500 ms` | SWIM direct/indirect probe timeout. |
 | `IndirectPingFanout` | `2` | Number of relay peers used for indirect SWIM probes. |
 | `SuspicionTimeout` | `5 s` | How long a node stays `Suspect` before becoming `Dead`. |
-| `DeadMemberEvictionGrace` | `30 s` | How long a node remains `Dead` before the system-partition leader evicts it. |
+| `DeadMemberEvictionGrace` | `2 min` | How long a node remains `Dead` before the system-partition leader may evict it. The eviction path performs a final direct probe before committing removal. |
+| `EnableAutoRejoin` | `true` | Allows a running node that discovers it was removed from the committed roster to automatically run the join flow again instead of remaining `NotMember`. |
 | `PingInterval` | `1 s` | SWIM ping round interval. Set to `0` or lower to disable the detector. Must be greater than `0` and lower than `StartElectionTimeout` when `EnableQuiescence` is `true`. |
 | `EnableLeaderBalancer` | `false` | Enables automatic redistribution of partition leadership across live voters. |
 | `LeaderBalancerReportInterval` | `5 s` | How often each node publishes its local leadership and load report through gossip. |
@@ -143,6 +149,19 @@ Kommander uses explicit admission control so client traffic and WAL pressure can
 
 If a client proposal limit is hit, the runtime can reject new work with `RaftOperationStatus.ProposalQueueFull` instead of letting memory usage grow indefinitely.
 
+## Leadership And Reads
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `LeadershipBarrierTimeout` | `10 s` | Bounds the promotion barrier for a newly elected leader that inherits prior-term WAL entries. During the barrier, heartbeats can flow, but leadership is not published to applications. |
+| `LeadershipConfirmationTimeout` | `2 s` | Bounds `ConfirmLeadershipAsync`, including its same-term quorum acknowledgement round and the wait for the local apply frontier to cover the confirmed commit index. |
+| `EnableCheckQuorum` | `false` | Makes an active leader step down after losing same-term quorum contact for the configured window. This helps stale leaders fail faster, but linearizable local reads should still use `ConfirmLeadershipAsync`. |
+| `CheckQuorumIntervalMultiplier` | `8` | Multiplier applied to `HeartbeatInterval` for the check-quorum step-down window. |
+
+The promotion barrier protects newly elected leaders from serving before inherited committed entries have been applied locally. If a clean failover has no inherited tail, leadership publishes immediately. If prior-term entries exist above the local commit frontier, Kommander commits an internal no-op first, drains inherited entries, and only then reports the node as leader.
+
+`ConfirmLeadershipAsync` is the read-side safety API. Use it before serving authoritative local reads from a leader-owned projection. It confirms that the node still has same-term quorum contact and that its local state machine has applied through the commit index observed by that confirmation round.
+
 ## WAL Write Batching
 
 `FairWalScheduler` can batch writes in two dimensions:
@@ -153,6 +172,7 @@ If a client proposal limit is hit, the runtime can reject new work with `RaftOpe
 | `MaxWalGroupBatchPartitions` | `64` | Maximum ready partitions coalesced into one `IWAL.Write` call. |
 | `WalGroupCommitLingerMs` | `0` | Adaptive wait window that lets a WAL worker gather more ready partitions into one sync before writing. |
 | `WalSingleFsyncCommit` | `true` | Removes the committed-marker sync from the client-visible `autoCommit` path by acknowledging after propose quorum durability. |
+| `ApplicationDurabilityProvider` | `null` | Optional floor reported by the application for the highest committed WAL index durably applied to the application's own storage. |
 | `WriteIOThreads` | `4` | Number of scheduler workers. Each worker can process one cross-partition group batch at a time. |
 | `SqliteWalShardCount` | `0` | Desired SQLite shard count when creating a new WAL directory. |
 
@@ -194,7 +214,8 @@ Kommander supports runtime cluster membership management with learners, promotio
 | `PingTimeout` | `500 ms` | SWIM direct/indirect probe timeout. |
 | `IndirectPingFanout` | `2` | Number of relay peers used for indirect SWIM probes. |
 | `SuspicionTimeout` | `5 s` | How long a node stays `Suspect` before becoming `Dead`. |
-| `DeadMemberEvictionGrace` | `30 s` | How long a node remains `Dead` before the system-partition leader evicts it. |
+| `DeadMemberEvictionGrace` | `2 min` | How long a node remains `Dead` before the system-partition leader may evict it. The leader probes the endpoint once more before committing removal. |
+| `EnableAutoRejoin` | `true` | Lets an evicted-but-running node automatically rejoin through the ordinary learner-to-voter path. Disable only when remote removal is intended to keep the process out while it remains running. |
 
 The built-in in-memory, gRPC, and REST transports all implement direct and indirect SWIM pings. If you disable SWIM by setting `PingInterval` to `0`, also set `EnableQuiescence = false`.
 

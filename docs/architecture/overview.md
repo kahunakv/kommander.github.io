@@ -35,6 +35,8 @@ When a node starts:
 
 When dynamic membership is used, a new node joins as a learner first. It catches up before it is promoted to voter, so the existing quorum is not weakened during catch-up.
 
+If a node was evicted while it was restarting or partitioned, it can automatically rejoin when `EnableAutoRejoin` is enabled. The node goes through the same learner catch-up and promotion path as an ordinary join.
+
 ## Write Flow
 
 For a normal `ReplicateLogs` call:
@@ -48,6 +50,8 @@ For a normal `ReplicateLogs` call:
 
 With `autoCommit: true`, the leader commits as soon as quorum is reached. With `autoCommit: false`, the caller uses the returned proposal ticket with `CommitLogs` or `RollbackLogs`.
 
+When a newly elected leader inherits prior-term entries above its local commit frontier, Kommander holds leadership unpublished until an internal promotion barrier commits and the inherited entries have been drained into the application state machine. That prevents a node from advertising itself as leader while its local projection is still behind.
+
 ## Restore Flow
 
 The WAL is the durable source of truth after a restart.
@@ -55,10 +59,12 @@ The WAL is the durable source of truth after a restart.
 During restore:
 
 1. Kommander reads retained logs for the partition
-2. proposed and rolled-back entries are ignored for application restore
-3. committed application entries are delivered through `OnLogRestored`
-4. system entries rebuild the partition map and membership state
-5. the partition becomes available for normal Raft operation.
+2. the contiguous WAL frontier and committed frontier are reconstructed
+3. replay is widened to the application durability floor when `ApplicationDurabilityProvider` is configured
+4. proposed and rolled-back entries are ignored for application restore
+5. committed application entries are delivered through `OnLogRestored`
+6. system entries rebuild the partition map and membership state
+7. the partition becomes available for normal Raft operation.
 
 Your application should treat `OnLogRestored` as the path that rebuilds local state from committed history.
 
