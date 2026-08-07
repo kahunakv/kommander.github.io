@@ -4,7 +4,7 @@
 
 Kommander implements this model with partitioned Raft groups. Each partition elects its own leader, so a node can lead one partition and follow another. This improves throughput when workloads can be routed by key while preserving strict ordering inside each partition.
 
-If you are new to Raft, read "replicated state machine" as "the same sequence of decisions is replayed on every node." Kommander gives every node the same committed sequence. Your code turns that sequence into useful state.
+If you are new to Raft, read "replicated state machine" as "the same sequence of decisions is replayed on every replica that hosts the partition." With default full replication, that means every voter. With replica placement enabled, it means the partition's assigned replicas. Your code turns that sequence into useful state.
 
 ![Compressed overview of the Raft algorithm](/img/raft-compressed.png)
 

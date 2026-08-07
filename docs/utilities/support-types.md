@@ -25,11 +25,13 @@ Use it where the expected key count is small and predictable.
 
 Elastic partition APIs use a few public support types:
 
-- `RaftPartitionRange`: one partition-map entry, including `PartitionId`, hash range, `Generation`, `State`, and `RoutingMode`.
+- `RaftPartitionRange`: one partition-map entry, including `PartitionId`, hash range, `Generation`, `State`, `RoutingMode`, `Replicas`, and `ReplicationFactor`.
+- `RaftReplica`: one node that hosts a partition range when replica placement is enabled.
+- `RaftReplicaRole`: `Voter`, `Learner`, or `Removing`.
 - `RaftPartitionLifecycleResult`: result from create, remove, split, and merge operations.
 - `RaftSplitPlan`: optional split configuration such as target partition id, routing mode, and hash boundary.
 - `RaftMergePlan`: identifies the survivor and source partitions during merge.
 - `RaftPartitionState`: `Active`, `Splitting`, `Draining`, `Removed`.
 - `RaftRoutingMode`: `HashRange`, `Unrouted`.
 
-See [Elastic Partitions](../guides/elastic-partitions.md) for when applications should use these types.
+See [Elastic Partitions](../guides/elastic-partitions.md) and [Replica Placement](../guides/replica-placement.md) for when applications should use these types.

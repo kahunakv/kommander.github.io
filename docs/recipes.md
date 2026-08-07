@@ -8,7 +8,7 @@ Kommander is intentionally not a finished database or workflow engine. In each p
 
 If you are new to Raft, think of Kommander as a way to make a small cluster agree on important decisions before your application acts on them.
 
-A command is an application-level decision you want the cluster to remember, such as "this job started", "this configuration value changed", or "this resource now belongs to node-a". Kommander replicates that command to the partition's Raft group. Once the command is committed, every node receives it through callbacks and can update its own local view.
+A command is an application-level decision you want the cluster to remember, such as "this job started", "this configuration value changed", or "this resource now belongs to node-a". Kommander replicates that command to the partition's Raft group. Once the command is committed, every replica that hosts that partition receives it through callbacks and can update its own local view.
 
 Most recipes are split into the same beginner-friendly pieces:
 

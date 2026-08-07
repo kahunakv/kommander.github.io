@@ -2,7 +2,7 @@
 
 Use Kommander to replicate operational configuration changes across all nodes in a service.
 
-In this recipe, configuration is not edited independently on every node. Instead, each change is recorded as a command in Kommander. Every node applies the same commands in the same order, so they build the same configuration view.
+In this recipe, configuration is not edited independently on every node. Instead, each change is recorded as a command in Kommander. Every replica that hosts the configuration partition applies the same commands in the same order, so they build the same configuration view.
 
 ## Problem
 
@@ -24,7 +24,7 @@ Avoid storing large files, secrets, or high-churn metrics directly in the log. F
 
 ## Kommander Pattern
 
-Represent each configuration change as an append-only command. The leader commits the command, and every node applies it in the same order.
+Represent each configuration change as an append-only command. The leader commits the command, and every replica applies it in the same order.
 
 The command should describe the change, not just the final in-memory object. This makes startup recovery simpler because a node can replay the committed changes to rebuild its local configuration cache.
 

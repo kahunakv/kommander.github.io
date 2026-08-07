@@ -17,7 +17,7 @@ Kommander gives those nodes one agreed order of changes. For each partition:
 1. one node acts as leader
 2. the leader proposes an application command
 3. a quorum stores the command durably
-4. every node applies committed commands in the same order
+4. every replica applies committed commands in the same order
 5. another node can become leader when the current leader is unavailable.
 
 This is useful when correctness depends on agreement, not merely on eventually copying data.
@@ -50,6 +50,8 @@ Each user partition has its own Raft group and leader. Different nodes can lead 
 
 Partition `0` is reserved for Kommander's system state. Application partitions start at `1`.
 
+By default, every user partition is replicated to every committed voter. For larger clusters, `ReplicationFactor` lets each user partition use a fixed-size replica set, so storage, heartbeats, and quorum width do not have to grow with the total cluster size.
+
 ### Pluggable Storage And Transport
 
 Choose the components that fit your deployment:
@@ -72,6 +74,7 @@ Kommander supports capabilities commonly needed after the first deployment:
 - remove members through a committed cluster roster
 - detect node failure through SWIM-style probing
 - create, split, merge, and remove user partitions
+- place user partition replicas by replication factor
 - fence stale routing decisions with partition generations
 - redistribute partition leaders by count and measured load.
 

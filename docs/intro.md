@@ -6,7 +6,7 @@ sidebar_position: 1
 
 Kommander is an open-source distributed consensus library for C#/.NET. It helps several running processes agree on the same ordered stream of changes, even when individual nodes restart, lose network connectivity, or stop responding.
 
-If you have not worked with [Raft](https://raft.github.io/) or consensus algorithms before, the core idea is simple: one node becomes the leader for a partition, that leader accepts a proposed change, and the change is considered committed only after enough nodes have stored it. Your application can then apply committed changes in the same order on every node.
+If you have not worked with [Raft](https://raft.github.io/) or consensus algorithms before, the core idea is simple: one node becomes the leader for a partition, that leader accepts a proposed change, and the change is considered committed only after enough replicas have stored it. Your application can then apply committed changes in the same order on every node that hosts that partition.
 
 That gives you a reliable foundation for building services where multiple machines need to behave like one coordinated system.
 
@@ -38,7 +38,7 @@ Your application decides what the lines mean. A line might mean "job 123 started
 
 Kommander is useful when a single server is not enough, but letting every server make independent decisions would create conflicts. You can use it to build:
 
-- Replicated state machines where every node applies the same commands in the same order.
+- Replicated state machines where every replica applies the same commands in the same order.
 - Highly available control planes where another node can continue after the leader fails.
 - Partitioned metadata services for tenants, resources, jobs, sessions, or internal platform state.
 - Leader-aware workers where exactly one node coordinates work for a partition at a time.
@@ -80,6 +80,7 @@ That boundary is intentional. Kommander owns consensus mechanics. Your applicati
 
 - Per-partition Raft leader election.
 - Quorum-based log replication.
+- Optional per-partition replica placement through `ReplicationFactor`.
 - Automatic commit or explicit commit and rollback.
 - RocksDB, SQLite, and in-memory WAL implementations.
 - gRPC, REST/JSON, and in-memory communication adapters.
