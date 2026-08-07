@@ -19,6 +19,7 @@ const sidebars = {
         'guides/security-and-authentication',
         'guides/checkpointing-and-recovery',
         'guides/elastic-partitions',
+        'guides/replica-placement',
         'guides/splitting-a-hot-partition',
         'guides/merging-idle-partitions',
         'guides/dynamic-cluster-membership',

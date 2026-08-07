@@ -21,7 +21,9 @@ Do not call public replication APIs with partition `0`; `RaftManager` rejects us
 
 ## Dynamic Partitions
 
-Initial user partitions are replicated through the reserved system partition and then started on every node. If you keep a concrete `RaftManager` reference, you can request a partition split:
+Initial user partitions are replicated through the reserved system partition and then started according to the committed partition map. With the default `ReplicationFactor = 0`, every user partition is hosted by every roster voter. When replica placement is enabled, each user partition records the voter replicas that host it.
+
+If you keep a concrete `RaftManager` reference, you can request a partition split:
 
 ```csharp
 RaftManager manager = /* created node */;
@@ -31,3 +33,13 @@ await manager.SplitPartition(partitionId);
 The caller must be initialized, the target partition must be `1` or higher, and the local node must be leader for the target partition.
 
 Kommander exposes create, remove, split, and merge APIs through `IRaft`, along with generation fencing and partition-map snapshots. See [Elastic Partitions](../guides/elastic-partitions.md) for the user-facing lifecycle behavior.
+
+## Replica Placement
+
+Replica placement lets a user partition live on a subset of voters.
+
+Set `ReplicationFactor` to a positive value to target that many voter replicas per user partition. A range with RF 3 commits through a majority of its three voter replicas, regardless of how many voters exist in the whole cluster.
+
+Partition `0` remains fully replicated because it stores the authoritative system state, including the partition map and replica assignments.
+
+See [Replica Placement](../guides/replica-placement.md) for routing, rebalancing, and configuration details.

@@ -404,7 +404,7 @@ The SimpleDB sample itself is fixed to three nodes: `NodeOptions.Validate` expec
 
 Adding voters improves failure tolerance only when quorum remains available. It also increases replication work and may increase commit latency. Prefer an odd voter count and choose it from the failure budget instead of adding replicas without a quorum plan.
 
-This example replicates the materialized key/value state to every node. More nodes do not automatically shard `values.db` or increase storage capacity. User partitions distribute leadership and write coordination; application state placement and transfer remain your responsibility if you want true data sharding.
+This example uses the default full-replication behavior, so the materialized key/value state is present on every node. With Kommander's replica placement enabled, user partitions can target a replication factor such as RF 3 instead of every voter, and clients can route to the replicas listed by `GetPartitionReplicas`. Your application still owns the SQLite schema, query API, snapshots, and any state-transfer behavior needed when partition layouts change.
 
 ## Test Failure And Recovery
 

@@ -9,7 +9,7 @@
 | Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes`, `GetFollowerLagAsync` |
 | Leadership | `AmILeaderQuick`, `AmILeader`, `ConfirmLeadershipAsync`, `WaitForLeader`, `WaitForLeaderStableAsync` |
 | Replication | `ReplicateLogs`, `ReplicateEntries`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
-| Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetPartitionGeneration`, `GetPartitionMap`, `RegisterStateMachineTransfer` |
+| Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetPartitionGeneration`, `GetPartitionMap`, `GetPartitionReplicas`, `GetEffectiveReplicationFactor`, `SetReplicationFactorAsync`, `RegisterStateMachineTransfer` |
 | System partition state | `RegisterSystemStateTransfer`, `SetMinRetainIndex`, `AcquireRetentionHold` |
 | Partition load | `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, `GetPartitionCommitWaitMs` |
 | Partition routing | `GetPartitionKey`, `GetPrefixPartitionKey` |
@@ -289,10 +289,27 @@ Useful companion APIs:
 ```csharp
 long generation = raft.GetPartitionGeneration(2);
 IReadOnlyList<RaftPartitionRange> map = raft.GetPartitionMap();
+IReadOnlyList<RaftReplica> replicas = raft.GetPartitionReplicas(2);
+int effectiveRf = raft.GetEffectiveReplicationFactor(2);
 raft.RegisterStateMachineTransfer(new MyTransfer());
 ```
 
-See [Elastic Partitions](../guides/elastic-partitions.md) for the full behavior and application responsibilities.
+`GetPartitionReplicas` returns the committed replica set for consumer-side routing. An empty list means legacy full replication, where every committed roster voter hosts the partition.
+
+Set a per-partition replication-factor override with:
+
+```csharp
+RaftPartitionLifecycleResult rfChanged =
+    await raft.SetReplicationFactorAsync(
+        partitionId: 2,
+        replicationFactor: 3,
+        ct: cancellationToken
+    );
+```
+
+Use `replicationFactor: 0` to clear the override and inherit `RaftConfiguration.ReplicationFactor`. Changing the target RF does not move replicas immediately; placement moves happen on later controller passes when `EnablePlacementRebalancer` is enabled.
+
+See [Elastic Partitions](../guides/elastic-partitions.md) and [Replica Placement](../guides/replica-placement.md) for the full behavior and application responsibilities.
 
 ## Replication Signature Note
 

@@ -4,6 +4,8 @@ Each Kommander user partition is an independent Raft group with its own leader. 
 
 The optional leader balancer gradually redistributes leadership across live voting members. It balances leader count first, then considers measured partition load. This spreads replication, heartbeat, and proposal work without moving partition data or changing partition ranges.
 
+When [replica placement](../guides/replica-placement.md) is enabled, leadership can move only among the partition's voter replicas. Placement decides which nodes host the range; leader balancing decides which eligible replica should lead it.
+
 ## When To Use It
 
 Leader balancing is useful when:

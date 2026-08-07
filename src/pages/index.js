@@ -8,6 +8,7 @@ import styles from './index.module.css';
 
 const proofPoints = [
   'Partitioned Raft groups',
+  'Replica placement',
   'Dynamic membership',
   'Elastic partitions',
   'MIT-licensed for commercial and internal use',
@@ -18,6 +19,11 @@ const advantageCards = [
     title: 'Spread writes across partitions',
     description:
       'Different partitions can have different leaders, so one node does not have to own every write in the cluster.',
+  },
+  {
+    title: 'Choose how many replicas each range needs',
+    description:
+      'Keep full replication for simple deployments or set a replication factor so large clusters store each user partition on a smaller voter set.',
   },
   {
     title: 'Keep control of your domain model',
@@ -245,6 +251,18 @@ export default function Home() {
                 </p>
                 <Link className={styles.inlineLink} to="/docs/guides/elastic-partitions">
                   Read the partition guide
+                </Link>
+              </div>
+              <div className={styles.calloutCard}>
+                <Heading as="h3" className={styles.cardTitle}>
+                  Replica placement
+                </Heading>
+                <p className={styles.cardDescription}>
+                  Configure a replication factor per user partition so larger clusters can keep
+                  fixed-size replica sets while the system partition remains fully replicated.
+                </p>
+                <Link className={styles.inlineLink} to="/docs/guides/replica-placement">
+                  Read the placement guide
                 </Link>
               </div>
               <div className={styles.calloutCard}>

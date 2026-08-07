@@ -85,6 +85,12 @@
 | `LeaderBalancerOpsWeight` | `1.0` | Operations-per-second weight in the partition load score. |
 | `LeaderBalancerQueueWeight` | `0.5` | Queue-depth weight in the partition load score. |
 | `SuggestionTimeout` | `15 s` | Time allowed for a suggested move to appear in a fresh load report. |
+| `ReplicationFactor` | `0` | Target voter replicas per user partition. `0` means legacy full replication across every roster voter. |
+| `EnablePlacementRebalancer` | `false` | Enables ongoing replica placement repair, trim, and balancing. In-flight transitions still complete when disabled. |
+| `MaxReplicaMovesPerPass` | `2` | Maximum new replica placement moves started in one controller pass. |
+| `MaxConcurrentReplicaTransfers` | `1` | Maximum ranges with a transitional learner or removing replica at once. |
+| `ReplicaCountDeadband` | `1` | Per-node replica-count imbalance tolerated before balancing moves are emitted. Under-replication repairs ignore it. |
+| `Zone` | `null` | Optional locality hint for the local node. The placement planner prefers distinct zones when hints are available. |
 | `CompactEveryOperations` | `10000` | Committed operations between automatic WAL compaction triggers per partition. Set to `0` or lower to disable automatic compaction. |
 | `CompactNumberEntries` | `100` | Max entries the WAL adapter is asked to remove per `CompactLogsOlderThan` call. Values below `1` are treated as `1`. |
 | `MaxEntriesPerCompaction` | `5000` | Upper bound on entries removed during one triggered compaction pass before yielding. Values below `CompactNumberEntries` are treated as `CompactNumberEntries`. |
@@ -255,6 +261,28 @@ The optional leader balancer runs only on the current system-partition leader. I
 | `LeaderBalancerQueueWeight` | `0.5` | Queue-pressure contribution to the load score. |
 
 See [Automatic Leader Balancing](../operations/leader-balancing.md) for behavior, tuning, metrics, and troubleshooting.
+
+## Replica Placement
+
+Replica placement controls which nodes host each user partition.
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `ReplicationFactor` | `0` | Target number of voter replicas per user partition. `0` means full replication across every roster voter. |
+| `EnablePlacementRebalancer` | `false` | Master switch for ongoing placement passes. Initial placement still honors `ReplicationFactor`, and in-flight transitions still complete. |
+| `MaxReplicaMovesPerPass` | `2` | Maximum new add/remove placement moves initiated in one pass. |
+| `MaxConcurrentReplicaTransfers` | `1` | Maximum number of ranges allowed to have a learner or removing replica at once. |
+| `ReplicaCountDeadband` | `1` | Replica-count imbalance tolerated before balancing moves are planned. Repairs for under-replicated ranges bypass the deadband. |
+| `Zone` | `null` | Optional zone or rack hint for this node. Placement prefers spreading a range's replicas across distinct zones when hints exist. |
+| `LeaderBalancerInterval` | `30 s` | Placement pass cadence. The placement controller shares the leader-balancer timer path. |
+| `LearnerPromotionLag` | `10` | Maximum lag a learner replica may have and still be considered caught up. |
+| `LearnerPromotionStableWindow` | `3 s` | Stable catch-up window before a learner replica is promoted to voter. |
+
+`ReplicationFactor = 0` keeps the legacy behavior where every committed roster voter hosts every user partition. When RF is greater than `0`, each range records its own replica set in the committed partition map, and quorum is computed over that range's voter replicas.
+
+Prefer odd RF values. RF 4 usually costs more than RF 3 without increasing tolerated failures, because both require a majority and both tolerate one failed replica.
+
+See [Replica Placement](../guides/replica-placement.md) for routing behavior, split/merge interaction, and operational guidance.
 
 ## Partition Quiescence
 

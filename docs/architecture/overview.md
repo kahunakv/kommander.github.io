@@ -8,6 +8,8 @@ Kommander is also partitioned: each user partition is its own Raft group with it
 
 Large partition counts are handled with a shared executor pool and hot-set leader checks, so idle partitions do not each require a dedicated thread or high-frequency timer work. See [Partition Scaling](../operations/partition-scaling.md).
 
+By default, every user partition is replicated to every committed voter. When `ReplicationFactor` is set, each user partition can instead record a smaller replica set in the committed partition map. Quorum, elections, and leadership are then scoped to that partition's voter replicas. See [Replica Placement](../guides/replica-placement.md).
+
 ## Main Components
 
 | Component | Role |
@@ -75,6 +77,7 @@ Partition `0` is reserved for Kommander system state.
 It stores cluster-wide metadata such as:
 
 - the partition map
+- replica placement for user partitions
 - dynamic membership roster
 - split and merge lifecycle records.
 

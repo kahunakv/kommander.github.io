@@ -204,6 +204,10 @@ Each `RaftPartitionRange` includes:
 - `Generation`
 - `State`
 - `RoutingMode`
+- `Replicas`
+- `ReplicationFactor`
+
+`Replicas` is the committed set of nodes that host the range when replica placement is enabled. An empty replica list means full replication across every committed roster voter. `ReplicationFactor` is a per-range override; `0` means the range inherits `RaftConfiguration.ReplicationFactor`.
 
 Lifecycle states are:
 
@@ -230,6 +234,7 @@ This fires every time a new partition map is applied, including:
 - split phase transitions
 - merge phase transitions
 - create and remove operations.
+- replica placement changes.
 
 Use it when your application needs to refresh routing caches, rebalance local workers, or update operational views of the current partition layout.
 
@@ -285,6 +290,19 @@ If registered, the coordinator can:
 
 If no transfer implementation is registered, the coordinator falls back to log-shipping behavior, and your application is responsible for moving state before phase 2 completes.
 
+## Interaction With Replica Placement
+
+Elastic partitions and replica placement share the committed partition map.
+
+When `ReplicationFactor > 0`:
+
+- a created partition receives an initial replica set chosen from the least-loaded voter nodes
+- a split target inherits the source partition's replica set because the source data already lives on those nodes
+- a merge survivor receives the union of both replica sets, which the placement rebalancer can trim later
+- replica placement changes bump `Generation`, so stale writers still receive `PartitionMoved`.
+
+Use `GetPartitionReplicas(partitionId)` when clients need to route directly to nodes that host a partition. This matters for gRPC and REST deployments because non-replica forwarding is not wired there.
+
 ## What Your Application Still Owns
 
 Elastic partitions change Kommander's partition map and WAL ownership boundaries. Your application still owns:
@@ -303,5 +321,6 @@ Elastic partitions change Kommander's partition map and WAL ownership boundaries
 - Use `Unrouted` when the application addresses partitions directly.
 - Treat `Generation` as part of the write contract when routing information may be stale.
 - Subscribe to `OnPartitionMapChanged` if the application caches partition layout.
+- Use `GetPartitionReplicas` when replica placement is enabled and clients need to choose a hosting node.
 - Do not assume split or merge automatically migrates your application state.
 - Do not use partition `0` for application data.
