@@ -16,7 +16,7 @@ That older two-sync path is safe and predictable, but storage sync latency can d
 
 These settings affect durable WAL adapters. `InMemoryWAL` does not fsync, and durable adapters configured with `syncWrites: false` already trade away crash durability for testing or benchmarking.
 
-## Mental Model
+## What Makes An Entry Durable
 
 Raft considers an entry committed when a quorum has durably stored it.
 

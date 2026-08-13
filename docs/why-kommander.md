@@ -96,6 +96,19 @@ Metrics and structured logs expose partition queue depth, WAL queue depth and ba
 
 In-memory discovery, communication, and WAL adapters let tests run several nodes in one process. Deterministic election seeds, virtual-time simulation tools, stable-leader waiting, and fault-injection hooks help reproduce timing-sensitive behavior.
 
+### Jepsen Fault Testing
+
+Kommander is also exercised by a [Jepsen test suite](https://github.com/kahunakv/kommander-jepsen) that embeds the library in a small ASP.NET harness and checks behavior under distributed-system faults.
+
+The suite runs against a five-node cluster and includes:
+
+- a linearizable compare-and-set register workload checked with Knossos
+- a log-append workload that checks replica agreement, acknowledged-entry durability, uniqueness, exactly-once apply, and monotonic application
+- nemeses for network partitions, process kills, pauses, and membership leave/join churn
+- gRPC as the default transport path, with REST available as a transport option.
+
+Green Jepsen runs are an important milestone because they show these workloads did not find stale reads, lost acknowledged entries, divergent logs, duplicate application, or ordering anomalies under the tested fault schedules. They are not a proof that every possible application workload is anomaly-free; they are strong evidence that Kommander's consensus path behaves correctly under the failures the suite models.
+
 ## What Your Application Still Owns
 
 Kommander is not a finished database. It deliberately does not define:

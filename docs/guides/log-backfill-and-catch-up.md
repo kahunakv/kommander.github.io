@@ -4,7 +4,7 @@ Backfill is how a leader catches a lagging follower up without creating gaps in 
 
 Followers can fall behind when they are slow, paused, briefly disconnected, or newly joined as learners. Normal live replication handles small delays. Backfill handles larger gaps.
 
-## The Mental Model
+## How It Works
 
 A follower log must stay contiguous and consistent with the leader.
 

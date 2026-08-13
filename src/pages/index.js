@@ -9,6 +9,7 @@ import styles from './index.module.css';
 const proofPoints = [
   'Partitioned Raft groups',
   'Replica placement',
+  'Jepsen-tested fault behavior',
   'Dynamic membership',
   'Elastic partitions',
   'MIT-licensed for commercial and internal use',
@@ -54,6 +55,11 @@ const advantageCards = [
     title: 'Change cluster membership safely',
     description:
       'Add nodes as learners, promote them after catch-up, and remove members through the committed system partition roster instead of trusting discovery snapshots.',
+  },
+  {
+    title: 'Back the claims with Jepsen tests',
+    description:
+      'Kommander has a Jepsen suite for linearizable CAS registers and log-append integrity under partitions, kills, pauses, and membership churn.',
   },
   {
     title: 'Balance leadership automatically',
@@ -287,6 +293,20 @@ export default function Home() {
                   stale completions, and election behavior, while deterministic simulation
                   helps reproduce timing-sensitive failures.
                 </p>
+              </div>
+              <div className={styles.calloutCard}>
+                <Heading as="h3" className={styles.cardTitle}>
+                  Jepsen fault testing
+                </Heading>
+                <p className={styles.cardDescription}>
+                  The Jepsen suite exercises a five-node Kommander harness with register and
+                  log-append workloads while faults partition, kill, pause, and churn nodes.
+                </p>
+                <Link
+                  className={styles.inlineLink}
+                  to="https://github.com/kahunakv/kommander-jepsen">
+                  Review the Jepsen suite
+                </Link>
               </div>
             </div>
             <div className={styles.footerActions}>

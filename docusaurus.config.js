@@ -28,6 +28,16 @@ const config = {
     locales: ['en'],
   },
 
+  headTags: [
+    {
+      tagName: 'meta',
+      attributes: {
+        name: 'algolia-site-verification',
+        content: 'CCAE52A1C7A7537A',
+      },
+    },
+  ],
+
   presets: [
     [
       'classic',
@@ -49,6 +59,15 @@ const config = {
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
       image: 'img/logo.svg',
+      algolia: {
+        appId: 'SPBBUBI3JT',
+        // Search-only key. Safe to commit; never put the crawler key here.
+        apiKey: '4bce7f90e4896c3f699731e08db06a09',
+        indexName: 'kahunakv_github_io_spbbubi3jt_pages',
+        // The site is single-locale and unversioned, so contextual filtering
+        // by docusaurus_tag would only ever exclude valid results.
+        contextualSearch: false,
+      },
       navbar: {
         title: 'Kommander',
         logo: {

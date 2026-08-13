@@ -10,7 +10,7 @@ If you have not worked with [Raft](https://raft.github.io/) or consensus algorit
 
 That gives you a reliable foundation for building services where multiple machines need to behave like one coordinated system.
 
-## Mental Model
+## In Simple Terms
 
 Think of Kommander as a shared notebook for important decisions:
 

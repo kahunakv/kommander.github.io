@@ -32,7 +32,7 @@ The default settings are intentionally conservative. Start with them before chan
 
 The balancer exchanges reports through membership gossip. Keep `GossipFanout` greater than `0`, and use a transport that implements `SendGossip`. Kommander's in-memory, gRPC, and REST transports support this path.
 
-## Mental Model
+## How Balancing Works
 
 Partition `0`, the system partition, coordinates the cluster. Only its current leader runs balancing passes, which provides one controller for the whole cluster.
 
