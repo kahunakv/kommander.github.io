@@ -434,6 +434,44 @@ Machine</a></li>
 <li><a href="#checklist" id="toc-checklist"><span class="toc-section-number">9.9</span> Checklist</a></li>
 <li><a href="#summary-7" id="toc-summary-7"><span class="toc-section-number">9.10</span> Summary</a></li>
 </ul></li>
+<li><a href="#batch-replication-and-manual-commit-control" id="toc-batch-replication-and-manual-commit-control"><span class="toc-section-number">10</span> Batch Replication and Manual Commit
+Control</a>
+<ul>
+<li><a href="#batch-replication-homogeneous" id="toc-batch-replication-homogeneous"><span class="toc-section-number">10.1</span> Batch Replication:
+Homogeneous</a></li>
+<li><a href="#batch-replication-heterogeneous" id="toc-batch-replication-heterogeneous"><span class="toc-section-number">10.2</span> Batch Replication:
+Heterogeneous</a></li>
+<li><a href="#manual-commit" id="toc-manual-commit"><span class="toc-section-number">10.3</span> Manual Commit</a></li>
+<li><a href="#the-reserve-and-confirm-pattern" id="toc-the-reserve-and-confirm-pattern"><span class="toc-section-number">10.4</span> The Reserve-and-Confirm
+Pattern</a></li>
+<li><a href="#manual-commit-with-heterogeneous-batches" id="toc-manual-commit-with-heterogeneous-batches"><span class="toc-section-number">10.5</span> Manual Commit with Heterogeneous
+Batches</a></li>
+<li><a href="#what-happens-when-the-leader-crashes" id="toc-what-happens-when-the-leader-crashes"><span class="toc-section-number">10.6</span> What Happens When the Leader
+Crashes</a></li>
+<li><a href="#checkpoints" id="toc-checkpoints"><span class="toc-section-number">10.7</span> Checkpoints</a></li>
+<li><a href="#building-a-bulk-import-endpoint" id="toc-building-a-bulk-import-endpoint"><span class="toc-section-number">10.8</span> Building a Bulk Import
+Endpoint</a></li>
+<li><a href="#choosing-the-right-approach" id="toc-choosing-the-right-approach"><span class="toc-section-number">10.9</span> Choosing the Right
+Approach</a></li>
+<li><a href="#summary-8" id="toc-summary-8"><span class="toc-section-number">10.10</span> Summary</a></li>
+</ul></li>
+<li><a href="#why-one-raft-group-is-not-enough" id="toc-why-one-raft-group-is-not-enough"><span class="toc-section-number">11</span> Why One Raft Group Is Not
+Enough</a>
+<ul>
+<li><a href="#the-single-leader-bottleneck" id="toc-the-single-leader-bottleneck"><span class="toc-section-number">11.1</span> The Single-Leader
+Bottleneck</a></li>
+<li><a href="#partitioned-raft" id="toc-partitioned-raft"><span class="toc-section-number">11.2</span> Partitioned Raft</a></li>
+<li><a href="#configuring-partitions" id="toc-configuring-partitions"><span class="toc-section-number">11.3</span> Configuring Partitions</a></li>
+<li><a href="#partition-0-the-system-partition-1" id="toc-partition-0-the-system-partition-1"><span class="toc-section-number">11.4</span> Partition 0: The System
+Partition</a></li>
+<li><a href="#routing-keys-to-partitions" id="toc-routing-keys-to-partitions"><span class="toc-section-number">11.5</span> Routing Keys to
+Partitions</a></li>
+<li><a href="#the-partition-map" id="toc-the-partition-map"><span class="toc-section-number">11.6</span> The Partition Map</a></li>
+<li><a href="#failure-isolation" id="toc-failure-isolation"><span class="toc-section-number">11.7</span> Failure Isolation</a></li>
+<li><a href="#a-note-on-the-word-partition" id="toc-a-note-on-the-word-partition"><span class="toc-section-number">11.8</span> A Note on the Word
+“Partition”</a></li>
+<li><a href="#summary-9" id="toc-summary-9"><span class="toc-section-number">11.9</span> Summary</a></li>
+</ul></li>
 </ul>
 </nav>
 <h1 data-number="1" id="preface"><span class="header-section-number">1</span> Preface</h1>
@@ -4593,6 +4631,1220 @@ that are not naturally idempotent.</li>
 explicit version fields as the format evolves.</li>
 <li>The next chapter covers failure modes and retry strategies for
 distributed operations.</li>
+</ul>
+<h1 data-number="10" id="batch-replication-and-manual-commit-control"><span class="header-section-number">10</span> Batch Replication and Manual
+Commit Control</h1>
+<p>Every <code>ReplicateLogs</code> call in the previous chapters sent
+one command. One command means one proposal, one quorum round-trip, and
+one WAL flush. For a single write, this is fine. For a bulk import of
+10,000 keys, it means 10,000 round-trips.</p>
+<p>This chapter shows two ways to reduce that cost:</p>
+<ol type="1">
+<li><strong>Batch replication.</strong> Send multiple entries in one
+proposal. One round-trip. One flush.</li>
+<li><strong>Manual commit.</strong> Propose entries without committing
+them. Validate, then commit or roll back as a unit.</li>
+</ol>
+<h2 data-number="10.1" id="batch-replication-homogeneous"><span class="header-section-number">10.1</span> Batch Replication:
+Homogeneous</h2>
+<p>The simplest form of batching sends multiple payloads of the same
+type in one call. Instead of passing a single <code>byte[]</code>, pass
+a list of <code>byte[]</code>.</p>
+<h3 data-number="10.1.1" id="single-entry-call-before"><span class="header-section-number">10.1.1</span> Single-Entry Call
+(Before)</h3>
+<div class="sourceCode" id="cb134"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb134-1"><a href="#cb134-1" aria-hidden="true" tabindex="-1"></a><span class="kw">foreach</span> <span class="op">(</span><span class="dt">var</span> item <span class="kw">in</span> items<span class="op">)</span></span>
+<span id="cb134-2"><a href="#cb134-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb134-3"><a href="#cb134-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">byte</span><span class="op">[]</span> payload <span class="op">=</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb134-4"><a href="#cb134-4" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="fu">SetValueCommand</span><span class="op">(</span>item<span class="op">.</span><span class="fu">Key</span><span class="op">,</span> item<span class="op">.</span><span class="fu">Value</span><span class="op">)</span></span>
+<span id="cb134-5"><a href="#cb134-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb134-6"><a href="#cb134-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb134-7"><a href="#cb134-7" aria-hidden="true" tabindex="-1"></a>    await raft<span class="op">.</span><span class="fu">ReplicateLogs</span><span class="op">(</span>partitionId<span class="op">,</span> <span class="st">&quot;SetValue&quot;</span><span class="op">,</span> payload<span class="op">);</span></span>
+<span id="cb134-8"><a href="#cb134-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>This loop sends N proposals. Each proposal waits for a quorum before
+the next one starts. For 100 items on a 1 ms round-trip, the total time
+is at least 100 ms.</p>
+<h3 data-number="10.1.2" id="batch-call-after"><span class="header-section-number">10.1.2</span> Batch Call (After)</h3>
+<div class="sourceCode" id="cb135"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb135-1"><a href="#cb135-1" aria-hidden="true" tabindex="-1"></a>List<span class="op">&lt;</span><span class="dt">byte</span><span class="op">[]&gt;</span> payloads <span class="op">=</span> items<span class="op">.</span><span class="fu">Select</span><span class="op">(</span>item <span class="op">=&gt;</span></span>
+<span id="cb135-2"><a href="#cb135-2" aria-hidden="true" tabindex="-1"></a>    JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb135-3"><a href="#cb135-3" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="fu">SetValueCommand</span><span class="op">(</span>item<span class="op">.</span><span class="fu">Key</span><span class="op">,</span> item<span class="op">.</span><span class="fu">Value</span><span class="op">)</span></span>
+<span id="cb135-4"><a href="#cb135-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">)</span></span>
+<span id="cb135-5"><a href="#cb135-5" aria-hidden="true" tabindex="-1"></a><span class="op">).</span><span class="fu">ToList</span><span class="op">();</span></span>
+<span id="cb135-6"><a href="#cb135-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb135-7"><a href="#cb135-7" aria-hidden="true" tabindex="-1"></a>RaftReplicationResult result <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ReplicateLogs</span><span class="op">(</span></span>
+<span id="cb135-8"><a href="#cb135-8" aria-hidden="true" tabindex="-1"></a>    partitionId<span class="op">,</span> <span class="st">&quot;SetValue&quot;</span><span class="op">,</span> payloads</span>
+<span id="cb135-9"><a href="#cb135-9" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div>
+<p>This call sends all entries in one proposal. One quorum round-trip.
+One WAL flush. For 100 items on a 1 ms round-trip, the total time is
+approximately 1 ms.</p>
+<h3 data-number="10.1.3" id="the-batch-overload"><span class="header-section-number">10.1.3</span> The Batch Overload</h3>
+<div class="sourceCode" id="cb136"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb136-1"><a href="#cb136-1" aria-hidden="true" tabindex="-1"></a>Task<span class="op">&lt;</span>RaftReplicationResult<span class="op">&gt;</span> <span class="fu">ReplicateLogs</span><span class="op">(</span></span>
+<span id="cb136-2"><a href="#cb136-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> partitionId<span class="op">,</span></span>
+<span id="cb136-3"><a href="#cb136-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span> type<span class="op">,</span></span>
+<span id="cb136-4"><a href="#cb136-4" aria-hidden="true" tabindex="-1"></a>    IReadOnlyList<span class="op">&lt;</span><span class="dt">byte</span><span class="op">[]&gt;</span> logs<span class="op">,</span></span>
+<span id="cb136-5"><a href="#cb136-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">bool</span> autoCommit <span class="op">=</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb136-6"><a href="#cb136-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">long</span> expectedGeneration <span class="op">=</span> <span class="dv">0</span><span class="op">,</span></span>
+<span id="cb136-7"><a href="#cb136-7" aria-hidden="true" tabindex="-1"></a>    CancellationToken cancellationToken <span class="op">=</span> <span class="kw">default</span></span>
+<span id="cb136-8"><a href="#cb136-8" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div>
+<p>The parameters are the same as the single-entry overload, except that
+<code>logs</code> is a list instead of a single byte array. All entries
+in the batch share the same <code>type</code> string and
+<code>autoCommit</code> flag. This is why it is called a
+<strong>homogeneous</strong> batch: same type for every entry.</p>
+<p>The result is a single <code>RaftReplicationResult</code>. If the
+batch succeeds, all entries committed. If it fails, none committed.</p>
+<h3 data-number="10.1.4" id="when-to-use-homogeneous-batches"><span class="header-section-number">10.1.4</span> When to Use Homogeneous
+Batches</h3>
+<p>Use homogeneous batches when you have multiple commands of the same
+type that do not depend on each other:</p>
+<ul>
+<li>Bulk imports (many <code>SetValue</code> commands)</li>
+<li>Batch deletes (many <code>DeleteValue</code> commands)</li>
+<li>Event ingestion (many <code>AppendEvent</code> commands)</li>
+</ul>
+<h2 data-number="10.2" id="batch-replication-heterogeneous"><span class="header-section-number">10.2</span> Batch Replication:
+Heterogeneous</h2>
+<p>Sometimes you need to batch commands of different types. A single
+transaction might set a key, increment a counter, and delete a temporary
+flag. The homogeneous batch cannot do this because it forces one
+<code>type</code> string across all entries.</p>
+<p><code>ReplicateEntries</code> solves this. Each entry carries its own
+type.</p>
+<h3 data-number="10.2.1" id="raftproposalentry"><span class="header-section-number">10.2.1</span> RaftProposalEntry</h3>
+<div class="sourceCode" id="cb137"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb137-1"><a href="#cb137-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">readonly</span> record <span class="kw">struct</span> <span class="fu">RaftProposalEntry</span><span class="op">(</span></span>
+<span id="cb137-2"><a href="#cb137-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span> Type<span class="op">,</span></span>
+<span id="cb137-3"><a href="#cb137-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">byte</span><span class="op">[]</span> Data<span class="op">,</span></span>
+<span id="cb137-4"><a href="#cb137-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">bool</span> AutoCommit <span class="op">=</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb137-5"><a href="#cb137-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">long</span> ExpectedGeneration <span class="op">=</span> <span class="dv">0</span></span>
+<span id="cb137-6"><a href="#cb137-6" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div>
+<p>Each entry has:</p>
+<ul>
+<li><strong>Type.</strong> The command type string (maps to
+<code>RaftLog.LogType</code> in the state machine).</li>
+<li><strong>Data.</strong> The serialized command payload (maps to
+<code>RaftLog.LogData</code>).</li>
+<li><strong>AutoCommit.</strong> Whether this entry commits with the
+batch. Defaults to <code>true</code>.</li>
+<li><strong>ExpectedGeneration.</strong> A generation fence for
+partition moves (see Chapter 13). Defaults to <code>0</code> (no
+fence).</li>
+</ul>
+<h3 data-number="10.2.2" id="replicateentries"><span class="header-section-number">10.2.2</span> ReplicateEntries</h3>
+<div class="sourceCode" id="cb138"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb138-1"><a href="#cb138-1" aria-hidden="true" tabindex="-1"></a>Task<span class="op">&lt;</span>RaftBatchReplicationResult<span class="op">&gt;</span> <span class="fu">ReplicateEntries</span><span class="op">(</span></span>
+<span id="cb138-2"><a href="#cb138-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> partitionId<span class="op">,</span></span>
+<span id="cb138-3"><a href="#cb138-3" aria-hidden="true" tabindex="-1"></a>    IReadOnlyList<span class="op">&lt;</span>RaftProposalEntry<span class="op">&gt;</span> entries<span class="op">,</span></span>
+<span id="cb138-4"><a href="#cb138-4" aria-hidden="true" tabindex="-1"></a>    CancellationToken cancellationToken <span class="op">=</span> <span class="kw">default</span></span>
+<span id="cb138-5"><a href="#cb138-5" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div>
+<p>This method sends a heterogeneous batch: one proposal, one
+round-trip, one flush, but each entry has its own type. The result is a
+<code>RaftBatchReplicationResult</code> that contains a per-entry
+outcome.</p>
+<h3 data-number="10.2.3" id="example-mixed-command-batch"><span class="header-section-number">10.2.3</span> Example: Mixed Command
+Batch</h3>
+<div class="sourceCode" id="cb139"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb139-1"><a href="#cb139-1" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> entries <span class="op">=</span> <span class="kw">new</span> List<span class="op">&lt;</span>RaftProposalEntry<span class="op">&gt;</span></span>
+<span id="cb139-2"><a href="#cb139-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb139-3"><a href="#cb139-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">new</span><span class="op">(</span></span>
+<span id="cb139-4"><a href="#cb139-4" aria-hidden="true" tabindex="-1"></a>        Type<span class="op">:</span> <span class="st">&quot;SetValue&quot;</span><span class="op">,</span></span>
+<span id="cb139-5"><a href="#cb139-5" aria-hidden="true" tabindex="-1"></a>        Data<span class="op">:</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb139-6"><a href="#cb139-6" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="fu">SetValueCommand</span><span class="op">(</span><span class="st">&quot;user:123:name&quot;</span><span class="op">,</span> <span class="st">&quot;Alice&quot;</span><span class="op">)</span></span>
+<span id="cb139-7"><a href="#cb139-7" aria-hidden="true" tabindex="-1"></a>        <span class="op">)</span></span>
+<span id="cb139-8"><a href="#cb139-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">),</span></span>
+<span id="cb139-9"><a href="#cb139-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">new</span><span class="op">(</span></span>
+<span id="cb139-10"><a href="#cb139-10" aria-hidden="true" tabindex="-1"></a>        Type<span class="op">:</span> <span class="st">&quot;IncrementCounter&quot;</span><span class="op">,</span></span>
+<span id="cb139-11"><a href="#cb139-11" aria-hidden="true" tabindex="-1"></a>        Data<span class="op">:</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb139-12"><a href="#cb139-12" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="fu">IncrementCounterCommand</span><span class="op">(</span><span class="st">&quot;stats:user-updates&quot;</span><span class="op">)</span></span>
+<span id="cb139-13"><a href="#cb139-13" aria-hidden="true" tabindex="-1"></a>        <span class="op">)</span></span>
+<span id="cb139-14"><a href="#cb139-14" aria-hidden="true" tabindex="-1"></a>    <span class="op">),</span></span>
+<span id="cb139-15"><a href="#cb139-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">new</span><span class="op">(</span></span>
+<span id="cb139-16"><a href="#cb139-16" aria-hidden="true" tabindex="-1"></a>        Type<span class="op">:</span> <span class="st">&quot;DeleteValue&quot;</span><span class="op">,</span></span>
+<span id="cb139-17"><a href="#cb139-17" aria-hidden="true" tabindex="-1"></a>        Data<span class="op">:</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb139-18"><a href="#cb139-18" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="fu">DeleteValueCommand</span><span class="op">(</span><span class="st">&quot;pending:user:123&quot;</span><span class="op">)</span></span>
+<span id="cb139-19"><a href="#cb139-19" aria-hidden="true" tabindex="-1"></a>        <span class="op">)</span></span>
+<span id="cb139-20"><a href="#cb139-20" aria-hidden="true" tabindex="-1"></a>    <span class="op">)</span></span>
+<span id="cb139-21"><a href="#cb139-21" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb139-22"><a href="#cb139-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb139-23"><a href="#cb139-23" aria-hidden="true" tabindex="-1"></a>RaftBatchReplicationResult result <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ReplicateEntries</span><span class="op">(</span></span>
+<span id="cb139-24"><a href="#cb139-24" aria-hidden="true" tabindex="-1"></a>    partitionId<span class="op">,</span> entries</span>
+<span id="cb139-25"><a href="#cb139-25" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span>
+<span id="cb139-26"><a href="#cb139-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb139-27"><a href="#cb139-27" aria-hidden="true" tabindex="-1"></a><span class="kw">if</span> <span class="op">(</span>result<span class="op">.</span><span class="fu">Success</span><span class="op">)</span></span>
+<span id="cb139-28"><a href="#cb139-28" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb139-29"><a href="#cb139-29" aria-hidden="true" tabindex="-1"></a>    <span class="kw">for</span> <span class="op">(</span><span class="dt">int</span> i <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> i <span class="op">&lt;</span> result<span class="op">.</span><span class="fu">Entries</span><span class="op">.</span><span class="fu">Count</span><span class="op">;</span> i<span class="op">++)</span></span>
+<span id="cb139-30"><a href="#cb139-30" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb139-31"><a href="#cb139-31" aria-hidden="true" tabindex="-1"></a>        RaftEntryResult entry <span class="op">=</span> result<span class="op">.</span><span class="fu">Entries</span><span class="op">[</span>i<span class="op">];</span></span>
+<span id="cb139-32"><a href="#cb139-32" aria-hidden="true" tabindex="-1"></a>        Console<span class="op">.</span><span class="fu">WriteLine</span><span class="op">(</span></span>
+<span id="cb139-33"><a href="#cb139-33" aria-hidden="true" tabindex="-1"></a>            $<span class="st">&quot;Entry {i}: status={entry.Status}, logIndex={entry.LogIndex}&quot;</span></span>
+<span id="cb139-34"><a href="#cb139-34" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb139-35"><a href="#cb139-35" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb139-36"><a href="#cb139-36" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>All three commands travel in one proposal. One quorum round-trip
+commits the key update, the counter increment, and the delete.</p>
+<h3 data-number="10.2.4" id="raftbatchreplicationresult"><span class="header-section-number">10.2.4</span>
+RaftBatchReplicationResult</h3>
+<div class="sourceCode" id="cb140"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb140-1"><a href="#cb140-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> <span class="kw">class</span> RaftBatchReplicationResult</span>
+<span id="cb140-2"><a href="#cb140-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb140-3"><a href="#cb140-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">bool</span> Success <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb140-4"><a href="#cb140-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> RaftOperationStatus Status <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb140-5"><a href="#cb140-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> HLCTimestamp TicketId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb140-6"><a href="#cb140-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyList<span class="op">&lt;</span>RaftEntryResult<span class="op">&gt;</span> Entries <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb140-7"><a href="#cb140-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<ul>
+<li><strong>Success.</strong> <code>true</code> if at least one entry
+was admitted and appended. <code>false</code> on a batch-level rejection
+(bad shape or every entry fenced out).</li>
+<li><strong>Status.</strong> The overall batch status.</li>
+<li><strong>TicketId.</strong> The ticket for the batch proposal. Use
+this for diagnostics or for manual commit (see below).</li>
+<li><strong>Entries.</strong> One <code>RaftEntryResult</code> per input
+entry, aligned by index.</li>
+</ul>
+<h3 data-number="10.2.5" id="raftentryresult"><span class="header-section-number">10.2.5</span> RaftEntryResult</h3>
+<div class="sourceCode" id="cb141"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb141-1"><a href="#cb141-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">readonly</span> record <span class="kw">struct</span> <span class="fu">RaftEntryResult</span><span class="op">(</span></span>
+<span id="cb141-2"><a href="#cb141-2" aria-hidden="true" tabindex="-1"></a>    RaftOperationStatus Status<span class="op">,</span></span>
+<span id="cb141-3"><a href="#cb141-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">long</span> LogIndex<span class="op">,</span></span>
+<span id="cb141-4"><a href="#cb141-4" aria-hidden="true" tabindex="-1"></a>    HLCTimestamp Ticket</span>
+<span id="cb141-5"><a href="#cb141-5" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div>
+<ul>
+<li><strong>Status.</strong> The outcome for this entry.
+<code>Success</code> for auto-commit entries that committed.
+<code>Pending</code> for manual entries that await explicit commit.</li>
+<li><strong>LogIndex.</strong> The log index assigned to this entry.
+<code>-1</code> if the entry was not appended.</li>
+<li><strong>Ticket.</strong> The manual-commit ticket for manual
+entries. <code>HLCTimestamp.Zero</code> for auto-commit entries.</li>
+</ul>
+<h3 data-number="10.2.6" id="batch-shape-rules"><span class="header-section-number">10.2.6</span> Batch Shape Rules</h3>
+<p>A heterogeneous batch has a shape rule for the order of auto-commit
+and manual entries:</p>
+<ol type="1">
+<li>Auto-commit entries (<code>AutoCommit = true</code>) must come
+first.</li>
+<li>Manual entries (<code>AutoCommit = false</code>) must come after all
+auto-commit entries.</li>
+<li>No auto-commit entry may follow a manual entry.</li>
+</ol>
+<p>This rule exists because manual entries form one contiguous suffix
+that the application commits or rolls back as a unit. An auto-commit
+entry after a manual entry would break that property.</p>
+<pre><code>  Valid batch:
+
+  [AutoCommit] [AutoCommit] [Manual] [Manual]
+  ────────────────────────  ────────────────
+  auto group (commits)      manual group (pending)
+
+
+  Invalid batch:
+
+  [AutoCommit] [Manual] [AutoCommit]   ← rejected
+                         ▲
+                         batch-level rejection</code></pre>
+<p>If a batch violates this rule, <code>ReplicateEntries</code> returns
+a batch-level failure. No entries are appended.</p>
+<h2 data-number="10.3" id="manual-commit"><span class="header-section-number">10.3</span> Manual Commit</h2>
+<p>By default, every entry commits as soon as it reaches a quorum. The
+<code>autoCommit</code> parameter controls this. When
+<code>autoCommit</code> is <code>false</code>, the entry is proposed and
+replicated but not committed. The application decides later whether to
+commit or roll back.</p>
+<h3 data-number="10.3.1" id="the-flow"><span class="header-section-number">10.3.1</span> The Flow</h3>
+<pre><code>  1. Propose with autoCommit: false
+       │
+       ▼
+  2. Entry replicates to quorum (durable, but not committed)
+       │
+       ▼
+  3. Application validates (check inventory, verify balance, etc.)
+       │
+       ├── Valid:    CommitLogs(partitionId, ticketId)
+       │               └── Entry commits. State machine applies it.
+       │
+       └── Invalid:  RollbackLogs(partitionId, ticketId)
+                        └── Entry is discarded. Never applied.</code></pre>
+<h3 data-number="10.3.2" id="step-1-propose-without-committing"><span class="header-section-number">10.3.2</span> Step 1: Propose Without
+Committing</h3>
+<div class="sourceCode" id="cb144"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb144-1"><a href="#cb144-1" aria-hidden="true" tabindex="-1"></a><span class="dt">byte</span><span class="op">[]</span> payload <span class="op">=</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb144-2"><a href="#cb144-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">new</span> <span class="fu">ReserveInventoryCommand</span><span class="op">(</span><span class="st">&quot;SKU-42&quot;</span><span class="op">,</span> quantity<span class="op">:</span> <span class="dv">5</span><span class="op">)</span></span>
+<span id="cb144-3"><a href="#cb144-3" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span>
+<span id="cb144-4"><a href="#cb144-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb144-5"><a href="#cb144-5" aria-hidden="true" tabindex="-1"></a>RaftReplicationResult result <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ReplicateLogs</span><span class="op">(</span></span>
+<span id="cb144-6"><a href="#cb144-6" aria-hidden="true" tabindex="-1"></a>    partitionId<span class="op">,</span></span>
+<span id="cb144-7"><a href="#cb144-7" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;ReserveInventory&quot;</span><span class="op">,</span></span>
+<span id="cb144-8"><a href="#cb144-8" aria-hidden="true" tabindex="-1"></a>    payload<span class="op">,</span></span>
+<span id="cb144-9"><a href="#cb144-9" aria-hidden="true" tabindex="-1"></a>    autoCommit<span class="op">:</span> <span class="kw">false</span><span class="op">,</span></span>
+<span id="cb144-10"><a href="#cb144-10" aria-hidden="true" tabindex="-1"></a>    cancellationToken<span class="op">:</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb144-11"><a href="#cb144-11" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span>
+<span id="cb144-12"><a href="#cb144-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb144-13"><a href="#cb144-13" aria-hidden="true" tabindex="-1"></a><span class="kw">if</span> <span class="op">(!</span>result<span class="op">.</span><span class="fu">Success</span><span class="op">)</span></span>
+<span id="cb144-14"><a href="#cb144-14" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb144-15"><a href="#cb144-15" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Proposal failed. Handle the error.</span></span>
+<span id="cb144-16"><a href="#cb144-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb144-17"><a href="#cb144-17" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> result<span class="op">.</span><span class="fu">Status</span><span class="op">.</span><span class="fu">ToString</span><span class="op">()</span> <span class="op">},</span></span>
+<span id="cb144-18"><a href="#cb144-18" aria-hidden="true" tabindex="-1"></a>        statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb144-19"><a href="#cb144-19" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb144-20"><a href="#cb144-20" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb144-21"><a href="#cb144-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb144-22"><a href="#cb144-22" aria-hidden="true" tabindex="-1"></a><span class="co">// The entry is proposed and durable, but NOT committed.</span></span>
+<span id="cb144-23"><a href="#cb144-23" aria-hidden="true" tabindex="-1"></a><span class="co">// result.TicketId identifies this proposal.</span></span>
+<span id="cb144-24"><a href="#cb144-24" aria-hidden="true" tabindex="-1"></a>HLCTimestamp ticketId <span class="op">=</span> result<span class="op">.</span><span class="fu">TicketId</span><span class="op">;</span></span></code></pre></div>
+<p>The <code>TicketId</code> on the result is an
+<code>HLCTimestamp</code> value. It identifies the proposal for later
+commit or rollback.</p>
+<h3 data-number="10.3.3" id="step-2-validate"><span class="header-section-number">10.3.3</span> Step 2: Validate</h3>
+<p>The application runs its validation logic. This might check inventory
+levels, verify account balances, or apply business rules. The validation
+reads from the current committed state.</p>
+<div class="sourceCode" id="cb145"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb145-1"><a href="#cb145-1" aria-hidden="true" tabindex="-1"></a><span class="dt">int</span> available <span class="op">=</span> <span class="fu">GetAvailableInventory</span><span class="op">(</span><span class="st">&quot;SKU-42&quot;</span><span class="op">);</span></span>
+<span id="cb145-2"><a href="#cb145-2" aria-hidden="true" tabindex="-1"></a><span class="dt">bool</span> valid <span class="op">=</span> available <span class="op">&gt;=</span> <span class="dv">5</span><span class="op">;</span></span></code></pre></div>
+<h3 data-number="10.3.4" id="step-3-commit-or-roll-back"><span class="header-section-number">10.3.4</span> Step 3: Commit or Roll
+Back</h3>
+<div class="sourceCode" id="cb146"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb146-1"><a href="#cb146-1" aria-hidden="true" tabindex="-1"></a><span class="kw">if</span> <span class="op">(</span>valid<span class="op">)</span></span>
+<span id="cb146-2"><a href="#cb146-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb146-3"><a href="#cb146-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">var</span> <span class="op">(</span>success<span class="op">,</span> status<span class="op">,</span> commitLogId<span class="op">)</span> <span class="op">=</span> await raft<span class="op">.</span><span class="fu">CommitLogs</span><span class="op">(</span></span>
+<span id="cb146-4"><a href="#cb146-4" aria-hidden="true" tabindex="-1"></a>        partitionId<span class="op">,</span></span>
+<span id="cb146-5"><a href="#cb146-5" aria-hidden="true" tabindex="-1"></a>        ticketId<span class="op">,</span></span>
+<span id="cb146-6"><a href="#cb146-6" aria-hidden="true" tabindex="-1"></a>        cancellationToken<span class="op">:</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb146-7"><a href="#cb146-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb146-8"><a href="#cb146-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb146-9"><a href="#cb146-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>success<span class="op">)</span></span>
+<span id="cb146-10"><a href="#cb146-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb146-11"><a href="#cb146-11" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Ok</span><span class="op">(</span><span class="kw">new</span> <span class="op">{</span> reserved <span class="op">=</span> <span class="kw">true</span><span class="op">,</span> commitLogId <span class="op">});</span></span>
+<span id="cb146-12"><a href="#cb146-12" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb146-13"><a href="#cb146-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb146-14"><a href="#cb146-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb146-15"><a href="#cb146-15" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> status<span class="op">.</span><span class="fu">ToString</span><span class="op">()</span> <span class="op">},</span></span>
+<span id="cb146-16"><a href="#cb146-16" aria-hidden="true" tabindex="-1"></a>        statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb146-17"><a href="#cb146-17" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb146-18"><a href="#cb146-18" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb146-19"><a href="#cb146-19" aria-hidden="true" tabindex="-1"></a><span class="kw">else</span></span>
+<span id="cb146-20"><a href="#cb146-20" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb146-21"><a href="#cb146-21" aria-hidden="true" tabindex="-1"></a>    <span class="fu">var</span> <span class="op">(</span>success<span class="op">,</span> status<span class="op">,</span> _<span class="op">)</span> <span class="op">=</span> await raft<span class="op">.</span><span class="fu">RollbackLogs</span><span class="op">(</span></span>
+<span id="cb146-22"><a href="#cb146-22" aria-hidden="true" tabindex="-1"></a>        partitionId<span class="op">,</span></span>
+<span id="cb146-23"><a href="#cb146-23" aria-hidden="true" tabindex="-1"></a>        ticketId<span class="op">,</span></span>
+<span id="cb146-24"><a href="#cb146-24" aria-hidden="true" tabindex="-1"></a>        cancellationToken<span class="op">:</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb146-25"><a href="#cb146-25" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb146-26"><a href="#cb146-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb146-27"><a href="#cb146-27" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb146-28"><a href="#cb146-28" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="op">{</span> reserved <span class="op">=</span> <span class="kw">false</span><span class="op">,</span> reason <span class="op">=</span> <span class="st">&quot;Insufficient inventory&quot;</span> <span class="op">},</span></span>
+<span id="cb146-29"><a href="#cb146-29" aria-hidden="true" tabindex="-1"></a>        statusCode<span class="op">:</span> <span class="dv">409</span></span>
+<span id="cb146-30"><a href="#cb146-30" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb146-31"><a href="#cb146-31" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h3 data-number="10.3.5" id="commitlogs"><span class="header-section-number">10.3.5</span> CommitLogs</h3>
+<div class="sourceCode" id="cb147"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb147-1"><a href="#cb147-1" aria-hidden="true" tabindex="-1"></a>Task<span class="op">&lt;(</span><span class="dt">bool</span> success<span class="op">,</span> RaftOperationStatus status<span class="op">,</span> <span class="dt">long</span> commitLogId<span class="op">)&gt;</span> <span class="fu">CommitLogs</span><span class="op">(</span></span>
+<span id="cb147-2"><a href="#cb147-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> partitionId<span class="op">,</span></span>
+<span id="cb147-3"><a href="#cb147-3" aria-hidden="true" tabindex="-1"></a>    HLCTimestamp ticketId<span class="op">,</span></span>
+<span id="cb147-4"><a href="#cb147-4" aria-hidden="true" tabindex="-1"></a>    CancellationToken cancellationToken <span class="op">=</span> <span class="kw">default</span></span>
+<span id="cb147-5"><a href="#cb147-5" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div>
+<p><code>CommitLogs</code> commits the entries associated with the given
+ticket. After the call succeeds, the entries are committed and the state
+machine applies them through <code>OnReplicationReceived</code>.</p>
+<p>The return tuple contains:</p>
+<ul>
+<li><strong>success.</strong> <code>true</code> if the commit
+succeeded.</li>
+<li><strong>status.</strong> The operation status.</li>
+<li><strong>commitLogId.</strong> The log id of the commit record.</li>
+</ul>
+<p>Committing an already-committed ticket is a no-op. This makes retries
+safe.</p>
+<h3 data-number="10.3.6" id="rollbacklogs"><span class="header-section-number">10.3.6</span> RollbackLogs</h3>
+<div class="sourceCode" id="cb148"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb148-1"><a href="#cb148-1" aria-hidden="true" tabindex="-1"></a>Task<span class="op">&lt;(</span><span class="dt">bool</span> success<span class="op">,</span> RaftOperationStatus status<span class="op">,</span> <span class="dt">long</span> commitLogId<span class="op">)&gt;</span> <span class="fu">RollbackLogs</span><span class="op">(</span></span>
+<span id="cb148-2"><a href="#cb148-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> partitionId<span class="op">,</span></span>
+<span id="cb148-3"><a href="#cb148-3" aria-hidden="true" tabindex="-1"></a>    HLCTimestamp ticketId<span class="op">,</span></span>
+<span id="cb148-4"><a href="#cb148-4" aria-hidden="true" tabindex="-1"></a>    CancellationToken cancellationToken <span class="op">=</span> <span class="kw">default</span></span>
+<span id="cb148-5"><a href="#cb148-5" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div>
+<p><code>RollbackLogs</code> discards the entries associated with the
+given ticket. The entries are removed from the log. The state machine
+never sees them.</p>
+<p>Rolling back an already-rolled-back ticket is also a no-op.</p>
+<h3 data-number="10.3.7" id="cancellation-behavior"><span class="header-section-number">10.3.7</span> Cancellation Behavior</h3>
+<p>Both <code>CommitLogs</code> and <code>RollbackLogs</code> handle
+cancellation the same way. If the <code>CancellationToken</code> fires
+before the operation completes, the method returns
+<code>(false, OperationCancelled, 0)</code> instead of throwing. The
+caller should back off and retry the same ticket. The queued work may
+still apply, and re-issuing the same ticket is safe.</p>
+<h2 data-number="10.4" id="the-reserve-and-confirm-pattern"><span class="header-section-number">10.4</span> The Reserve-and-Confirm
+Pattern</h2>
+<p>Here is a complete example that uses manual commit for an inventory
+reservation:</p>
+<div class="sourceCode" id="cb149"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb149-1"><a href="#cb149-1" aria-hidden="true" tabindex="-1"></a>record <span class="fu">ReserveInventoryCommand</span><span class="op">(</span><span class="dt">string</span> Sku<span class="op">,</span> <span class="dt">int</span> Quantity<span class="op">,</span> <span class="dt">string</span> OperationId<span class="op">);</span></span>
+<span id="cb149-2"><a href="#cb149-2" aria-hidden="true" tabindex="-1"></a>record <span class="fu">ConfirmReservationCommand</span><span class="op">(</span><span class="dt">string</span> Sku<span class="op">,</span> <span class="dt">int</span> Quantity<span class="op">,</span> <span class="dt">string</span> OperationId<span class="op">);</span></span>
+<span id="cb149-3"><a href="#cb149-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-4"><a href="#cb149-4" aria-hidden="true" tabindex="-1"></a>app<span class="op">.</span><span class="fu">MapPost</span><span class="op">(</span><span class="st">&quot;/reserve&quot;</span><span class="op">,</span> <span class="fu">async</span> <span class="op">(</span>HttpRequest request<span class="op">)</span> <span class="op">=&gt;</span></span>
+<span id="cb149-5"><a href="#cb149-5" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb149-6"><a href="#cb149-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">using</span> <span class="dt">var</span> reader <span class="op">=</span> <span class="kw">new</span> <span class="fu">StreamReader</span><span class="op">(</span>request<span class="op">.</span><span class="fu">Body</span><span class="op">);</span></span>
+<span id="cb149-7"><a href="#cb149-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span> body <span class="op">=</span> await reader<span class="op">.</span><span class="fu">ReadToEndAsync</span><span class="op">();</span></span>
+<span id="cb149-8"><a href="#cb149-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">var</span> input <span class="op">=</span> JsonSerializer<span class="op">.</span><span class="fu">Deserialize</span><span class="op">&lt;</span>ReserveRequest<span class="op">&gt;(</span>body<span class="op">);</span></span>
+<span id="cb149-9"><a href="#cb149-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-10"><a href="#cb149-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>input <span class="kw">is</span> <span class="kw">null</span><span class="op">)</span></span>
+<span id="cb149-11"><a href="#cb149-11" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">BadRequest</span><span class="op">();</span></span>
+<span id="cb149-12"><a href="#cb149-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-13"><a href="#cb149-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span> operationId <span class="op">=</span> Guid<span class="op">.</span><span class="fu">NewGuid</span><span class="op">().</span><span class="fu">ToString</span><span class="op">();</span></span>
+<span id="cb149-14"><a href="#cb149-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-15"><a href="#cb149-15" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Step 1: Propose the reservation without committing</span></span>
+<span id="cb149-16"><a href="#cb149-16" aria-hidden="true" tabindex="-1"></a>    <span class="dt">byte</span><span class="op">[]</span> payload <span class="op">=</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb149-17"><a href="#cb149-17" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="fu">ReserveInventoryCommand</span><span class="op">(</span>input<span class="op">.</span><span class="fu">Sku</span><span class="op">,</span> input<span class="op">.</span><span class="fu">Quantity</span><span class="op">,</span> operationId<span class="op">)</span></span>
+<span id="cb149-18"><a href="#cb149-18" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb149-19"><a href="#cb149-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-20"><a href="#cb149-20" aria-hidden="true" tabindex="-1"></a>    <span class="kw">using</span> <span class="dt">var</span> timeout <span class="op">=</span> <span class="kw">new</span> <span class="fu">CancellationTokenSource</span><span class="op">(</span></span>
+<span id="cb149-21"><a href="#cb149-21" aria-hidden="true" tabindex="-1"></a>        TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">5</span><span class="op">)</span></span>
+<span id="cb149-22"><a href="#cb149-22" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb149-23"><a href="#cb149-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-24"><a href="#cb149-24" aria-hidden="true" tabindex="-1"></a>    <span class="dt">var</span> result <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ReplicateLogs</span><span class="op">(</span></span>
+<span id="cb149-25"><a href="#cb149-25" aria-hidden="true" tabindex="-1"></a>        partitionId<span class="op">,</span></span>
+<span id="cb149-26"><a href="#cb149-26" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;ReserveInventory&quot;</span><span class="op">,</span></span>
+<span id="cb149-27"><a href="#cb149-27" aria-hidden="true" tabindex="-1"></a>        payload<span class="op">,</span></span>
+<span id="cb149-28"><a href="#cb149-28" aria-hidden="true" tabindex="-1"></a>        autoCommit<span class="op">:</span> <span class="kw">false</span><span class="op">,</span></span>
+<span id="cb149-29"><a href="#cb149-29" aria-hidden="true" tabindex="-1"></a>        cancellationToken<span class="op">:</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb149-30"><a href="#cb149-30" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb149-31"><a href="#cb149-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-32"><a href="#cb149-32" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(!</span>result<span class="op">.</span><span class="fu">Success</span><span class="op">)</span></span>
+<span id="cb149-33"><a href="#cb149-33" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb149-34"><a href="#cb149-34" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb149-35"><a href="#cb149-35" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> result<span class="op">.</span><span class="fu">Status</span><span class="op">.</span><span class="fu">ToString</span><span class="op">()</span> <span class="op">},</span></span>
+<span id="cb149-36"><a href="#cb149-36" aria-hidden="true" tabindex="-1"></a>            statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb149-37"><a href="#cb149-37" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb149-38"><a href="#cb149-38" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb149-39"><a href="#cb149-39" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-40"><a href="#cb149-40" aria-hidden="true" tabindex="-1"></a>    HLCTimestamp ticketId <span class="op">=</span> result<span class="op">.</span><span class="fu">TicketId</span><span class="op">;</span></span>
+<span id="cb149-41"><a href="#cb149-41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-42"><a href="#cb149-42" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Step 2: Validate against current committed state</span></span>
+<span id="cb149-43"><a href="#cb149-43" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> available <span class="op">=</span> <span class="fu">GetAvailableInventory</span><span class="op">(</span>input<span class="op">.</span><span class="fu">Sku</span><span class="op">);</span></span>
+<span id="cb149-44"><a href="#cb149-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-45"><a href="#cb149-45" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>available <span class="op">&lt;</span> input<span class="op">.</span><span class="fu">Quantity</span><span class="op">)</span></span>
+<span id="cb149-46"><a href="#cb149-46" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb149-47"><a href="#cb149-47" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Not enough inventory. Roll back.</span></span>
+<span id="cb149-48"><a href="#cb149-48" aria-hidden="true" tabindex="-1"></a>        await raft<span class="op">.</span><span class="fu">RollbackLogs</span><span class="op">(</span>partitionId<span class="op">,</span> ticketId<span class="op">,</span> timeout<span class="op">.</span><span class="fu">Token</span><span class="op">);</span></span>
+<span id="cb149-49"><a href="#cb149-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-50"><a href="#cb149-50" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb149-51"><a href="#cb149-51" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="op">{</span> reserved <span class="op">=</span> <span class="kw">false</span><span class="op">,</span> reason <span class="op">=</span> <span class="st">&quot;Insufficient inventory&quot;</span> <span class="op">},</span></span>
+<span id="cb149-52"><a href="#cb149-52" aria-hidden="true" tabindex="-1"></a>            statusCode<span class="op">:</span> <span class="dv">409</span></span>
+<span id="cb149-53"><a href="#cb149-53" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb149-54"><a href="#cb149-54" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb149-55"><a href="#cb149-55" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-56"><a href="#cb149-56" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Step 3: Commit the reservation</span></span>
+<span id="cb149-57"><a href="#cb149-57" aria-hidden="true" tabindex="-1"></a>    <span class="fu">var</span> <span class="op">(</span>success<span class="op">,</span> status<span class="op">,</span> commitLogId<span class="op">)</span> <span class="op">=</span> await raft<span class="op">.</span><span class="fu">CommitLogs</span><span class="op">(</span></span>
+<span id="cb149-58"><a href="#cb149-58" aria-hidden="true" tabindex="-1"></a>        partitionId<span class="op">,</span></span>
+<span id="cb149-59"><a href="#cb149-59" aria-hidden="true" tabindex="-1"></a>        ticketId<span class="op">,</span></span>
+<span id="cb149-60"><a href="#cb149-60" aria-hidden="true" tabindex="-1"></a>        timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb149-61"><a href="#cb149-61" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb149-62"><a href="#cb149-62" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-63"><a href="#cb149-63" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(!</span>success<span class="op">)</span></span>
+<span id="cb149-64"><a href="#cb149-64" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb149-65"><a href="#cb149-65" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb149-66"><a href="#cb149-66" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> status<span class="op">.</span><span class="fu">ToString</span><span class="op">()</span> <span class="op">},</span></span>
+<span id="cb149-67"><a href="#cb149-67" aria-hidden="true" tabindex="-1"></a>            statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb149-68"><a href="#cb149-68" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb149-69"><a href="#cb149-69" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb149-70"><a href="#cb149-70" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-71"><a href="#cb149-71" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Ok</span><span class="op">(</span><span class="kw">new</span></span>
+<span id="cb149-72"><a href="#cb149-72" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb149-73"><a href="#cb149-73" aria-hidden="true" tabindex="-1"></a>        reserved <span class="op">=</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb149-74"><a href="#cb149-74" aria-hidden="true" tabindex="-1"></a>        sku <span class="op">=</span> input<span class="op">.</span><span class="fu">Sku</span><span class="op">,</span></span>
+<span id="cb149-75"><a href="#cb149-75" aria-hidden="true" tabindex="-1"></a>        quantity <span class="op">=</span> input<span class="op">.</span><span class="fu">Quantity</span><span class="op">,</span></span>
+<span id="cb149-76"><a href="#cb149-76" aria-hidden="true" tabindex="-1"></a>        commitLogId</span>
+<span id="cb149-77"><a href="#cb149-77" aria-hidden="true" tabindex="-1"></a>    <span class="op">});</span></span>
+<span id="cb149-78"><a href="#cb149-78" aria-hidden="true" tabindex="-1"></a><span class="op">});</span></span>
+<span id="cb149-79"><a href="#cb149-79" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb149-80"><a href="#cb149-80" aria-hidden="true" tabindex="-1"></a>record <span class="fu">ReserveRequest</span><span class="op">(</span><span class="dt">string</span> Sku<span class="op">,</span> <span class="dt">int</span> Quantity<span class="op">);</span></span></code></pre></div>
+<p>This pattern gives the application a decision point between proposal
+and commit. The entry is durable on a quorum of nodes, but the state
+machine does not apply it until the explicit commit.</p>
+<h2 data-number="10.5" id="manual-commit-with-heterogeneous-batches"><span class="header-section-number">10.5</span> Manual Commit with
+Heterogeneous Batches</h2>
+<p><code>ReplicateEntries</code> supports mixing auto-commit and manual
+entries in one batch. The auto-commit entries commit immediately. The
+manual entries form a trailing group that the application commits or
+rolls back later.</p>
+<div class="sourceCode" id="cb150"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb150-1"><a href="#cb150-1" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> entries <span class="op">=</span> <span class="kw">new</span> List<span class="op">&lt;</span>RaftProposalEntry<span class="op">&gt;</span></span>
+<span id="cb150-2"><a href="#cb150-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb150-3"><a href="#cb150-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Auto-commit: record the attempt (always commits)</span></span>
+<span id="cb150-4"><a href="#cb150-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">new</span><span class="op">(</span></span>
+<span id="cb150-5"><a href="#cb150-5" aria-hidden="true" tabindex="-1"></a>        Type<span class="op">:</span> <span class="st">&quot;AuditLog&quot;</span><span class="op">,</span></span>
+<span id="cb150-6"><a href="#cb150-6" aria-hidden="true" tabindex="-1"></a>        Data<span class="op">:</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb150-7"><a href="#cb150-7" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="fu">AuditLogEntry</span><span class="op">(</span><span class="st">&quot;reservation-attempt&quot;</span><span class="op">,</span> sku<span class="op">,</span> quantity<span class="op">)</span></span>
+<span id="cb150-8"><a href="#cb150-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">),</span></span>
+<span id="cb150-9"><a href="#cb150-9" aria-hidden="true" tabindex="-1"></a>        AutoCommit<span class="op">:</span> <span class="kw">true</span></span>
+<span id="cb150-10"><a href="#cb150-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">),</span></span>
+<span id="cb150-11"><a href="#cb150-11" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Manual: the reservation itself (commit or rollback)</span></span>
+<span id="cb150-12"><a href="#cb150-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">new</span><span class="op">(</span></span>
+<span id="cb150-13"><a href="#cb150-13" aria-hidden="true" tabindex="-1"></a>        Type<span class="op">:</span> <span class="st">&quot;ReserveInventory&quot;</span><span class="op">,</span></span>
+<span id="cb150-14"><a href="#cb150-14" aria-hidden="true" tabindex="-1"></a>        Data<span class="op">:</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb150-15"><a href="#cb150-15" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="fu">ReserveInventoryCommand</span><span class="op">(</span>sku<span class="op">,</span> quantity<span class="op">,</span> operationId<span class="op">)</span></span>
+<span id="cb150-16"><a href="#cb150-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">),</span></span>
+<span id="cb150-17"><a href="#cb150-17" aria-hidden="true" tabindex="-1"></a>        AutoCommit<span class="op">:</span> <span class="kw">false</span></span>
+<span id="cb150-18"><a href="#cb150-18" aria-hidden="true" tabindex="-1"></a>    <span class="op">)</span></span>
+<span id="cb150-19"><a href="#cb150-19" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb150-20"><a href="#cb150-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb150-21"><a href="#cb150-21" aria-hidden="true" tabindex="-1"></a>RaftBatchReplicationResult result <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ReplicateEntries</span><span class="op">(</span></span>
+<span id="cb150-22"><a href="#cb150-22" aria-hidden="true" tabindex="-1"></a>    partitionId<span class="op">,</span> entries</span>
+<span id="cb150-23"><a href="#cb150-23" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span>
+<span id="cb150-24"><a href="#cb150-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb150-25"><a href="#cb150-25" aria-hidden="true" tabindex="-1"></a><span class="kw">if</span> <span class="op">(</span>result<span class="op">.</span><span class="fu">Success</span><span class="op">)</span></span>
+<span id="cb150-26"><a href="#cb150-26" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb150-27"><a href="#cb150-27" aria-hidden="true" tabindex="-1"></a>    <span class="co">// The audit log entry committed immediately (status = Success).</span></span>
+<span id="cb150-28"><a href="#cb150-28" aria-hidden="true" tabindex="-1"></a>    <span class="co">// The reservation entry is pending (status = Pending).</span></span>
+<span id="cb150-29"><a href="#cb150-29" aria-hidden="true" tabindex="-1"></a>    RaftEntryResult auditResult <span class="op">=</span> result<span class="op">.</span><span class="fu">Entries</span><span class="op">[</span><span class="dv">0</span><span class="op">];</span></span>
+<span id="cb150-30"><a href="#cb150-30" aria-hidden="true" tabindex="-1"></a>    RaftEntryResult reserveResult <span class="op">=</span> result<span class="op">.</span><span class="fu">Entries</span><span class="op">[</span><span class="dv">1</span><span class="op">];</span></span>
+<span id="cb150-31"><a href="#cb150-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb150-32"><a href="#cb150-32" aria-hidden="true" tabindex="-1"></a>    <span class="co">// The manual ticket for commit/rollback</span></span>
+<span id="cb150-33"><a href="#cb150-33" aria-hidden="true" tabindex="-1"></a>    HLCTimestamp ticketId <span class="op">=</span> reserveResult<span class="op">.</span><span class="fu">Ticket</span><span class="op">;</span></span>
+<span id="cb150-34"><a href="#cb150-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb150-35"><a href="#cb150-35" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Validate, then commit or rollback ticketId...</span></span>
+<span id="cb150-36"><a href="#cb150-36" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The audit log entry commits with the batch. The reservation entry
+waits for an explicit <code>CommitLogs</code> or
+<code>RollbackLogs</code>.</p>
+<h2 data-number="10.6" id="what-happens-when-the-leader-crashes"><span class="header-section-number">10.6</span> What Happens When the Leader
+Crashes</h2>
+<p>If the leader crashes after a manual proposal but before the
+application calls <code>CommitLogs</code>:</p>
+<ol type="1">
+<li>The entry is durable on a quorum of nodes (it was proposed and
+acknowledged).</li>
+<li>The new leader does not automatically commit the entry. It remains
+uncommitted.</li>
+<li>The client’s <code>CommitLogs</code> call fails (the connection
+breaks or times out).</li>
+<li>The entry stays in the log as an uncommitted proposal until a new
+leader either includes it in its own term or overwrites it.</li>
+</ol>
+<p>The client must detect the failure and re-propose the entire
+operation:</p>
+<div class="sourceCode" id="cb151"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb151-1"><a href="#cb151-1" aria-hidden="true" tabindex="-1"></a><span class="fu">var</span> <span class="op">(</span>success<span class="op">,</span> status<span class="op">,</span> _<span class="op">)</span> <span class="op">=</span> await raft<span class="op">.</span><span class="fu">CommitLogs</span><span class="op">(</span></span>
+<span id="cb151-2"><a href="#cb151-2" aria-hidden="true" tabindex="-1"></a>    partitionId<span class="op">,</span> ticketId<span class="op">,</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb151-3"><a href="#cb151-3" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span>
+<span id="cb151-4"><a href="#cb151-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb151-5"><a href="#cb151-5" aria-hidden="true" tabindex="-1"></a><span class="kw">if</span> <span class="op">(!</span>success<span class="op">)</span></span>
+<span id="cb151-6"><a href="#cb151-6" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb151-7"><a href="#cb151-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>status <span class="op">==</span> RaftOperationStatus<span class="op">.</span><span class="fu">OperationCancelled</span> <span class="op">||</span></span>
+<span id="cb151-8"><a href="#cb151-8" aria-hidden="true" tabindex="-1"></a>        status <span class="op">==</span> RaftOperationStatus<span class="op">.</span><span class="fu">NodeIsNotLeader</span><span class="op">)</span></span>
+<span id="cb151-9"><a href="#cb151-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb151-10"><a href="#cb151-10" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Leader changed. Re-propose from scratch.</span></span>
+<span id="cb151-11"><a href="#cb151-11" aria-hidden="true" tabindex="-1"></a>        <span class="co">// The old uncommitted entry will be overwritten</span></span>
+<span id="cb151-12"><a href="#cb151-12" aria-hidden="true" tabindex="-1"></a>        <span class="co">// by the new leader.</span></span>
+<span id="cb151-13"><a href="#cb151-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb151-14"><a href="#cb151-14" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>This is why manual commit is a more advanced pattern. It adds a
+failure window between proposal and commit where a leader crash requires
+re-proposal. Auto-commit does not have this window because the entry
+commits as part of the same proposal.</p>
+<h2 data-number="10.7" id="checkpoints"><span class="header-section-number">10.7</span> Checkpoints</h2>
+<p><code>ReplicateCheckpoint</code> writes a special marker entry to the
+log. This marker tells the WAL compaction process that all entries
+before this point are safe to truncate.</p>
+<div class="sourceCode" id="cb152"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb152-1"><a href="#cb152-1" aria-hidden="true" tabindex="-1"></a>RaftReplicationResult result <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ReplicateCheckpoint</span><span class="op">(</span></span>
+<span id="cb152-2"><a href="#cb152-2" aria-hidden="true" tabindex="-1"></a>    partitionId<span class="op">,</span></span>
+<span id="cb152-3"><a href="#cb152-3" aria-hidden="true" tabindex="-1"></a>    cancellationToken<span class="op">:</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb152-4"><a href="#cb152-4" aria-hidden="true" tabindex="-1"></a><span class="op">);</span></span></code></pre></div>
+<p>The checkpoint is a replicated entry, not a local-only marker. It
+goes through the same proposal and quorum process as any other entry.
+This ensures that all nodes agree on the checkpoint position.</p>
+<h3 data-number="10.7.1" id="when-to-use-checkpoints"><span class="header-section-number">10.7.1</span> When to Use Checkpoints</h3>
+<p>Use checkpoints when:</p>
+<ul>
+<li>The WAL grows large and you want to allow compaction.</li>
+<li>Your application has a natural “save point” (e.g., after a snapshot
+of the state machine).</li>
+<li>You want to bound the replay time on restart.</li>
+</ul>
+<p>Without checkpoints, the WAL retains every entry from the beginning.
+Each restart replays the entire log through <code>OnLogRestored</code>.
+A checkpoint lets the WAL discard entries before the checkpoint, so
+replay starts from the checkpoint position instead of the beginning.</p>
+<h3 data-number="10.7.2" id="checkpoint-flow"><span class="header-section-number">10.7.2</span> Checkpoint Flow</h3>
+<pre><code>  Log:  [1] [2] [3] [4] [5] [CP] [6] [7] [8]
+                            ▲
+                            checkpoint at index 5
+
+  After compaction:
+
+  Log:  [CP] [6] [7] [8]
+
+  On restart, replay starts at [6], not [1].</code></pre>
+<p>The checkpoint does not include a snapshot of the state machine. It
+is a marker only. The application must ensure that the state machine can
+reconstruct its state from the entries after the checkpoint. This
+typically means the application writes a snapshot to disk at the same
+time it issues the checkpoint.</p>
+<h2 data-number="10.8" id="building-a-bulk-import-endpoint"><span class="header-section-number">10.8</span> Building a Bulk Import
+Endpoint</h2>
+<p>Here is a practical endpoint that uses batch replication:</p>
+<div class="sourceCode" id="cb154"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb154-1"><a href="#cb154-1" aria-hidden="true" tabindex="-1"></a>app<span class="op">.</span><span class="fu">MapPost</span><span class="op">(</span><span class="st">&quot;/store/bulk&quot;</span><span class="op">,</span> <span class="fu">async</span> <span class="op">(</span>HttpRequest request<span class="op">)</span> <span class="op">=&gt;</span></span>
+<span id="cb154-2"><a href="#cb154-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb154-3"><a href="#cb154-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">bool</span> isLeader <span class="op">=</span> await raft<span class="op">.</span><span class="fu">AmILeader</span><span class="op">(</span>partitionId<span class="op">,</span> <span class="kw">default</span><span class="op">);</span></span>
+<span id="cb154-4"><a href="#cb154-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(!</span>isLeader<span class="op">)</span></span>
+<span id="cb154-5"><a href="#cb154-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb154-6"><a href="#cb154-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">string</span><span class="op">?</span> leader <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionLeaderHint</span><span class="op">(</span>partitionId<span class="op">);</span></span>
+<span id="cb154-7"><a href="#cb154-7" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb154-8"><a href="#cb154-8" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> <span class="st">&quot;NotLeader&quot;</span><span class="op">,</span> leader <span class="op">},</span></span>
+<span id="cb154-9"><a href="#cb154-9" aria-hidden="true" tabindex="-1"></a>            statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb154-10"><a href="#cb154-10" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb154-11"><a href="#cb154-11" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb154-12"><a href="#cb154-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-13"><a href="#cb154-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">using</span> <span class="dt">var</span> reader <span class="op">=</span> <span class="kw">new</span> <span class="fu">StreamReader</span><span class="op">(</span>request<span class="op">.</span><span class="fu">Body</span><span class="op">);</span></span>
+<span id="cb154-14"><a href="#cb154-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span> body <span class="op">=</span> await reader<span class="op">.</span><span class="fu">ReadToEndAsync</span><span class="op">();</span></span>
+<span id="cb154-15"><a href="#cb154-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">var</span> items <span class="op">=</span> JsonSerializer<span class="op">.</span><span class="fu">Deserialize</span><span class="op">&lt;</span>List<span class="op">&lt;</span>KeyValueItem<span class="op">&gt;&gt;(</span>body<span class="op">);</span></span>
+<span id="cb154-16"><a href="#cb154-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-17"><a href="#cb154-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>items <span class="kw">is</span> <span class="kw">null</span> <span class="op">||</span> items<span class="op">.</span><span class="fu">Count</span> <span class="op">==</span> <span class="dv">0</span><span class="op">)</span></span>
+<span id="cb154-18"><a href="#cb154-18" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">BadRequest</span><span class="op">();</span></span>
+<span id="cb154-19"><a href="#cb154-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-20"><a href="#cb154-20" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Build the batch</span></span>
+<span id="cb154-21"><a href="#cb154-21" aria-hidden="true" tabindex="-1"></a>    <span class="dt">var</span> entries <span class="op">=</span> items<span class="op">.</span><span class="fu">Select</span><span class="op">(</span>item <span class="op">=&gt;</span> <span class="kw">new</span> <span class="fu">RaftProposalEntry</span><span class="op">(</span></span>
+<span id="cb154-22"><a href="#cb154-22" aria-hidden="true" tabindex="-1"></a>        Type<span class="op">:</span> <span class="st">&quot;SetValue&quot;</span><span class="op">,</span></span>
+<span id="cb154-23"><a href="#cb154-23" aria-hidden="true" tabindex="-1"></a>        Data<span class="op">:</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb154-24"><a href="#cb154-24" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="fu">SetValueCommand</span><span class="op">(</span>item<span class="op">.</span><span class="fu">Key</span><span class="op">,</span> item<span class="op">.</span><span class="fu">Value</span><span class="op">)</span></span>
+<span id="cb154-25"><a href="#cb154-25" aria-hidden="true" tabindex="-1"></a>        <span class="op">)</span></span>
+<span id="cb154-26"><a href="#cb154-26" aria-hidden="true" tabindex="-1"></a>    <span class="op">)).</span><span class="fu">ToList</span><span class="op">();</span></span>
+<span id="cb154-27"><a href="#cb154-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-28"><a href="#cb154-28" aria-hidden="true" tabindex="-1"></a>    <span class="kw">using</span> <span class="dt">var</span> timeout <span class="op">=</span> <span class="kw">new</span> <span class="fu">CancellationTokenSource</span><span class="op">(</span></span>
+<span id="cb154-29"><a href="#cb154-29" aria-hidden="true" tabindex="-1"></a>        TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">10</span><span class="op">)</span></span>
+<span id="cb154-30"><a href="#cb154-30" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb154-31"><a href="#cb154-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-32"><a href="#cb154-32" aria-hidden="true" tabindex="-1"></a>    RaftBatchReplicationResult result <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ReplicateEntries</span><span class="op">(</span></span>
+<span id="cb154-33"><a href="#cb154-33" aria-hidden="true" tabindex="-1"></a>        partitionId<span class="op">,</span> entries<span class="op">,</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb154-34"><a href="#cb154-34" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb154-35"><a href="#cb154-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-36"><a href="#cb154-36" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>result<span class="op">.</span><span class="fu">Success</span><span class="op">)</span></span>
+<span id="cb154-37"><a href="#cb154-37" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb154-38"><a href="#cb154-38" aria-hidden="true" tabindex="-1"></a>        <span class="dt">int</span> committed <span class="op">=</span> result<span class="op">.</span><span class="fu">Entries</span><span class="op">.</span><span class="fu">Count</span><span class="op">(</span></span>
+<span id="cb154-39"><a href="#cb154-39" aria-hidden="true" tabindex="-1"></a>            e <span class="op">=&gt;</span> e<span class="op">.</span><span class="fu">Status</span> <span class="op">==</span> RaftOperationStatus<span class="op">.</span><span class="fu">Success</span></span>
+<span id="cb154-40"><a href="#cb154-40" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb154-41"><a href="#cb154-41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-42"><a href="#cb154-42" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Ok</span><span class="op">(</span><span class="kw">new</span> <span class="op">{</span> imported <span class="op">=</span> committed<span class="op">,</span> total <span class="op">=</span> items<span class="op">.</span><span class="fu">Count</span> <span class="op">});</span></span>
+<span id="cb154-43"><a href="#cb154-43" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb154-44"><a href="#cb154-44" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-45"><a href="#cb154-45" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb154-46"><a href="#cb154-46" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> result<span class="op">.</span><span class="fu">Status</span><span class="op">.</span><span class="fu">ToString</span><span class="op">()</span> <span class="op">},</span></span>
+<span id="cb154-47"><a href="#cb154-47" aria-hidden="true" tabindex="-1"></a>        statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb154-48"><a href="#cb154-48" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb154-49"><a href="#cb154-49" aria-hidden="true" tabindex="-1"></a><span class="op">});</span></span>
+<span id="cb154-50"><a href="#cb154-50" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb154-51"><a href="#cb154-51" aria-hidden="true" tabindex="-1"></a>record <span class="fu">KeyValueItem</span><span class="op">(</span><span class="dt">string</span> Key<span class="op">,</span> <span class="dt">string</span> Value<span class="op">);</span></span></code></pre></div>
+<p>This endpoint accepts a JSON array of key-value pairs and imports all
+of them in one proposal. The response reports how many entries
+committed.</p>
+<h3 data-number="10.8.1" id="performance-comparison"><span class="header-section-number">10.8.1</span> Performance Comparison</h3>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>100 items, 1 ms RTT</th>
+<th>1000 items, 1 ms RTT</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Single-entry loop</td>
+<td>~100 ms</td>
+<td>~1000 ms</td>
+</tr>
+<tr>
+<td>Homogeneous batch</td>
+<td>~1 ms</td>
+<td>~1 ms</td>
+</tr>
+<tr>
+<td>Heterogeneous batch</td>
+<td>~1 ms</td>
+<td>~1 ms</td>
+</tr>
+</tbody>
+</table>
+<p>The batch approaches reduce the time from O(N) round-trips to O(1).
+The WAL also benefits: one flush for the entire batch instead of one
+flush per entry.</p>
+<h2 data-number="10.9" id="choosing-the-right-approach"><span class="header-section-number">10.9</span> Choosing the Right
+Approach</h2>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Need</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Many commands, same type</td>
+<td><code>ReplicateLogs</code> with
+<code>IReadOnlyList&lt;byte[]&gt;</code></td>
+</tr>
+<tr>
+<td>Many commands, different types</td>
+<td><code>ReplicateEntries</code> with <code>RaftProposalEntry</code>
+list</td>
+</tr>
+<tr>
+<td>Validate before committing</td>
+<td><code>autoCommit: false</code> + <code>CommitLogs</code> /
+<code>RollbackLogs</code></td>
+</tr>
+<tr>
+<td>Mark a WAL compaction point</td>
+<td><code>ReplicateCheckpoint</code></td>
+</tr>
+</tbody>
+</table>
+<p>Start with auto-commit. Move to manual commit only when you need the
+validate-then-decide pattern. Manual commit adds complexity and a
+failure window between proposal and commit.</p>
+<h2 data-number="10.10" id="summary-8"><span class="header-section-number">10.10</span> Summary</h2>
+<ul>
+<li>Batch replication sends multiple entries in one proposal. One quorum
+round-trip and one WAL flush replace N round-trips and N flushes.</li>
+<li>Homogeneous batches (<code>ReplicateLogs</code> with a list) require
+all entries to share the same type.</li>
+<li>Heterogeneous batches (<code>ReplicateEntries</code>) allow each
+entry to carry its own type and auto-commit flag.</li>
+<li><code>RaftBatchReplicationResult</code> contains per-entry results
+aligned by index to the input list.</li>
+<li>Manual commit (<code>autoCommit: false</code>) proposes entries
+without committing. The application calls <code>CommitLogs</code> to
+commit or <code>RollbackLogs</code> to discard.</li>
+<li>The <code>TicketId</code> (an <code>HLCTimestamp</code>) connects a
+proposal to its commit or rollback.</li>
+<li>If the leader crashes before a manual commit, the entry is not
+automatically committed. The client must re-propose.</li>
+<li><code>ReplicateCheckpoint</code> marks a point in the log for WAL
+compaction. Entries before the checkpoint can be truncated.</li>
+<li>The next chapter explains why a single Raft group is not sufficient
+for large-scale systems and introduces partitioned Raft.</li>
+</ul>
+<h1 data-number="11" id="why-one-raft-group-is-not-enough"><span class="header-section-number">11</span> Why One Raft Group Is Not
+Enough</h1>
+<p>Every chapter so far used a single partition: partition 1. All writes
+went to one leader. All reads came from one state machine. This works
+for small workloads. It does not scale.</p>
+<p>This chapter explains why and introduces partitioned Raft:
+independent Raft groups with independent leaders that distribute the
+write load across all nodes in the cluster.</p>
+<h2 data-number="11.1" id="the-single-leader-bottleneck"><span class="header-section-number">11.1</span> The Single-Leader
+Bottleneck</h2>
+<p>In a Raft cluster with one partition, only the leader accepts writes.
+The followers replicate entries and serve as standby copies. They do not
+accept proposals.</p>
+<pre><code>  Three-node cluster, one partition:
+
+  Node A (Leader)
+     │
+     ├── All writes go here
+     ├── WAL flush for every batch
+     ├── Send AppendEntries to B and C
+     └── Wait for quorum ACK
+         │
+  Node B (Follower)        Node C (Follower)
+     │                        │
+     └── Idle (replicating)   └── Idle (replicating)</code></pre>
+<p>Node A does all the work. Nodes B and C receive entries and store
+them, but they do not propose or order commands. The cluster has the
+capacity of three nodes, but the write throughput is limited to what one
+node can handle.</p>
+<h3 data-number="11.1.1" id="measuring-the-bottleneck"><span class="header-section-number">11.1.1</span> Measuring the
+Bottleneck</h3>
+<p>Assume each node can handle 50,000 writes per second. With one
+partition:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Write throughput</td>
+<td>50,000 ops/sec (one node)</td>
+</tr>
+<tr>
+<td>Leader CPU usage</td>
+<td>High</td>
+</tr>
+<tr>
+<td>Follower CPU usage</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>Cluster utilization</td>
+<td>33% (1 of 3 nodes busy)</td>
+</tr>
+</tbody>
+</table>
+<p>Two-thirds of the cluster’s capacity sits idle. Adding more nodes
+does not help. A six-node cluster with one partition still funnels all
+writes through one leader. The write throughput stays at 50,000
+ops/sec.</p>
+<h3 data-number="11.1.2" id="the-read-side"><span class="header-section-number">11.1.2</span> The Read Side</h3>
+<p>Reads are less affected. Every node has a copy of the state. A read
+that tolerates eventual consistency can go to any node (Chapter 6). A
+consistent read still needs a quorum confirmation, but the confirmation
+overhead is small compared to a write.</p>
+<p>The bottleneck is writes. Raft is a write-path protocol. Its core job
+is to order and replicate write proposals. When all proposals go through
+one leader, that leader is the ceiling.</p>
+<h2 data-number="11.2" id="partitioned-raft"><span class="header-section-number">11.2</span> Partitioned Raft</h2>
+<p>The solution: run multiple independent Raft groups in the same
+cluster. Each group is a <strong>partition</strong>. Each partition has
+its own leader, its own term, its own log, and its own state
+machine.</p>
+<pre><code>  Three-node cluster, three partitions:
+
+  Node A                Node B                Node C
+  ┌───────────┐         ┌───────────┐         ┌───────────┐
+  │ P1 LEADER │         │ P1 follow │         │ P1 follow │
+  │ P2 follow │         │ P2 LEADER │         │ P2 follow │
+  │ P3 follow │         │ P3 follow │         │ P3 LEADER │
+  └───────────┘         └───────────┘         └───────────┘
+
+  Writes to partition 1 → Node A
+  Writes to partition 2 → Node B
+  Writes to partition 3 → Node C</code></pre>
+<p>Now each node leads one partition. Write load spreads across all
+three nodes. The cluster throughput scales with the number of nodes and
+partitions.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>One partition</th>
+<th>Three partitions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Write throughput</td>
+<td>50,000 ops/sec</td>
+<td>150,000 ops/sec</td>
+</tr>
+<tr>
+<td>Leader CPU usage</td>
+<td>1 node at high</td>
+<td>3 nodes at moderate</td>
+</tr>
+<tr>
+<td>Cluster utilization</td>
+<td>33%</td>
+<td>~100%</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="11.2.1" id="independence"><span class="header-section-number">11.2.1</span> Independence</h3>
+<p>Each partition is fully independent. The leader of partition 1 does
+not coordinate with the leader of partition 2. Their logs are separate.
+Their terms are separate. Their elections are separate.</p>
+<p>If partition 2’s leader crashes, partition 2 runs a new election.
+Partitions 1 and 3 continue without interruption. The failure scope is
+one partition, not the entire cluster.</p>
+<pre><code>  Node B crashes:
+
+  Node A                                  Node C
+  ┌───────────┐                           ┌───────────┐
+  │ P1 LEADER │  (unaffected)             │ P1 follow │
+  │ P2 follow │  ← election starts →     │ P2 LEADER │  (new leader)
+  │ P3 follow │  (unaffected)             │ P3 LEADER │
+  └───────────┘                           └───────────┘
+
+  Partition 1: no interruption
+  Partition 2: brief pause, then resumes on Node C
+  Partition 3: no interruption</code></pre>
+<h2 data-number="11.3" id="configuring-partitions"><span class="header-section-number">11.3</span> Configuring Partitions</h2>
+<p>The <code>InitialPartitions</code> property on
+<code>RaftConfiguration</code> sets the number of application partitions
+at cluster bootstrap:</p>
+<div class="sourceCode" id="cb158"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb158-1"><a href="#cb158-1" aria-hidden="true" tabindex="-1"></a>RaftConfiguration configuration <span class="op">=</span> <span class="kw">new</span><span class="op">()</span></span>
+<span id="cb158-2"><a href="#cb158-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb158-3"><a href="#cb158-3" aria-hidden="true" tabindex="-1"></a>    NodeName <span class="op">=</span> <span class="st">&quot;node-a&quot;</span><span class="op">,</span></span>
+<span id="cb158-4"><a href="#cb158-4" aria-hidden="true" tabindex="-1"></a>    Host <span class="op">=</span> <span class="st">&quot;localhost&quot;</span><span class="op">,</span></span>
+<span id="cb158-5"><a href="#cb158-5" aria-hidden="true" tabindex="-1"></a>    Port <span class="op">=</span> <span class="dv">8001</span><span class="op">,</span></span>
+<span id="cb158-6"><a href="#cb158-6" aria-hidden="true" tabindex="-1"></a>    InitialPartitions <span class="op">=</span> <span class="dv">8</span></span>
+<span id="cb158-7"><a href="#cb158-7" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span></code></pre></div>
+<p>This creates 8 application partitions (partition 1 through partition
+8) plus the system partition (partition 0). The system partition is
+always present. The <code>InitialPartitions</code> count does not
+include it.</p>
+<h3 data-number="11.3.1" id="choosing-the-number-of-partitions"><span class="header-section-number">11.3.1</span> Choosing the Number of
+Partitions</h3>
+<p>The number of partitions determines the maximum parallelism for
+writes:</p>
+<table>
+<thead>
+<tr>
+<th>Partitions</th>
+<th>Maximum leaders</th>
+<th>Write parallelism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>1</td>
+<td>Single node</td>
+</tr>
+<tr>
+<td>3</td>
+<td>3</td>
+<td>All 3 nodes (on a 3-node cluster)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>3</td>
+<td>All 3 nodes, some lead multiple partitions</td>
+</tr>
+<tr>
+<td>24</td>
+<td>3</td>
+<td>All 3 nodes, 8 partitions each</td>
+</tr>
+</tbody>
+</table>
+<p>More partitions than nodes is fine. Kommander distributes leadership
+across the available nodes. With 8 partitions on 3 nodes, one node leads
+approximately 3 partitions and the other two lead approximately 2 or 3
+each.</p>
+<p>Guidelines:</p>
+<ul>
+<li><strong>Minimum:</strong> At least as many partitions as nodes. This
+ensures every node can lead at least one partition.</li>
+<li><strong>Practical default:</strong> 2 to 4 times the number of
+nodes. This gives the scheduler room to balance leadership even when a
+node goes down.</li>
+<li><strong>Too many:</strong> Each partition has overhead (WAL files,
+memory for the state machine, election timers). Hundreds of partitions
+on a 3-node cluster waste resources for no throughput gain.</li>
+</ul>
+<h3 data-number="11.3.2" id="initialpartitions-is-a-bootstrap-setting"><span class="header-section-number">11.3.2</span> InitialPartitions Is a
+Bootstrap Setting</h3>
+<p><code>InitialPartitions</code> takes effect only during the first
+cluster bootstrap (the first leader election on partition 0). The value
+is written into the committed partition map. On subsequent restarts, the
+value in the configuration is ignored. The cluster uses the committed
+map.</p>
+<p>To add partitions to a running cluster, use the partition management
+APIs (Chapter 13). To remove partitions, use the partition lifecycle
+APIs. <code>InitialPartitions</code> does not change the partition count
+of an existing cluster.</p>
+<h2 data-number="11.4" id="partition-0-the-system-partition-1"><span class="header-section-number">11.4</span> Partition 0: The System
+Partition</h2>
+<p>Partition 0 is the <strong>system partition</strong>. Kommander
+reserves it for internal cluster configuration: the partition map,
+membership changes, and other system-level operations.</p>
+<pre><code>  Partition 0 (system):   cluster configuration
+  Partition 1 (application): your data
+  Partition 2 (application): your data
+  Partition 3 (application): your data
+  ...</code></pre>
+<p>Rules for partition 0:</p>
+<ul>
+<li>Do not replicate application data to partition 0.</li>
+<li>Do not register application callbacks on partition 0.</li>
+<li>Kommander manages partition 0 internally.</li>
+<li>System entries use the <code>_RaftSystem</code> log type.</li>
+</ul>
+<p>Your application works with partitions 1 and above. When the previous
+chapters used <code>int partitionId = 1;</code>, that was partition 1,
+the first application partition.</p>
+<h2 data-number="11.5" id="routing-keys-to-partitions"><span class="header-section-number">11.5</span> Routing Keys to
+Partitions</h2>
+<p>With multiple partitions, the application must decide which partition
+holds which data. Kommander provides <code>GetPartitionKey</code> for
+this:</p>
+<div class="sourceCode" id="cb160"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb160-1"><a href="#cb160-1" aria-hidden="true" tabindex="-1"></a><span class="dt">int</span> partitionId <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionKey</span><span class="op">(</span><span class="st">&quot;user:123&quot;</span><span class="op">);</span></span></code></pre></div>
+<p><code>GetPartitionKey</code> hashes the input string and maps the
+hash to a partition id. The same key always maps to the same partition.
+Different keys may map to different partitions.</p>
+<p>The method returns a partition id in the application range (1 and
+above). It never returns 0 (the system partition).</p>
+<h3 data-number="11.5.1" id="how-the-routing-works"><span class="header-section-number">11.5.1</span> How the Routing Works</h3>
+<pre><code>  Key: &quot;user:123&quot;
+       │
+       ▼
+  Hash function (consistent hash)
+       │
+       ▼
+  Hash value: 0x4A2F...
+       │
+       ▼
+  Map to partition range
+       │
+       ▼
+  Partition id: 3</code></pre>
+<p>The partition map defines ranges. Each partition owns a range of hash
+values. <code>GetPartitionKey</code> hashes the key, finds which range
+contains the hash, and returns that partition’s id.</p>
+<h3 data-number="11.5.2" id="prefix-routing"><span class="header-section-number">11.5.2</span> Prefix Routing</h3>
+<p><code>GetPrefixPartitionKey</code> works the same way but uses only a
+prefix of the key for routing:</p>
+<div class="sourceCode" id="cb162"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb162-1"><a href="#cb162-1" aria-hidden="true" tabindex="-1"></a><span class="dt">int</span> partitionId <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPrefixPartitionKey</span><span class="op">(</span><span class="st">&quot;user:123:profile&quot;</span><span class="op">);</span></span></code></pre></div>
+<p>This is useful when you want all keys with the same prefix to land on
+the same partition. For example, all keys starting with
+<code>&quot;user:123&quot;</code> go to the same partition, regardless of the
+suffix.</p>
+<h3 data-number="11.5.3" id="updated-replicatedstore"><span class="header-section-number">11.5.3</span> Updated ReplicatedStore</h3>
+<p>Here is the ReplicatedStore evolved from one partition to multiple
+partitions:</p>
+<div class="sourceCode" id="cb163"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb163-1"><a href="#cb163-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Configuration: 8 partitions across 3 nodes</span></span>
+<span id="cb163-2"><a href="#cb163-2" aria-hidden="true" tabindex="-1"></a>RaftConfiguration configuration <span class="op">=</span> <span class="kw">new</span><span class="op">()</span></span>
+<span id="cb163-3"><a href="#cb163-3" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb163-4"><a href="#cb163-4" aria-hidden="true" tabindex="-1"></a>    NodeName <span class="op">=</span> args<span class="op">[</span><span class="dv">0</span><span class="op">],</span></span>
+<span id="cb163-5"><a href="#cb163-5" aria-hidden="true" tabindex="-1"></a>    Host <span class="op">=</span> <span class="st">&quot;localhost&quot;</span><span class="op">,</span></span>
+<span id="cb163-6"><a href="#cb163-6" aria-hidden="true" tabindex="-1"></a>    Port <span class="op">=</span> <span class="dt">int</span><span class="op">.</span><span class="fu">Parse</span><span class="op">(</span>args<span class="op">[</span><span class="dv">1</span><span class="op">]),</span></span>
+<span id="cb163-7"><a href="#cb163-7" aria-hidden="true" tabindex="-1"></a>    InitialPartitions <span class="op">=</span> <span class="dv">8</span></span>
+<span id="cb163-8"><a href="#cb163-8" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb163-9"><a href="#cb163-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb163-10"><a href="#cb163-10" aria-hidden="true" tabindex="-1"></a><span class="co">// Per-partition state machines</span></span>
+<span id="cb163-11"><a href="#cb163-11" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> stores <span class="op">=</span> <span class="kw">new</span> ConcurrentDictionary<span class="op">&lt;</span><span class="dt">int</span><span class="op">,</span> ConcurrentDictionary<span class="op">&lt;</span><span class="dt">string</span><span class="op">,</span> <span class="dt">string</span><span class="op">&gt;&gt;();</span></span>
+<span id="cb163-12"><a href="#cb163-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb163-13"><a href="#cb163-13" aria-hidden="true" tabindex="-1"></a>ConcurrentDictionary<span class="op">&lt;</span><span class="dt">string</span><span class="op">,</span> <span class="dt">string</span><span class="op">&gt;</span> <span class="fu">GetStore</span><span class="op">(</span><span class="dt">int</span> partitionId<span class="op">)</span></span>
+<span id="cb163-14"><a href="#cb163-14" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb163-15"><a href="#cb163-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> stores<span class="op">.</span><span class="fu">GetOrAdd</span><span class="op">(</span>partitionId<span class="op">,</span> _ <span class="op">=&gt;</span> <span class="kw">new</span> ConcurrentDictionary<span class="op">&lt;</span><span class="dt">string</span><span class="op">,</span> <span class="dt">string</span><span class="op">&gt;());</span></span>
+<span id="cb163-16"><a href="#cb163-16" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb163-17"><a href="#cb163-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb163-18"><a href="#cb163-18" aria-hidden="true" tabindex="-1"></a>Task<span class="op">&lt;</span><span class="dt">bool</span><span class="op">&gt;</span> <span class="fu">ApplyCommand</span><span class="op">(</span><span class="dt">int</span> partitionId<span class="op">,</span> RaftLog log<span class="op">)</span></span>
+<span id="cb163-19"><a href="#cb163-19" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb163-20"><a href="#cb163-20" aria-hidden="true" tabindex="-1"></a>    <span class="dt">var</span> store <span class="op">=</span> <span class="fu">GetStore</span><span class="op">(</span>partitionId<span class="op">);</span></span>
+<span id="cb163-21"><a href="#cb163-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb163-22"><a href="#cb163-22" aria-hidden="true" tabindex="-1"></a>    <span class="kw">switch</span> <span class="op">(</span>log<span class="op">.</span><span class="fu">LogType</span><span class="op">)</span></span>
+<span id="cb163-23"><a href="#cb163-23" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb163-24"><a href="#cb163-24" aria-hidden="true" tabindex="-1"></a>        <span class="kw">case</span> <span class="st">&quot;SetValue&quot;</span><span class="op">:</span></span>
+<span id="cb163-25"><a href="#cb163-25" aria-hidden="true" tabindex="-1"></a>            <span class="dt">var</span> cmd <span class="op">=</span> JsonSerializer<span class="op">.</span><span class="fu">Deserialize</span><span class="op">&lt;</span>SetValueCommand<span class="op">&gt;(</span></span>
+<span id="cb163-26"><a href="#cb163-26" aria-hidden="true" tabindex="-1"></a>                log<span class="op">.</span><span class="fu">LogData</span> <span class="op">??</span> <span class="op">[]</span></span>
+<span id="cb163-27"><a href="#cb163-27" aria-hidden="true" tabindex="-1"></a>            <span class="op">);</span></span>
+<span id="cb163-28"><a href="#cb163-28" aria-hidden="true" tabindex="-1"></a>            <span class="kw">if</span> <span class="op">(</span>cmd <span class="kw">is</span> not <span class="kw">null</span><span class="op">)</span></span>
+<span id="cb163-29"><a href="#cb163-29" aria-hidden="true" tabindex="-1"></a>                store<span class="op">[</span>cmd<span class="op">.</span><span class="fu">Key</span><span class="op">]</span> <span class="op">=</span> cmd<span class="op">.</span><span class="fu">Value</span><span class="op">;</span></span>
+<span id="cb163-30"><a href="#cb163-30" aria-hidden="true" tabindex="-1"></a>            <span class="kw">break</span><span class="op">;</span></span>
+<span id="cb163-31"><a href="#cb163-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb163-32"><a href="#cb163-32" aria-hidden="true" tabindex="-1"></a>        <span class="kw">case</span> <span class="st">&quot;DeleteValue&quot;</span><span class="op">:</span></span>
+<span id="cb163-33"><a href="#cb163-33" aria-hidden="true" tabindex="-1"></a>            <span class="dt">var</span> del <span class="op">=</span> JsonSerializer<span class="op">.</span><span class="fu">Deserialize</span><span class="op">&lt;</span>DeleteValueCommand<span class="op">&gt;(</span></span>
+<span id="cb163-34"><a href="#cb163-34" aria-hidden="true" tabindex="-1"></a>                log<span class="op">.</span><span class="fu">LogData</span> <span class="op">??</span> <span class="op">[]</span></span>
+<span id="cb163-35"><a href="#cb163-35" aria-hidden="true" tabindex="-1"></a>            <span class="op">);</span></span>
+<span id="cb163-36"><a href="#cb163-36" aria-hidden="true" tabindex="-1"></a>            <span class="kw">if</span> <span class="op">(</span>del <span class="kw">is</span> not <span class="kw">null</span><span class="op">)</span></span>
+<span id="cb163-37"><a href="#cb163-37" aria-hidden="true" tabindex="-1"></a>                store<span class="op">.</span><span class="fu">TryRemove</span><span class="op">(</span>del<span class="op">.</span><span class="fu">Key</span><span class="op">,</span> <span class="kw">out</span> _<span class="op">);</span></span>
+<span id="cb163-38"><a href="#cb163-38" aria-hidden="true" tabindex="-1"></a>            <span class="kw">break</span><span class="op">;</span></span>
+<span id="cb163-39"><a href="#cb163-39" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb163-40"><a href="#cb163-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb163-41"><a href="#cb163-41" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> Task<span class="op">.</span><span class="fu">FromResult</span><span class="op">(</span><span class="kw">true</span><span class="op">);</span></span>
+<span id="cb163-42"><a href="#cb163-42" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb163-43"><a href="#cb163-43" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb163-44"><a href="#cb163-44" aria-hidden="true" tabindex="-1"></a>raft<span class="op">.</span><span class="fu">OnReplicationReceived</span> <span class="op">+=</span> ApplyCommand<span class="op">;</span></span>
+<span id="cb163-45"><a href="#cb163-45" aria-hidden="true" tabindex="-1"></a>raft<span class="op">.</span><span class="fu">OnLogRestored</span> <span class="op">+=</span> ApplyCommand<span class="op">;</span></span></code></pre></div>
+<p>The state machine now receives the <code>partitionId</code> parameter
+and maintains a separate dictionary for each partition. This is
+important: each partition is an independent Raft group with its own log.
+The state machine must keep the data separate.</p>
+<h3 data-number="11.5.4" id="routing-writes"><span class="header-section-number">11.5.4</span> Routing Writes</h3>
+<div class="sourceCode" id="cb164"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb164-1"><a href="#cb164-1" aria-hidden="true" tabindex="-1"></a>app<span class="op">.</span><span class="fu">MapPut</span><span class="op">(</span><span class="st">&quot;/store/{key}&quot;</span><span class="op">,</span> <span class="fu">async</span> <span class="op">(</span><span class="dt">string</span> key<span class="op">,</span> HttpRequest request<span class="op">)</span> <span class="op">=&gt;</span></span>
+<span id="cb164-2"><a href="#cb164-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb164-3"><a href="#cb164-3" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Route the key to a partition</span></span>
+<span id="cb164-4"><a href="#cb164-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> partitionId <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionKey</span><span class="op">(</span>key<span class="op">);</span></span>
+<span id="cb164-5"><a href="#cb164-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb164-6"><a href="#cb164-6" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Check if this node leads the partition</span></span>
+<span id="cb164-7"><a href="#cb164-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">bool</span> isLeader <span class="op">=</span> await raft<span class="op">.</span><span class="fu">AmILeader</span><span class="op">(</span>partitionId<span class="op">,</span> <span class="kw">default</span><span class="op">);</span></span>
+<span id="cb164-8"><a href="#cb164-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(!</span>isLeader<span class="op">)</span></span>
+<span id="cb164-9"><a href="#cb164-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb164-10"><a href="#cb164-10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">string</span><span class="op">?</span> leader <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionLeaderHint</span><span class="op">(</span>partitionId<span class="op">);</span></span>
+<span id="cb164-11"><a href="#cb164-11" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb164-12"><a href="#cb164-12" aria-hidden="true" tabindex="-1"></a>            <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> <span class="st">&quot;NotLeader&quot;</span><span class="op">,</span> leader<span class="op">,</span> partitionId <span class="op">},</span></span>
+<span id="cb164-13"><a href="#cb164-13" aria-hidden="true" tabindex="-1"></a>            statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb164-14"><a href="#cb164-14" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb164-15"><a href="#cb164-15" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb164-16"><a href="#cb164-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb164-17"><a href="#cb164-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">using</span> <span class="dt">var</span> reader <span class="op">=</span> <span class="kw">new</span> <span class="fu">StreamReader</span><span class="op">(</span>request<span class="op">.</span><span class="fu">Body</span><span class="op">);</span></span>
+<span id="cb164-18"><a href="#cb164-18" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span> value <span class="op">=</span> await reader<span class="op">.</span><span class="fu">ReadToEndAsync</span><span class="op">();</span></span>
+<span id="cb164-19"><a href="#cb164-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb164-20"><a href="#cb164-20" aria-hidden="true" tabindex="-1"></a>    <span class="dt">byte</span><span class="op">[]</span> payload <span class="op">=</span> JsonSerializer<span class="op">.</span><span class="fu">SerializeToUtf8Bytes</span><span class="op">(</span></span>
+<span id="cb164-21"><a href="#cb164-21" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="fu">SetValueCommand</span><span class="op">(</span>key<span class="op">,</span> value<span class="op">)</span></span>
+<span id="cb164-22"><a href="#cb164-22" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb164-23"><a href="#cb164-23" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb164-24"><a href="#cb164-24" aria-hidden="true" tabindex="-1"></a>    <span class="kw">using</span> <span class="dt">var</span> timeout <span class="op">=</span> <span class="kw">new</span> <span class="fu">CancellationTokenSource</span><span class="op">(</span></span>
+<span id="cb164-25"><a href="#cb164-25" aria-hidden="true" tabindex="-1"></a>        TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">5</span><span class="op">)</span></span>
+<span id="cb164-26"><a href="#cb164-26" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb164-27"><a href="#cb164-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb164-28"><a href="#cb164-28" aria-hidden="true" tabindex="-1"></a>    <span class="dt">var</span> result <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ReplicateLogs</span><span class="op">(</span></span>
+<span id="cb164-29"><a href="#cb164-29" aria-hidden="true" tabindex="-1"></a>        partitionId<span class="op">,</span> <span class="st">&quot;SetValue&quot;</span><span class="op">,</span> payload<span class="op">,</span></span>
+<span id="cb164-30"><a href="#cb164-30" aria-hidden="true" tabindex="-1"></a>        cancellationToken<span class="op">:</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb164-31"><a href="#cb164-31" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb164-32"><a href="#cb164-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb164-33"><a href="#cb164-33" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>result<span class="op">.</span><span class="fu">Success</span><span class="op">)</span></span>
+<span id="cb164-34"><a href="#cb164-34" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Ok</span><span class="op">(</span><span class="kw">new</span> <span class="op">{</span> key<span class="op">,</span> value<span class="op">,</span> partitionId <span class="op">});</span></span>
+<span id="cb164-35"><a href="#cb164-35" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb164-36"><a href="#cb164-36" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span><span class="op">?</span> newLeader <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionLeaderHint</span><span class="op">(</span>partitionId<span class="op">);</span></span>
+<span id="cb164-37"><a href="#cb164-37" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb164-38"><a href="#cb164-38" aria-hidden="true" tabindex="-1"></a>        <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> result<span class="op">.</span><span class="fu">Status</span><span class="op">.</span><span class="fu">ToString</span><span class="op">(),</span> leader <span class="op">=</span> newLeader <span class="op">},</span></span>
+<span id="cb164-39"><a href="#cb164-39" aria-hidden="true" tabindex="-1"></a>        statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb164-40"><a href="#cb164-40" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb164-41"><a href="#cb164-41" aria-hidden="true" tabindex="-1"></a><span class="op">});</span></span></code></pre></div>
+<p>The key change: <code>partitionId</code> is no longer hardcoded to 1.
+It comes from <code>GetPartitionKey(key)</code>. Different keys route to
+different partitions. Different partitions may have different leaders.
+The error response now includes <code>partitionId</code> so the client
+knows which partition to retry.</p>
+<h3 data-number="11.5.5" id="routing-reads"><span class="header-section-number">11.5.5</span> Routing Reads</h3>
+<div class="sourceCode" id="cb165"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb165-1"><a href="#cb165-1" aria-hidden="true" tabindex="-1"></a>app<span class="op">.</span><span class="fu">MapGet</span><span class="op">(</span><span class="st">&quot;/store/{key}&quot;</span><span class="op">,</span> <span class="fu">async</span> <span class="op">(</span><span class="dt">string</span> key<span class="op">,</span> HttpRequest request<span class="op">)</span> <span class="op">=&gt;</span></span>
+<span id="cb165-2"><a href="#cb165-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb165-3"><a href="#cb165-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> partitionId <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionKey</span><span class="op">(</span>key<span class="op">);</span></span>
+<span id="cb165-4"><a href="#cb165-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">var</span> store <span class="op">=</span> <span class="fu">GetStore</span><span class="op">(</span>partitionId<span class="op">);</span></span>
+<span id="cb165-5"><a href="#cb165-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb165-6"><a href="#cb165-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">bool</span> consistent <span class="op">=</span> request<span class="op">.</span><span class="fu">Query</span><span class="op">.</span><span class="fu">ContainsKey</span><span class="op">(</span><span class="st">&quot;consistent&quot;</span><span class="op">);</span></span>
+<span id="cb165-7"><a href="#cb165-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb165-8"><a href="#cb165-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>consistent<span class="op">)</span></span>
+<span id="cb165-9"><a href="#cb165-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb165-10"><a href="#cb165-10" aria-hidden="true" tabindex="-1"></a>        <span class="kw">using</span> <span class="dt">var</span> timeout <span class="op">=</span> <span class="kw">new</span> <span class="fu">CancellationTokenSource</span><span class="op">(</span></span>
+<span id="cb165-11"><a href="#cb165-11" aria-hidden="true" tabindex="-1"></a>            TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">3</span><span class="op">)</span></span>
+<span id="cb165-12"><a href="#cb165-12" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb165-13"><a href="#cb165-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb165-14"><a href="#cb165-14" aria-hidden="true" tabindex="-1"></a>        <span class="dt">bool</span> confirmed <span class="op">=</span> await raft<span class="op">.</span><span class="fu">ConfirmLeadershipAsync</span><span class="op">(</span></span>
+<span id="cb165-15"><a href="#cb165-15" aria-hidden="true" tabindex="-1"></a>            partitionId<span class="op">,</span> timeout<span class="op">.</span><span class="fu">Token</span></span>
+<span id="cb165-16"><a href="#cb165-16" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb165-17"><a href="#cb165-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb165-18"><a href="#cb165-18" aria-hidden="true" tabindex="-1"></a>        <span class="kw">if</span> <span class="op">(!</span>confirmed<span class="op">)</span></span>
+<span id="cb165-19"><a href="#cb165-19" aria-hidden="true" tabindex="-1"></a>        <span class="op">{</span></span>
+<span id="cb165-20"><a href="#cb165-20" aria-hidden="true" tabindex="-1"></a>            <span class="dt">string</span><span class="op">?</span> leader <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionLeaderHint</span><span class="op">(</span>partitionId<span class="op">);</span></span>
+<span id="cb165-21"><a href="#cb165-21" aria-hidden="true" tabindex="-1"></a>            <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Json</span><span class="op">(</span></span>
+<span id="cb165-22"><a href="#cb165-22" aria-hidden="true" tabindex="-1"></a>                <span class="kw">new</span> <span class="op">{</span> error <span class="op">=</span> <span class="st">&quot;LeadershipNotConfirmed&quot;</span><span class="op">,</span> leader<span class="op">,</span> partitionId <span class="op">},</span></span>
+<span id="cb165-23"><a href="#cb165-23" aria-hidden="true" tabindex="-1"></a>                statusCode<span class="op">:</span> <span class="dv">503</span></span>
+<span id="cb165-24"><a href="#cb165-24" aria-hidden="true" tabindex="-1"></a>            <span class="op">);</span></span>
+<span id="cb165-25"><a href="#cb165-25" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb165-26"><a href="#cb165-26" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb165-27"><a href="#cb165-27" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb165-28"><a href="#cb165-28" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> store<span class="op">.</span><span class="fu">TryGetValue</span><span class="op">(</span>key<span class="op">,</span> <span class="kw">out</span> <span class="dt">string</span><span class="op">?</span> value<span class="op">)</span></span>
+<span id="cb165-29"><a href="#cb165-29" aria-hidden="true" tabindex="-1"></a>        <span class="op">?</span> Results<span class="op">.</span><span class="fu">Ok</span><span class="op">(</span><span class="kw">new</span> <span class="op">{</span> key<span class="op">,</span> value<span class="op">,</span> partitionId <span class="op">})</span></span>
+<span id="cb165-30"><a href="#cb165-30" aria-hidden="true" tabindex="-1"></a>        <span class="op">:</span> Results<span class="op">.</span><span class="fu">NotFound</span><span class="op">();</span></span>
+<span id="cb165-31"><a href="#cb165-31" aria-hidden="true" tabindex="-1"></a><span class="op">});</span></span></code></pre></div>
+<p>The read handler uses the same routing. Consistent reads confirm
+leadership on the correct partition.</p>
+<h2 data-number="11.6" id="the-partition-map"><span class="header-section-number">11.6</span> The Partition Map</h2>
+<p><code>GetPartitionMap</code> returns the current partition map:</p>
+<div class="sourceCode" id="cb166"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb166-1"><a href="#cb166-1" aria-hidden="true" tabindex="-1"></a>IReadOnlyList<span class="op">&lt;</span>RaftPartitionRange<span class="op">&gt;</span> map <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionMap</span><span class="op">();</span></span>
+<span id="cb166-2"><a href="#cb166-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb166-3"><a href="#cb166-3" aria-hidden="true" tabindex="-1"></a><span class="kw">foreach</span> <span class="op">(</span>RaftPartitionRange range <span class="kw">in</span> map<span class="op">)</span></span>
+<span id="cb166-4"><a href="#cb166-4" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb166-5"><a href="#cb166-5" aria-hidden="true" tabindex="-1"></a>    Console<span class="op">.</span><span class="fu">WriteLine</span><span class="op">(</span></span>
+<span id="cb166-6"><a href="#cb166-6" aria-hidden="true" tabindex="-1"></a>        $<span class="st">&quot;Partition {range.PartitionId}: &quot;</span> <span class="op">+</span></span>
+<span id="cb166-7"><a href="#cb166-7" aria-hidden="true" tabindex="-1"></a>        $<span class="st">&quot;range [{range.StartRange}, {range.EndRange}], &quot;</span> <span class="op">+</span></span>
+<span id="cb166-8"><a href="#cb166-8" aria-hidden="true" tabindex="-1"></a>        $<span class="st">&quot;generation {range.Generation}, &quot;</span> <span class="op">+</span></span>
+<span id="cb166-9"><a href="#cb166-9" aria-hidden="true" tabindex="-1"></a>        $<span class="st">&quot;state {range.State}&quot;</span></span>
+<span id="cb166-10"><a href="#cb166-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb166-11"><a href="#cb166-11" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Each <code>RaftPartitionRange</code> has:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Property</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PartitionId</code></td>
+<td><code>int</code></td>
+<td>The partition’s id</td>
+</tr>
+<tr>
+<td><code>StartRange</code></td>
+<td><code>int</code></td>
+<td>Start of the hash range</td>
+</tr>
+<tr>
+<td><code>EndRange</code></td>
+<td><code>int</code></td>
+<td>End of the hash range</td>
+</tr>
+<tr>
+<td><code>Generation</code></td>
+<td><code>long</code></td>
+<td>Incremented on each map mutation</td>
+</tr>
+<tr>
+<td><code>State</code></td>
+<td><code>RaftPartitionState</code></td>
+<td>Lifecycle state (active, splitting, etc.)</td>
+</tr>
+<tr>
+<td><code>RoutingMode</code></td>
+<td><code>RaftRoutingMode</code></td>
+<td>Whether included in <code>GetPartitionKey</code> routing</td>
+</tr>
+<tr>
+<td><code>Replicas</code></td>
+<td><code>List&lt;RaftReplica&gt;</code></td>
+<td>The nodes hosting this partition</td>
+</tr>
+</tbody>
+</table>
+<p>The partition map is replicated through partition 0 (the system
+partition). All nodes see the same map.</p>
+<h2 data-number="11.7" id="failure-isolation"><span class="header-section-number">11.7</span> Failure Isolation</h2>
+<p>With multiple partitions, a single node failure affects only the
+partitions that node led. Other partitions continue without
+interruption.</p>
+<h3 data-number="11.7.1" id="example-node-b-fails"><span class="header-section-number">11.7.1</span> Example: Node B Fails</h3>
+<pre><code>  Before failure:
+
+  Node A: leads P1, P4, P7
+  Node B: leads P2, P5, P8
+  Node C: leads P3, P6
+
+  Node B crashes.
+
+  After election:
+
+  Node A: leads P1, P4, P7, P5 (new)
+  Node C: leads P3, P6, P2 (new), P8 (new)
+
+  Affected partitions: P2, P5, P8 (brief pause during election)
+  Unaffected partitions: P1, P3, P4, P6, P7</code></pre>
+<p>Clients that wrote to partitions P1, P3, P4, P6, or P7 never noticed
+the failure. Clients that wrote to P2, P5, or P8 saw a brief timeout
+(the election timeout, 2 to 4 seconds), then resumed on the new
+leaders.</p>
+<p>This is the core advantage of partitioned Raft: <strong>failure
+isolation</strong>. One node failure does not stop the entire cluster.
+It stops only the partitions that node led, and those partitions recover
+through election within seconds.</p>
+<h2 data-number="11.8" id="a-note-on-the-word-partition"><span class="header-section-number">11.8</span> A Note on the Word
+“Partition”</h2>
+<p>The word “partition” appears in three contexts in distributed
+systems:</p>
+<ol type="1">
+<li><strong>Data partition.</strong> A subset of the data, assigned to a
+Raft group. This is the meaning in this chapter.</li>
+<li><strong>Raft group / partition.</strong> The Raft consensus group
+that manages a data partition. In Kommander, these are the same thing:
+one Raft group per data partition.</li>
+<li><strong>Network partition.</strong> A failure that splits the
+network into isolated groups (Chapter 9).</li>
+</ol>
+<p>Context makes the meaning clear. When this book uses “partition”
+without a qualifier, it means a Raft group (senses 1 and 2). “Network
+partition” always has the “network” qualifier.</p>
+<h2 data-number="11.9" id="summary-9"><span class="header-section-number">11.9</span> Summary</h2>
+<ul>
+<li>One Raft group means one leader. One leader is a write throughput
+bottleneck.</li>
+<li>Partitioned Raft runs multiple independent Raft groups in the same
+cluster. Each partition has its own leader, term, log, and state
+machine.</li>
+<li><code>InitialPartitions</code> sets the number of application
+partitions at bootstrap. Partition 0 is reserved for system use.</li>
+<li><code>GetPartitionKey</code> hashes a string key to a partition id.
+The same key always maps to the same partition.</li>
+<li>Each partition must have its own state machine (separate data
+store). The <code>partitionId</code> parameter in the callbacks
+identifies which partition the entry belongs to.</li>
+<li>A node failure affects only the partitions that node led. Other
+partitions continue without interruption.</li>
+<li>More partitions allow better distribution of leadership across
+nodes. A practical default is 2 to 4 times the node count.</li>
+<li>The next chapter builds a fully partitioned ReplicatedStore with
+per-partition routing and state machines.</li>
 </ul>
 </body>
 </html>
