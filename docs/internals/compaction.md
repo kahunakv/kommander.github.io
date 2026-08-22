@@ -53,6 +53,19 @@ WAL backends maintain the last committed checkpoint as indexed metadata rather t
 
 RocksDB also keeps a per-partition compaction seek hint. After a compaction pass removes an old prefix, the next pass starts near the previous removal boundary instead of repeatedly seeking from the beginning of a large retained partition log.
 
+## Diagnostics
+
+Compaction emits metrics even when it removes nothing:
+
+- `raft.wal.compaction_passes_total{outcome=no_checkpoint}` means no committed checkpoint exists yet.
+- `raft.wal.compaction_passes_total{outcome=floor_not_positive}` means retention floors left nothing removable.
+- `raft.wal.compaction_passes_total{outcome=effective}` means the pass reached the WAL adapter.
+- `raft.wal.compaction_passes_total{outcome=failed}` means the pass failed.
+- `raft.wal.compaction_blocked_by_durability_floor_total` means the application durability floor prevented removal.
+- `raft.wal.durability_floor_lag` reports the gap between the application durability floor and the checkpoint.
+
+These signals make a growing WAL easier to explain: either checkpoints are missing, retention floors are intentionally holding the tail, the application durability floor is behind, or the adapter is failing compaction.
+
 ## Safety Boundary
 
 Compaction should only remove entries older than a committed checkpoint. Removing newer entries can break restore and follower catch-up.

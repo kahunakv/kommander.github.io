@@ -1,6 +1,6 @@
 # Hosting Endpoints
 
-When using network transports, each process must expose matching Raft endpoints from the hosting application.
+Each process must give the equivalent Raft endpoints from its host application. This requirement applies to a network transport.
 
 ## gRPC
 
@@ -34,9 +34,9 @@ Use `RestCommunication` on the `RaftManager`:
 ICommunication communication = new RestCommunication();
 ```
 
-For REST, configure `HttpScheme`, `HttpTimeout`, and `HttpVersion` on `RaftConfiguration`. For transport authentication and TLS settings, see [Security And Authentication](security-and-authentication.md).
+For REST, configure `HttpScheme`, `HttpTimeout`, and `HttpVersion` on `RaftConfiguration`. For the transport authentication and the TLS settings, see [Security And Authentication](security-and-authentication.md).
 
-`MapRestRaftRoutes` currently maps these protocol endpoints:
+`MapRestRaftRoutes` maps these protocol endpoints now:
 
 | Method | Route |
 | --- | --- |
@@ -52,4 +52,4 @@ For REST, configure `HttpScheme`, `HttpTimeout`, and `HttpVersion` on `RaftConfi
 
 ## In-Memory
 
-`InMemoryCommunication` is intended for tests and in-process simulations. It does not require ASP.NET Core route mapping.
+`InMemoryCommunication` is for tests and in-process simulations. It does not need a route map from ASP.NET Core.

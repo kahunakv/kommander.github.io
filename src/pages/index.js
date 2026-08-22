@@ -12,6 +12,7 @@ const proofPoints = [
   'Jepsen-tested fault behavior',
   'Dynamic membership',
   'Elastic partitions',
+  'Shared-secret and mTLS node auth',
   'MIT-licensed for commercial and internal use',
 ];
 
@@ -40,6 +41,11 @@ const advantageCards = [
     title: 'Choose the durability and transport path',
     description:
       'Use RocksDB or SQLite in production, in-memory adapters in tests, and gRPC or REST depending on how your cluster is hosted.',
+  },
+  {
+    title: 'Authenticate node-to-node traffic',
+    description:
+      'Use shared-secret request signing or mutual TLS with per-node client certificates and thumbprint pinning for REST and gRPC clusters.',
   },
   {
     title: 'Scale partitions at runtime',
@@ -140,6 +146,9 @@ function HomepageHeader() {
           <div className={styles.buttons}>
             <Link className="button button--primary button--lg" to="/docs/getting-started">
               Get started
+            </Link>
+            <Link className="button button--secondary button--lg" to="/book">
+              Read the book
             </Link>
             <Link className="button button--secondary button--lg" to="/docs/why-kommander">
               Why Kommander

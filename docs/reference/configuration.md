@@ -56,7 +56,9 @@
 | `LeadershipConfirmationTimeout` | `2 s` | Maximum time `ConfirmLeadershipAsync` waits for quorum confirmation and local apply catch-up before returning `false`. |
 | `EnableCheckQuorum` | `false` | When enabled, a leader steps down if it has not heard same-term acknowledgements from a majority for the configured check-quorum window. |
 | `CheckQuorumIntervalMultiplier` | `8` | Number of heartbeat intervals used as the check-quorum step-down window when `EnableCheckQuorum` is enabled. |
-| `BackfillThreshold` | `10` | Follower lag threshold that switches the leader from empty heartbeats to active committed-log backfill. |
+| `BackfillEnabled` | `true` | Master switch for leader-driven backfill and snapshot fallback for lagging followers. Set to `false` only when a consumer owns catch-up by another path. |
+| `BackfillThreshold` | `10` | Follower lag threshold that engages the actively-behind backfill trigger. This is not a disable switch; use `BackfillEnabled` to turn backfill off. |
+| `FollowerSaturationBackoff` | `1 s` | How long a leader pauses entry-carrying backfill to a follower after that follower reports WAL saturation. Heartbeats continue. |
 | `MaxBackfillEntriesPerRound` | `128` | Maximum committed log entries shipped to one stale follower per backfill round. |
 | `SnapshotReceiveSessionTtl` | `30 s` | Idle timeout for an incomplete snapshot receive session. Expiry runs lazily on later snapshot receives. |
 | `SnapshotMaxPendingSessions` | `8` | Maximum concurrent snapshot receive sessions buffered by one node. |
@@ -73,6 +75,7 @@
 | `EnableAutoRejoin` | `true` | Allows a running node that discovers it was removed from the committed roster to automatically run the join flow again instead of remaining `NotMember`. |
 | `PingInterval` | `1 s` | SWIM ping round interval. Set to `0` or lower to disable the detector. Must be greater than `0` and lower than `StartElectionTimeout` when `EnableQuiescence` is `true`. |
 | `EnableLeaderBalancer` | `false` | Enables automatic redistribution of partition leadership across live voters. |
+| `EnableLoadReports` | `false` | Explicitly enables gossip of partition leadership and load reports even when the leader balancer is off. Reports are also enabled automatically by leader balancing, placement rebalancing, or a nonzero global `ReplicationFactor`. |
 | `LeaderBalancerReportInterval` | `5 s` | How often each node publishes its local leadership and load report through gossip. |
 | `LeaderBalancerInterval` | `30 s` | How often the system-partition leader runs a balancing pass. |
 | `LeaderBalancerReportTtl` | `20 s` | Maximum report age accepted by the balancer. Must be greater than `LeaderBalancerReportInterval`. |
@@ -87,8 +90,11 @@
 | `SuggestionTimeout` | `15 s` | Time allowed for a suggested move to appear in a fresh load report. |
 | `ReplicationFactor` | `0` | Target voter replicas per user partition. `0` means legacy full replication across every roster voter. |
 | `EnablePlacementRebalancer` | `false` | Enables ongoing replica placement repair, trim, and balancing. In-flight transitions still complete when disabled. |
-| `MaxReplicaMovesPerPass` | `2` | Maximum new replica placement moves started in one controller pass. |
-| `MaxConcurrentReplicaTransfers` | `1` | Maximum ranges with a transitional learner or removing replica at once. |
+| `PlacementPassInterval` | `5 s` | Cadence for placement-controller passes on the system-partition leader. Independent of the leader-balancer timer. Non-positive disables the timer, but event-driven kicks can still run. |
+| `MaxReplicaMovesPerPass` | `4` | Maximum new replica placement moves started in one controller pass across repair and balance priorities. |
+| `MaxConcurrentReplicaTransfers` | `1` | Maximum balance-class replica transfers allowed in flight at once. Repair work has a separate budget. |
+| `MaxConcurrentReplicaRepairs` | `3` | Maximum repair-class replica moves allowed in flight at once, such as re-replication after node loss or decommission drain. |
+| `DecommissionDrainTimeout` | `2 min` | Maximum time `RequestLeaveAsync` waits for replica evacuation after committing the local member as `Leaving`. On expiry the role is rolled back to `Voter` and the leave reports `DrainTimedOut`. |
 | `ReplicaCountDeadband` | `1` | Per-node replica-count imbalance tolerated before balancing moves are emitted. Under-replication repairs ignore it. |
 | `Zone` | `null` | Optional locality hint for the local node. The placement planner prefers distinct zones when hints are available. |
 | `CompactEveryOperations` | `10000` | Committed operations between automatic WAL compaction triggers per partition. Set to `0` or lower to disable automatic compaction. |
@@ -107,10 +113,15 @@
 | `RequireTls` | `true` | Reject non-TLS network transport requests when authentication requires secure transport. |
 | `AllowInsecureCertificateValidation` | `false` | Development-only certificate validation bypass for client transports. Do not enable in production. |
 | `AllowedClockSkew` | `60 s` | Maximum clock skew allowed when validating signed requests. |
-| `TrustedServerCertificateThumbprints` | empty | Optional allow-list of trusted server certificate thumbprints. |
-| `TrustedClientCertificateThumbprints` | empty | Optional allow-list of trusted client certificate thumbprints. |
+| `TrustedServerCertificateThumbprints` | empty | Optional SHA-256 thumbprint allow-list for peer server certificates used by outbound REST and gRPC clients. |
+| `TrustedClientCertificateThumbprints` | empty | SHA-256 thumbprint allow-list for peer client certificates used by incoming `MutualTls` requests. Server deployments should set at least one value in `MutualTls` mode. |
+| `ClientCertificatePath` | `null` | Path to the PKCS#12 client certificate this node presents to peers in `MutualTls` mode. |
+| `ClientCertificatePassword` | `null` | Password for `ClientCertificatePath`. Empty is valid for password-less archives. |
+| `ClientCertificate` | `null` | Pre-loaded `X509Certificate2` for embedded hosts. Takes precedence over `ClientCertificatePath` and is not bound by the server CLI. |
 
-The configuration still supports `HttpAuthBearerToken` for legacy compatibility. Internally, `GetEffectiveTransportSecurity()` falls back to that bearer token when `TransportSecurity.SharedSecret` is not set.
+The configuration still supports `HttpAuthBearerToken` for legacy compatibility. Internally, `GetEffectiveTransportSecurity()` falls back to that bearer token when `TransportSecurity.SharedSecret` is not set and `NodeAuthenticationMode` is not `MutualTls`.
+
+`MutualTls` requires a client certificate and cannot be combined with `AllowInsecureCertificateValidation`. The certificate is loaded once and retained by long-lived REST and gRPC handlers, so certificate rotation requires rolling the trust lists first and restarting nodes with the new certificate.
 
 ## gRPC Transport
 
@@ -206,7 +217,9 @@ Kommander supports runtime cluster membership management with learners, promotio
 
 | Property | Default | Description |
 | --- | ---: | --- |
-| `BackfillThreshold` | `10` | Follower lag threshold that switches the leader from empty heartbeats to active committed-log backfill. |
+| `BackfillEnabled` | `true` | Master switch for leader-driven committed-log backfill and snapshot fallback for lagging followers. |
+| `BackfillThreshold` | `10` | Follower lag threshold that engages active committed-log backfill. It does not disable idle-tail or restart-regression repairs. |
+| `FollowerSaturationBackoff` | `1 s` | Backoff window after a follower reports WAL saturation. |
 | `MaxBackfillEntriesPerRound` | `128` | Maximum committed log entries shipped to one stale follower per backfill round. |
 | `SnapshotReceiveSessionTtl` | `30 s` | How long an incomplete snapshot receive session may sit idle before the receiver drops its buffered state. |
 | `SnapshotMaxPendingSessions` | `8` | Maximum concurrent snapshot receive sessions on one node. |
@@ -247,6 +260,7 @@ The optional leader balancer runs only on the current system-partition leader. I
 | Property | Default | Description |
 | --- | ---: | --- |
 | `EnableLeaderBalancer` | `false` | Enables reports and balancing passes. Configure it consistently on every node. |
+| `EnableLoadReports` | `false` | Explicit opt-in for load-report gossip when you want leader hints and remote partition load signals without enabling balancing. |
 | `LeaderBalancerReportInterval` | `5 s` | Local load-report cadence. |
 | `LeaderBalancerInterval` | `30 s` | Controller balancing-pass cadence. |
 | `LeaderBalancerReportTtl` | `20 s` | Maximum report age accepted by the controller. |
@@ -270,11 +284,13 @@ Replica placement controls which nodes host each user partition.
 | --- | ---: | --- |
 | `ReplicationFactor` | `0` | Target number of voter replicas per user partition. `0` means full replication across every roster voter. |
 | `EnablePlacementRebalancer` | `false` | Master switch for ongoing placement passes. Initial placement still honors `ReplicationFactor`, and in-flight transitions still complete. |
-| `MaxReplicaMovesPerPass` | `2` | Maximum new add/remove placement moves initiated in one pass. |
-| `MaxConcurrentReplicaTransfers` | `1` | Maximum number of ranges allowed to have a learner or removing replica at once. |
+| `PlacementPassInterval` | `5 s` | Placement-controller cadence on the system-partition leader. This is separate from `LeaderBalancerInterval`. |
+| `MaxReplicaMovesPerPass` | `4` | Maximum new add/remove placement moves initiated in one pass. |
+| `MaxConcurrentReplicaTransfers` | `1` | Balance-class move budget for ranges with a learner or removing replica. |
+| `MaxConcurrentReplicaRepairs` | `3` | Repair-class move budget for under-replicated ranges and decommission evacuation. |
+| `DecommissionDrainTimeout` | `2 min` | Drain-first leave timeout before a `Leaving` member rolls back to `Voter`. |
 | `ReplicaCountDeadband` | `1` | Replica-count imbalance tolerated before balancing moves are planned. Repairs for under-replicated ranges bypass the deadband. |
 | `Zone` | `null` | Optional zone or rack hint for this node. Placement prefers spreading a range's replicas across distinct zones when hints exist. |
-| `LeaderBalancerInterval` | `30 s` | Placement pass cadence. The placement controller shares the leader-balancer timer path. |
 | `LearnerPromotionLag` | `10` | Maximum lag a learner replica may have and still be considered caught up. |
 | `LearnerPromotionStableWindow` | `3 s` | Stable catch-up window before a learner replica is promoted to voter. |
 

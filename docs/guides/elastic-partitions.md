@@ -1,33 +1,33 @@
 # Elastic Partitions
 
-Kommander can change the user partition layout at runtime.
+Kommander can change the layout of the user partitions at runtime.
 
-That means an application can:
+An application can do these operations:
 
 - create a new partition
-- split a hot partition into two
-- merge lightly loaded partitions
-- remove a partition that is no longer needed.
+- split a hot partition into two partitions
+- merge two partitions with a light load
+- remove a partition that it no longer needs.
 
-This page documents the user-facing APIs and the application behavior you need to plan for.
+This page gives the APIs for the user. It also gives the application behavior that you must plan for.
 
-Partition `0` is still reserved for Kommander system configuration. Elastic partition APIs apply to user partitions `1` and above.
+Partition `0` stays reserved for the system configuration of Kommander. The elastic partition APIs apply to user partition `1` and above.
 
-If you want task-oriented walkthroughs instead of the whole API surface, also read:
+Read these pages if you want a task-oriented procedure instead of the full API:
 
 - [Splitting A Hot Partition](./splitting-a-hot-partition.md)
 - [Merging Idle Partitions](./merging-idle-partitions.md)
 
-## Why You Would Use This
+## Why To Use This
 
-Elastic partitions are useful when the right partition count is not known up front.
+Elastic partitions are useful when you do not know the correct partition count in advance.
 
-Typical cases:
+Typical cases are:
 
-- one tenant or key range becomes much hotter than the others
-- a new workload segment should be isolated in its own partition
-- two partitions are mostly idle and can be merged
-- an unrouted, application-managed partition is no longer needed.
+- One tenant or key range becomes much hotter than the others.
+- A new workload segment needs its own partition.
+- Two partitions are mostly idle. You can merge them.
+- An unrouted partition that the application manages is no longer necessary.
 
 ## Routing Modes
 
@@ -38,21 +38,21 @@ Each partition in the map uses one of two routing modes:
 
 ### HashRange
 
-`HashRange` partitions participate in normal key-based routing.
+A `HashRange` partition takes part in the normal key-based routing.
 
-They are returned by:
+These methods return it:
 
 - `GetPartitionKey`
 - `GetPrefixPartitionKey`
 
-Use this mode when the application wants Kommander to route keys automatically.
+Use this mode when the application wants Kommander to route the keys automatically.
 
-`GetPartitionKey` and `GetPrefixPartitionKey` do not behave the same way:
+`GetPartitionKey` and `GetPrefixPartitionKey` behave differently:
 
-- `GetPartitionKey("tenant-42/order-1001")` hashes the prefix before the last `/`, so the effective routing key is `tenant-42`.
-- `GetPrefixPartitionKey("tenant-42/order-1001")` hashes the full string exactly as provided.
+- `GetPartitionKey("tenant-42/order-1001")` hashes the prefix before the last `/`. Therefore, the effective routing key is `tenant-42`.
+- `GetPrefixPartitionKey("tenant-42/order-1001")` hashes the full string exactly as you give it.
 
-That means `GetPartitionKey` is useful when related records should stay together by a shared prefix, while `GetPrefixPartitionKey` is useful when the whole supplied key should decide placement.
+Therefore, `GetPartitionKey` is useful when related records must stay together under a shared prefix. `GetPrefixPartitionKey` is useful when the full key must decide the placement.
 
 Examples:
 
@@ -61,19 +61,19 @@ int tenantPartition = raft.GetPartitionKey("tenant-42/order-1001");
 int exactKeyPartition = raft.GetPrefixPartitionKey("tenant-42/order-1001");
 ```
 
-In the first call, all keys that share the `tenant-42` prefix before the last slash route to the same partition. In the second call, different full keys can land in different partitions even if they share the same prefix.
+In the first call, all the keys with the `tenant-42` prefix before the last slash go to the same partition. In the second call, two different full keys can go to different partitions. This occurs even with the same prefix.
 
 ### Unrouted
 
-`Unrouted` partitions exist in the partition map but are never returned by hash-based routing helpers.
+An `Unrouted` partition is in the partition map. The hash-based routing helpers never return it.
 
-Use this mode when the application addresses a partition directly by id instead of routing through a hash key.
+Use this mode when the application addresses a partition directly by its id. That application does not route through a hash key.
 
-## Main APIs
+## Primary APIs
 
-Elastic partitioning is exposed through `IRaft`.
+`IRaft` gives the elastic partition methods.
 
-### Create a Partition
+### Create A Partition
 
 ```csharp
 RaftPartitionLifecycleResult created = await raft.CreatePartitionAsync(
@@ -83,7 +83,7 @@ RaftPartitionLifecycleResult created = await raft.CreatePartitionAsync(
 );
 ```
 
-For a `HashRange` partition, provide the range explicitly:
+For a `HashRange` partition, give the range explicitly:
 
 ```csharp
 RaftPartitionLifecycleResult created = await raft.CreatePartitionAsync(
@@ -94,13 +94,27 @@ RaftPartitionLifecycleResult created = await raft.CreatePartitionAsync(
 );
 ```
 
-Important behavior:
+The important behavior is:
 
-- leader-only
-- idempotent when the partition already exists in `Active` state
-- rejects overlapping `HashRange` ranges.
+- The leader only can make this call.
+- The call is idempotent when the partition exists in the `Active` state.
+- The call rejects a `HashRange` range that overlaps another range.
 
-### Remove a Partition
+Use `GetNextAvailablePartitionId()` as the start point when your application allocates the partition ids dynamically:
+
+```csharp
+int partitionId = raft.GetNextAvailablePartitionId();
+
+RaftPartitionLifecycleResult created = await raft.CreatePartitionAsync(
+    partitionId,
+    mode: RaftRoutingMode.Unrouted,
+    ct: cancellationToken
+);
+```
+
+The helper knows the tombstones. The id of a removed partition stays allocated. Kommander does not use it again. The helper is advisory. It is not a reservation. Therefore, two concurrent allocators must still handle a failure of `CreatePartitionAsync`. They can also retry with a new id.
+
+### Remove A Partition
 
 ```csharp
 RaftPartitionLifecycleResult removed = await raft.RemovePartitionAsync(
@@ -109,14 +123,14 @@ RaftPartitionLifecycleResult removed = await raft.RemovePartitionAsync(
 );
 ```
 
-Important behavior:
+The important behavior is:
 
-- leader-only
-- idempotent when the partition is already `Removed`
-- re-attempts WAL reclamation on repeated removal calls
-- rejects removal while the partition is mid-split or mid-merge.
+- The leader only can make this call.
+- The call is idempotent when the partition is already `Removed`.
+- A repeated removal call tries the WAL reclamation again. The WAL is the write-ahead log.
+- The call rejects a removal during a split or a merge.
 
-### Split a Partition
+### Split A Partition
 
 ```csharp
 RaftPartitionLifecycleResult split = await raft.SplitPartitionAsync(
@@ -131,17 +145,17 @@ RaftPartitionLifecycleResult split = await raft.SplitPartitionAsync(
 );
 ```
 
-Key points:
+The key points are:
 
-- leader-only
-- `targetPartitionId = 0` means auto-assign the next available id
-- `HashBoundary = null` means split at the midpoint
-- the new partition inherits or uses the requested routing mode.
+- The leader only can make this call.
+- `targetPartitionId = 0` means the assignment of the next available id.
+- `HashBoundary = null` means a split at the midpoint.
+- The new partition inherits the routing mode, or it uses the requested mode.
 
-For `HashRange` partitions:
+For a `HashRange` partition:
 
-- the source becomes the left half
-- the target becomes the right half.
+- The source becomes the left half.
+- The target becomes the right half.
 
 ### Merge Partitions
 
@@ -158,17 +172,17 @@ RaftPartitionLifecycleResult merged = await raft.MergePartitionsAsync(
 );
 ```
 
-Key points:
+The key points are:
 
-- the caller must be leader of both partitions
-- the partitions must both be `Active`
-- for `HashRange`, they must be adjacent
-- the source is drained and removed
-- the survivor absorbs the source's range.
+- The caller must be the leader of both partitions.
+- Both partitions must be `Active`.
+- For `HashRange`, the two partitions must be adjacent.
+- Kommander drains the source, then removes it.
+- The survivor absorbs the range of the source.
 
 ## Return Type
 
-Partition lifecycle APIs return `RaftPartitionLifecycleResult`:
+The partition lifecycle APIs return a `RaftPartitionLifecycleResult`:
 
 ```csharp
 public sealed class RaftPartitionLifecycleResult
@@ -181,22 +195,23 @@ public sealed class RaftPartitionLifecycleResult
 
 In practice:
 
-- `Success` tells you whether the operation finished successfully
-- `Status` explains the failure or success condition
+- `Success` tells you if the operation completed correctly.
+- `Status` explains the failure condition or the success condition.
 - `Generation` is the committed generation of the partition entry after the change.
 
-## Reading the Partition Map
+## Read The Partition Map
 
-Two APIs let applications inspect the current partition layout:
+Three methods let an application examine the current partition layout:
 
 ```csharp
 IReadOnlyList<RaftPartitionRange> map = raft.GetPartitionMap();
 long generation = raft.GetPartitionGeneration(partitionId: 2);
+int nextId = raft.GetNextAvailablePartitionId();
 ```
 
-`GetPartitionMap()` returns a snapshot copy of the current map. Mutating the returned list does not affect Kommander.
+`GetPartitionMap()` returns a snapshot copy of the current map. A change to the returned list has no effect on Kommander.
 
-Each `RaftPartitionRange` includes:
+Each `RaftPartitionRange` includes these fields:
 
 - `PartitionId`
 - `StartRange`
@@ -207,18 +222,18 @@ Each `RaftPartitionRange` includes:
 - `Replicas`
 - `ReplicationFactor`
 
-`Replicas` is the committed set of nodes that host the range when replica placement is enabled. An empty replica list means full replication across every committed roster voter. `ReplicationFactor` is a per-range override; `0` means the range inherits `RaftConfiguration.ReplicationFactor`.
+`Replicas` is the committed set of nodes that host the range. It applies with replica placement enabled. An empty replica list means full replication across every voter in the committed roster. `ReplicationFactor` is an override for one range. A value of `0` means that the range inherits `RaftConfiguration.ReplicationFactor`.
 
-Lifecycle states are:
+The lifecycle states are:
 
 - `Active`
 - `Splitting`
 - `Draining`
 - `Removed`
 
-## Partition Map Change Event
+## Event For A Change Of The Partition Map
 
-Applications can subscribe to:
+An application can subscribe to this event:
 
 ```csharp
 raft.OnPartitionMapChanged += ranges =>
@@ -227,22 +242,22 @@ raft.OnPartitionMapChanged += ranges =>
 };
 ```
 
-This fires every time a new partition map is applied, including:
+The event fires each time that Kommander applies a new partition map. The causes include:
 
-- startup restore
-- system configuration replication
-- split phase transitions
-- merge phase transitions
-- create and remove operations.
-- replica placement changes.
+- a startup restore
+- the replication of the system configuration
+- a phase transition of a split
+- a phase transition of a merge
+- a create operation or a remove operation
+- a change of the replica placement.
 
-Use it when your application needs to refresh routing caches, rebalance local workers, or update operational views of the current partition layout.
+Use the event when your application must refresh a routing cache. Also use it to rebalance the local workers, or to update an operational view of the partition layout.
 
-Handlers should stay quick and should not block the coordinator path.
+Keep the handlers fast. A handler must not block the coordinator path.
 
 ## Generation Fence And PartitionMoved
 
-The main user-facing safety feature for elastic partitions is the generation fence.
+The generation fence is the primary safety feature of elastic partitions for a user. A generation fence protects a partition from a write with an old generation number.
 
 `ReplicateLogs` accepts an optional `expectedGeneration`:
 
@@ -258,37 +273,37 @@ RaftReplicationResult result = await raft.ReplicateLogs(
 );
 ```
 
-If the partition has moved to a newer generation before the write is accepted, Kommander rejects the request with:
+The partition can move to a newer generation before Kommander accepts the write. Kommander then rejects the request with this status:
 
 - `RaftOperationStatus.PartitionMoved`
 
-That protects callers that cached an old partition id before a split or merge completed.
+That protects a caller that cached an old partition id before the end of a split or a merge.
 
-The application response should be:
+The application must then do these steps:
 
-1. refresh the partition map or generation
-2. re-route the key
-3. retry against the current owner.
+1. Refresh the partition map or the generation.
+2. Route the key again.
+3. Retry against the current owner.
 
-## State Transfer During Split
+## State Transfer During A Split
 
-Elastic partitioning changes the routing map. It does not magically move your application state unless you provide a transfer implementation.
+Elastic partitions change the routing map. They do not move your application state. A transfer implementation moves it.
 
-You can register:
+You can register one implementation:
 
 ```csharp
 raft.RegisterStateMachineTransfer(new MyTransfer());
 ```
 
-through `IRaftStateMachineTransfer`.
+The implementation uses `IRaftStateMachineTransfer`.
 
-If registered, the coordinator can:
+With that implementation registered, the coordinator can do these steps:
 
-1. export a source range snapshot
-2. import it into the target partition
-3. replicate a checkpoint into the target partition.
+1. It exports a snapshot of the source range.
+2. It imports the snapshot into the target partition.
+3. It replicates a checkpoint into the target partition.
 
-If no transfer implementation is registered, the coordinator falls back to log-shipping behavior, and your application is responsible for moving state before phase 2 completes.
+Without a registered transfer implementation, the coordinator uses the log-shipping behavior. Your application is then responsible for the move of the state before the end of phase 2.
 
 ## Interaction With Replica Placement
 
@@ -296,31 +311,31 @@ Elastic partitions and replica placement share the committed partition map.
 
 When `ReplicationFactor > 0`:
 
-- a created partition receives an initial replica set chosen from the least-loaded voter nodes
-- a split target inherits the source partition's replica set because the source data already lives on those nodes
-- a merge survivor receives the union of both replica sets, which the placement rebalancer can trim later
-- replica placement changes bump `Generation`, so stale writers still receive `PartitionMoved`.
+- A new partition receives an initial replica set. Kommander selects it from the voter nodes with the lowest load.
+- A split target inherits the replica set of the source partition, because the source data is already on those nodes.
+- A merge survivor receives the union of both replica sets. The placement rebalancer can reduce that set later.
+- A change of the replica placement increments `Generation`. Therefore, a stale writer still receives `PartitionMoved`.
 
-Use `GetPartitionReplicas(partitionId)` when clients need to route directly to nodes that host a partition. This matters for gRPC and REST deployments because non-replica forwarding is not wired there.
+Use `GetPartitionReplicas(partitionId)` when a client must route directly to the nodes that host a partition. This is important for a gRPC deployment and a REST deployment. A node that is not a replica cannot forward the request there.
 
 ## What Your Application Still Owns
 
-Elastic partitions change Kommander's partition map and WAL ownership boundaries. Your application still owns:
+Elastic partitions change the partition map of Kommander and the WAL ownership boundaries. Your application still owns these items:
 
-- how state is moved during split
-- whether direct partition ids or routed keys are used
-- how local caches are refreshed
-- how to retry after `PartitionMoved`
-- any external indexes or projections that must follow the new partition layout.
+- the move of the state during a split
+- the choice between a direct partition id and a routed key
+- the refresh of the local caches
+- the retry after a `PartitionMoved` status
+- each external index or projection that must follow the new partition layout.
 
 ## Practical Rules
 
-- Use `HashRange` when keys should route automatically through Kommander.
-- Use `GetPartitionKey` when the prefix before the last `/` should define the shard.
-- Use `GetPrefixPartitionKey` when the full supplied key should define the shard.
-- Use `Unrouted` when the application addresses partitions directly.
-- Treat `Generation` as part of the write contract when routing information may be stale.
-- Subscribe to `OnPartitionMapChanged` if the application caches partition layout.
-- Use `GetPartitionReplicas` when replica placement is enabled and clients need to choose a hosting node.
-- Do not assume split or merge automatically migrates your application state.
+- Use `HashRange` when Kommander must route the keys automatically.
+- Use `GetPartitionKey` when the prefix before the last `/` defines the shard.
+- Use `GetPrefixPartitionKey` when the full key defines the shard.
+- Use `Unrouted` when the application addresses a partition directly.
+- Treat `Generation` as part of the write contract when the routing information can be stale.
+- Subscribe to `OnPartitionMapChanged` if the application caches the partition layout.
+- Use `GetPartitionReplicas` when replica placement is enabled and a client must select a host node.
+- Do not expect a split or a merge to migrate your application state automatically.
 - Do not use partition `0` for application data.

@@ -1,10 +1,10 @@
 # Checkpoints And Compaction
 
-Checkpoint replication is part of the main application-facing flow.
+Checkpoint replication is part of the main flow that the application uses.
 
-## Replicating A Checkpoint
+## Replicate A Checkpoint
 
-Use `ReplicateCheckpoint` to write a checkpoint entry through the same Raft quorum path as normal proposals:
+Use `ReplicateCheckpoint` to write a checkpoint entry. It uses the same Raft quorum path as a normal proposal:
 
 ```csharp
 RaftReplicationResult checkpoint = await raft.ReplicateCheckpoint(
@@ -13,7 +13,7 @@ RaftReplicationResult checkpoint = await raft.ReplicateCheckpoint(
 );
 ```
 
-Internally, checkpoints use:
+Internally, a checkpoint uses these log types:
 
 - `ProposedCheckpoint`
 - `CommittedCheckpoint`
@@ -21,13 +21,13 @@ Internally, checkpoints use:
 
 ## Why Checkpoints Matter
 
-Automatic WAL compaction only removes history that is older than the last committed checkpoint. If an application never writes checkpoints, there is little or nothing eligible to compact.
+Automatic WAL compaction removes only the history that is older than the last committed checkpoint. The WAL is the write-ahead log. If an application writes no checkpoint, there is little or nothing to compact.
 
-Think of a checkpoint as a marker that says: the application has a stable point here, and older WAL history may eventually become removable.
+A checkpoint is a marker. It says that the application has a stable point here. Older WAL history can become removable later.
 
 ## Automatic Compaction
 
-Kommander can trigger automatic WAL compaction per partition after a configured number of committed operations.
+Kommander can start automatic WAL compaction for each partition after a configured number of committed operations.
 
 The relevant settings are:
 
@@ -35,31 +35,31 @@ The relevant settings are:
 - `CompactNumberEntries`
 - `MaxEntriesPerCompaction`
 
-The compaction pass:
+A compaction pass does these steps:
 
-1. reads the last committed checkpoint
-2. asks the WAL adapter to remove entries older than that checkpoint
-3. repeats in batches until there is no more eligible work or the configured pass limit is reached.
+1. It reads the last committed checkpoint.
+2. It asks the WAL adapter to remove the entries that are older than that checkpoint.
+3. It repeats in batches until no eligible work remains, or until it reaches the configured limit for one pass.
 
-This keeps one compaction trigger from monopolizing the partition indefinitely.
+Because of the limit, one compaction trigger cannot hold the partition for an unbounded time.
 
 ## Retain Floors
 
 `SetMinRetainIndex(partitionId, index)` can protect a WAL tail from compaction.
 
-This is useful when an application has persisted its own local snapshot and needs to keep only the deltas after that snapshot for offline replay:
+This is useful when an application keeps its own local snapshot. The application then needs only the deltas after that snapshot for an offline replay:
 
 ```csharp
 raft.SetMinRetainIndex(partitionId, snapshotIndex + 1);
 ```
 
-For partition `0` application deltas, this is part of the system-state snapshot contract. The retain floor is in-memory and must be reasserted after process restart.
+For the application deltas on partition `0`, this call is part of the contract for system-state snapshots. The retain floor is in memory. You must set it again after a process restart.
 
-Values `0` or lower mean no protection. The effective compaction boundary is the lower of the last committed checkpoint and the retain floor.
+A value of `0` or lower gives no protection. The effective compaction boundary is the lower of two values: the last committed checkpoint and the retain floor.
 
 ## Retention Holds
 
-Use `AcquireRetentionHold(partitionId, index)` when retention is temporary or when several independent consumers may protect different WAL ranges at the same time.
+Use `AcquireRetentionHold(partitionId, index)` when the retention is temporary. Also use it when several independent consumers can protect different WAL ranges at the same time.
 
 ```csharp
 using IDisposable hold = raft.AcquireRetentionHold(
@@ -72,25 +72,25 @@ await copyJob.CopyLogsAsync(cancellationToken);
 
 Retention holds compose safely:
 
-- each hold protects entries down to its own index
-- the effective hold floor is the minimum active hold index
-- disposing a handle releases exactly one hold
-- disposing a handle more than once is a no-op
-- holds are in-memory and must be re-acquired after restart.
+- Each hold protects the entries down to its own index.
+- The effective hold floor is the minimum index of the active holds.
+- The disposal of a handle releases exactly one hold.
+- A second disposal of the same handle does nothing.
+- The holds are in memory. You must acquire them again after a restart.
 
-`SetMinRetainIndex` is useful for one owner that continuously publishes a local snapshot boundary. `AcquireRetentionHold` is safer for short-lived work such as point-in-time recovery capture, backup export, or concurrent consumers that should not overwrite each other's floor.
+`SetMinRetainIndex` is useful for one owner that publishes a local snapshot boundary continuously. `AcquireRetentionHold` is safer for short work such as a point-in-time recovery capture, a backup export, or concurrent consumers. Those consumers must not overwrite the floor of each other.
 
-See [System Partition State Snapshots](../guides/system-partition-state-snapshots.md) for the partition `0` delta pattern.
+See [System Partition State Snapshots](../guides/system-partition-state-snapshots.md) for the delta pattern on partition `0`.
 
 ## Snapshot Boundaries
 
-When a follower installs a snapshot, Kommander writes a durable `CommittedCheckpoint` at the snapshot index. That checkpoint says the snapshot covers every committed entry up to and including that index.
+A follower installs a snapshot. Kommander then writes a durable `CommittedCheckpoint` at the snapshot index. That checkpoint says that the snapshot covers every committed entry up to that index and includes it.
 
-The WAL backend decides atomically whether to keep or truncate the suffix above the boundary:
+The WAL backend decides atomically to keep or to truncate the suffix above the boundary:
 
-- if the local entry at the snapshot index has the same term, the suffix is retained
-- if the term differs, the suffix is truncated and normal backfill repairs it from the leader.
+- It retains the suffix if the local entry at the snapshot index has the same term.
+- It truncates the suffix if the term is different. Normal backfill then repairs the suffix from the leader.
 
-Application snapshot imports must be idempotent for the same snapshot identity, because the leader can retry if the application import succeeds but the durable boundary write fails.
+The snapshot import of the application must be idempotent for the same snapshot identity. The application import can succeed while the durable boundary write fails. The leader can then retry the snapshot.
 
 See [Snapshot Installation](./snapshot-installation.md) for the full install sequence.

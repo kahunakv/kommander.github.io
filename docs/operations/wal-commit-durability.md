@@ -1,31 +1,31 @@
 # WAL Commit Durability
 
-Kommander persists Raft log entries through the configured write-ahead log, or WAL.
+Kommander persists the Raft log entries through the configured write-ahead log (WAL).
 
-For durable backends such as RocksDB and SQLite, Kommander keeps the Raft durability invariant while avoiding an unnecessary client-visible sync on the common auto-commit path.
+For a durable backend such as RocksDB or SQLite, Kommander keeps the Raft durability invariant. It also avoids an unnecessary sync that the client can see on the common auto-commit path. A sync is an fsync, which is a durable flush to disk.
 
-Without the single-fsync fast path, a normal auto-commit write performs two durable storage syncs:
+Without the single-fsync fast path, a normal auto-commit write does two durable syncs:
 
-1. write the proposed entry and sync it
-2. after quorum acknowledgement, write the committed marker and sync it.
+1. It writes the proposed entry and syncs it.
+2. It writes the committed marker after the quorum acknowledgement, then syncs it.
 
-That older two-sync path is safe and predictable, but storage sync latency can dominate write latency. Kommander exposes two WAL settings that reduce the cost in different ways:
+That older two-sync path is safe and predictable. The storage sync latency can still dominate the write latency. Kommander gives two WAL settings that reduce the cost in different ways:
 
-- `WalGroupCommitLingerMs` improves batching density and throughput under staggered concurrent writes
-- `WalSingleFsyncCommit` removes the second sync from the client-visible auto-commit path.
+- `WalGroupCommitLingerMs` improves the batch density and the throughput when concurrent writes arrive at staggered times.
+- `WalSingleFsyncCommit` removes the second sync from the auto-commit path that the client can see.
 
-These settings affect durable WAL adapters. `InMemoryWAL` does not fsync, and durable adapters configured with `syncWrites: false` already trade away crash durability for testing or benchmarking.
+These settings apply to a durable WAL adapter. `InMemoryWAL` does no fsync. A durable adapter with `syncWrites: false` already trades crash durability for test speed or benchmark speed.
 
 ## What Makes An Entry Durable
 
-Raft considers an entry committed when a quorum has durably stored it.
+Raft treats an entry as committed when a quorum stores it durably.
 
-Kommander's default WAL representation stores both:
+The default WAL representation of Kommander stores two records:
 
-- a `Proposed` record, written before replication
-- a `Committed` marker, written after the entry reaches quorum.
+- a `Proposed` record, written before the replication
+- a `Committed` marker, written after the entry reaches the quorum.
 
-The second marker makes restart recovery cheaper because the WAL describes the committed prefix directly. It is not what makes the entry durable on a quorum. The quorum-durable proposed entry is the Raft commit point.
+The second marker makes the restart recovery cheaper, because the WAL describes the committed prefix directly. The marker is not the reason that the entry is durable on a quorum. The quorum-durable proposed entry is the Raft commit point.
 
 ## Two-Sync Path
 
@@ -39,34 +39,34 @@ leader committed marker -> fsync
 client acknowledged
 ```
 
-Followers also receive committed markers and sync them.
+Each follower also receives a committed marker and syncs it.
 
-This means a single auto-commit write can wait for two serial syncs on the leader path. Group commit can amortize syncs across many writes, but the write still waits for both phases.
+Therefore, one auto-commit write can wait for two serial syncs on the leader path. Group commit can amortize the syncs across many writes. The write still waits for both phases.
 
 ## Group Commit Linger
 
-`FairWalScheduler` already batches ready WAL work across partitions. A worker can drain up to `MaxWalGroupBatchPartitions` ready partitions and issue one `IWAL.Write` call.
+`FairWalScheduler` already batches the ready WAL work across partitions. A worker can drain a maximum of `MaxWalGroupBatchPartitions` ready partitions. It then makes one `IWAL.Write` call.
 
-`WalGroupCommitLingerMs` adds a short adaptive wait after the first ready partition is found. That gives more partitions a chance to arrive and share the same storage sync.
+`WalGroupCommitLingerMs` adds a short adaptive wait after the worker finds the first ready partition. That wait gives more partitions a chance to arrive and share the same storage sync.
 
-Use it when:
+Use the linger in these conditions:
 
-- writes are spread across many partitions
-- WAL batches are small even under meaningful load
-- follower append traffic arrives staggered and causes many near-solo syncs
-- storage sync cost is visible in latency or throughput profiles.
+- The writes spread across many partitions.
+- The WAL batches stay small, even under a meaningful load.
+- The follower append traffic arrives at staggered times and causes many near-solo syncs.
+- The storage sync cost is visible in a latency profile or a throughput profile.
 
-Start with a small value such as `2 ms` and measure. `0` keeps the default purely opportunistic batching.
+Start with a small value such as `2 ms`. Then measure the result. A value of `0` keeps the default opportunistic batches.
 
-The linger window is adaptive. If another ready partition does not arrive, the worker does not sit through the whole window. A full group batch also syncs immediately.
+The linger window is adaptive. The worker does not wait for the full window if no other ready partition arrives. A full group batch also syncs immediately.
 
-`ReplicateEntries` can reduce proposal and transport overhead before work reaches the WAL scheduler. An auto-commit-only heterogeneous batch is one proposal, while a batch with a trailing manual group is proposed as an auto group followed by a manual suffix. The WAL scheduler still controls storage-call and fsync coalescing through the same group commit settings.
+`ReplicateEntries` can reduce the proposal overhead and the transport overhead before the work reaches the WAL scheduler. A heterogeneous batch with auto-commit entries only is one proposal. A batch with a trailing manual group is one auto group plus a manual suffix. The WAL scheduler still controls the storage calls and the fsync coalescence through the same group commit settings.
 
 ## Single-Fsync Commit Fast Path
 
 `WalSingleFsyncCommit` changes the auto-commit path.
 
-When enabled, which is the default, an `autoCommit` write can acknowledge the client as soon as the proposed entry is durable on a quorum. The per-entry committed marker is still written afterward, but it is written lazily so it can ride a later sync.
+The setting is enabled by default. An `autoCommit` write then acknowledges the client as soon as the proposed entry is durable on a quorum. The runtime still writes the committed marker of each entry afterward. It writes the marker lazily, so the marker can ride a later sync.
 
 ```text
 proposed entry -> fsync
@@ -75,30 +75,30 @@ client acknowledged
 committed marker written lazily
 ```
 
-This is a latency optimization. It removes one serial sync from the client-visible path for the common single-round auto-commit write.
+This is a latency optimization. It removes one serial sync from the path that the client can see. It applies to the common single-round auto-commit write.
 
-It does not apply to explicit two-phase writes where the caller uses `autoCommit: false` and later calls `CommitLogs` or `RollbackLogs`. That path keeps its separate durable commit behavior.
+It does not apply to an explicit two-phase write. In that case, the caller uses `autoCommit: false`, then calls `CommitLogs` or `RollbackLogs`. That path keeps its separate durable commit behavior.
 
 ## Crash Recovery Behavior
 
-With `WalSingleFsyncCommit` enabled, a crash can leave a proposed entry on disk whose committed marker was not flushed yet.
+With `WalSingleFsyncCommit` enabled, a crash can leave a proposed entry on disk. The committed marker of that entry can be unflushed.
 
-Kommander handles that conservatively:
+Kommander handles that case conservatively:
 
-- it keeps the durable proposed tail and does not reuse those log ids
-- it restores the committed prefix from durable committed records and committed checkpoints
-- followers can be re-supplied committed entries by the leader through normal catch-up and backfill
-- a restarted node that becomes leader can recommit durable proposed entries through standard Raft rules.
+- It keeps the durable proposed tail. It does not reuse those log ids.
+- It restores the committed prefix from the durable committed records and the committed checkpoints.
+- The leader can supply the committed entries to the followers again through normal catch-up and backfill.
+- A node that restarts and becomes leader can recommit the durable proposed entries through the standard Raft rules.
 
-The important operator-facing invariant is unchanged: a write acknowledged to the client has reached quorum durability.
+One invariant for the operator does not change. A write that the system acknowledges to the client reached quorum durability.
 
 ## Application Durability Floor
 
 Raft durability and application durability are related, but they are not identical.
 
-Kommander's checkpoints describe the Raft log prefix that consensus has made durable. Your application may apply committed entries to its own storage synchronously inside `OnReplicationReceived`, or it may apply them to an in-memory projection first and flush that projection later.
+The checkpoints of Kommander describe the prefix of the Raft log that consensus made durable. Your application can apply the committed entries to its own storage synchronously inside `OnReplicationReceived`. It can also apply them to an in-memory projection first and flush that projection later.
 
-If your application flushes asynchronously, configure `ApplicationDurabilityProvider`:
+Configure `ApplicationDurabilityProvider` if your application flushes asynchronously:
 
 ```csharp
 public sealed class ProjectionDurability : IApplicationDurabilityProvider
@@ -115,32 +115,32 @@ var config = new RaftConfiguration
 };
 ```
 
-The provider returns the highest WAL log id whose committed prefix has been durably applied to the application's own storage. Kommander uses that floor in two places:
+The provider returns the highest WAL log id with a committed prefix that is durable in the storage of the application. Kommander uses that floor in two places:
 
-- restart replay widens down to the floor, so committed entries above the application's durable point are delivered again through `OnLogRestored`
-- compaction does not remove entries above the floor, even when a Raft checkpoint is higher.
+- The restart replay widens down to the floor. The runtime then delivers the committed entries above the durable point of the application again through `OnLogRestored`.
+- Compaction does not remove an entry above the floor, even when a Raft checkpoint is higher.
 
-Return `-1` for "no opinion", which keeps checkpoint-anchored behavior. Return `0` when nothing has been durably applied yet. The value must come from durable application storage, must be cheap to read, and must never be too high. A stale-low value is safe because entries can be redelivered; a too-high value can hide entries the application still needs after restart.
+Return `-1` for "no opinion". That value keeps the behavior that the checkpoint anchors. Return `0` when nothing is durably applied yet. The value must come from the durable storage of the application. It must be cheap to read. It must never be too high. A stale low value is safe, because the runtime can deliver the entries again. A value that is too high can hide the entries that the application still needs after a restart.
 
 ## Configuration
 
 | Property | Default | Description |
 | --- | ---: | --- |
-| `WalSingleFsyncCommit` | `true` | Enables the single-fsync auto-commit fast path. Client acknowledgement happens when the proposed entry is durable on a quorum; the committed marker is written lazily. |
-| `WalGroupCommitLingerMs` | `0` | Bounded adaptive wait, in milliseconds, used by WAL workers to gather more ready partitions into a group commit. `0` disables the linger and keeps opportunistic batching. |
-| `MaxWalGroupBatchPartitions` | `64` | Maximum ready partitions coalesced into one scheduler group write. |
-| `MaxWalBatchSize` | `256` | Maximum WAL operations drained from one partition into one batch. |
-| `ApplicationDurabilityProvider` | `null` | Optional application durability floor used to widen restart replay and fence compaction. |
-| `WriteIOThreads` | `4` | Number of WAL scheduler write workers. |
+| `WalSingleFsyncCommit` | `true` | Enables the single-fsync fast path for auto-commit. The client acknowledgement occurs when the proposed entry is durable on a quorum. The runtime writes the committed marker lazily. |
+| `WalGroupCommitLingerMs` | `0` | The bounded adaptive wait, in milliseconds, that a WAL worker uses to gather more ready partitions into one group commit. `0` disables the linger and keeps the opportunistic batches. |
+| `MaxWalGroupBatchPartitions` | `64` | The maximum number of ready partitions that the scheduler coalesces into one group write. |
+| `MaxWalBatchSize` | `256` | The maximum number of WAL operations that the scheduler drains from one partition into one batch. |
+| `ApplicationDurabilityProvider` | `null` | The optional application durability floor. It widens the restart replay and fences the compaction. |
+| `WriteIOThreads` | `4` | The number of write workers in the WAL scheduler. |
 
-The two WAL durability knobs are complementary:
+The two WAL durability settings are complementary:
 
-- use `WalSingleFsyncCommit` when write latency is dominated by the second commit sync
-- use `WalGroupCommitLingerMs` when throughput or tail latency suffers because writes arrive just far enough apart to miss batching opportunities.
+- Use `WalSingleFsyncCommit` when the second commit sync dominates the write latency.
+- Use `WalGroupCommitLingerMs` when the throughput or the tail latency suffers. That case occurs when the writes arrive far enough apart to miss the batch opportunities.
 
 ## Observability
 
-Useful signals:
+These signals are useful:
 
 - `raft.wal.batches_total`
 - `raft.wal.operations_total`
@@ -149,25 +149,25 @@ Useful signals:
 - `IRaft.GetPartitionWalQueueDepth`
 - `IRaft.GetPartitionCommitWaitMs`
 
-Scheduler internals also track:
+The scheduler internals also track:
 
 - `TotalBatchesWritten`
 - `TotalSyncBatchesWritten`
 - `TotalPartitionsBatched`
 
-Those counters distinguish storage write calls from true sync batches. With `WalSingleFsyncCommit` enabled, the number of write calls may stay similar while the number of sync batches drops.
+Those counters separate the storage write calls from the true sync batches. With `WalSingleFsyncCommit` enabled, the number of write calls can stay similar while the number of sync batches falls.
 
-For group commit linger, compare average batch density before and after enabling it. If `TotalPartitionsBatched / TotalBatchesWritten` rises while latency stays acceptable, the linger is doing useful work.
+For the group commit linger, compare the average batch density before and after you enable it. The linger does useful work if `TotalPartitionsBatched / TotalBatchesWritten` rises while the latency stays acceptable.
 
 ## Practical Guidance
 
-- Keep defaults when first deploying durable storage.
-- Keep `WalSingleFsyncCommit` enabled when write latency is dominated by the second commit sync.
-- Disable `WalSingleFsyncCommit` only when you need the older behavior where the disk's committed markers alone identify the complete committed frontier immediately after local restart.
-- Configure `ApplicationDurabilityProvider` when committed entries are applied to application storage asynchronously.
-- Use `WalGroupCommitLingerMs` with small values first; large values can add avoidable latency.
-- Do not use `syncWrites: false` as a substitute for these settings in production. That changes crash durability.
-- If WAL queue depth grows steadily, first determine whether the bottleneck is storage sync latency, too few `WriteIOThreads`, or a workload that needs more partitions or nodes.
+- Keep the defaults for your first deployment on durable storage.
+- Keep `WalSingleFsyncCommit` enabled when the second commit sync dominates the write latency.
+- Disable `WalSingleFsyncCommit` only when you need the older behavior. In that behavior, the committed markers on the disk alone identify the complete committed frontier immediately after a local restart.
+- Configure `ApplicationDurabilityProvider` when the application applies the committed entries to its storage asynchronously.
+- Use small values for `WalGroupCommitLingerMs` first. A large value can add avoidable latency.
+- Do not use `syncWrites: false` in place of these settings in production. That setting changes the crash durability.
+- Find the bottleneck first if the WAL queue depth grows steadily. The cause is the storage sync latency, too few `WriteIOThreads`, or a workload that needs more partitions or more nodes.
 
 ## Related Reading
 

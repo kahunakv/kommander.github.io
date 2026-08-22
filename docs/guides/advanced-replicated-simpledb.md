@@ -1,22 +1,22 @@
 # Advanced Tutorial: Build A Replicated Key/Value Service
 
-This tutorial studies [Kommander SimpleDB](https://github.com/kahunakv/kommander-simpledb), a small but complete three-node service built with ASP.NET Core, Kommander, gRPC, and SQLite.
+This tutorial examines [Kommander SimpleDB](https://github.com/kahunakv/kommander-simpledb). SimpleDB is a small but complete service with three nodes. It uses ASP.NET Core, Kommander, gRPC, and SQLite.
 
-Unlike the minimal Getting Started example, SimpleDB includes the application concerns that appear around consensus:
+The Getting Started example is minimal. SimpleDB adds the application concerns around consensus:
 
-- partitioning keys across independent Raft groups
-- routing HTTP requests to the correct partition leader
-- replicating typed application commands
-- maintaining a local materialized view on every node
-- restoring that view after restart
-- running separate public REST and internal gRPC endpoints
-- shutting the cluster down cleanly.
+- the division of keys across independent Raft groups
+- the route from an HTTP request to the correct partition leader
+- the replication of typed application commands
+- a local materialized view on every node
+- the restore of that view after a restart
+- separate public REST endpoints and internal gRPC endpoints
+- a clean shutdown of the cluster.
 
-The result is intentionally small, not a production database. Its value is showing where Kommander ends and application design begins.
+The result is small on purpose. It is not a production database. Its value is the boundary that it shows. Kommander ends at that boundary, and the application design starts.
 
 ## What You Will Build
 
-The service exposes:
+The service gives these routes:
 
 ```text
 PUT /keys/{key}   Store a string value
@@ -24,7 +24,7 @@ GET /keys/{key}   Read a string value
 GET /health       Report whether the local Raft node is initialized
 ```
 
-Three processes participate in eight user partitions. `raft.GetPartitionKey(key)` maps each key to a partition. Because every partition elects its own leader, the node responsible for one key may be a follower for another key.
+Three processes take part in eight user partitions. `raft.GetPartitionKey(key)` maps each key to a partition. Each partition elects its own leader. Therefore, the node that is responsible for one key can be a follower for another key.
 
 ```text
 Client
@@ -53,7 +53,7 @@ git clone https://github.com/kahunakv/kommander-simpledb.git
 cd kommander-simpledb
 ```
 
-The project references Kommander and the SQLite provider:
+The project refers to Kommander and to the SQLite provider:
 
 ```xml
 <ItemGroup>
@@ -62,7 +62,7 @@ The project references Kommander and the SQLite provider:
 </ItemGroup>
 ```
 
-Use versions appropriate for your application when adapting the design.
+Use the versions that are correct for your application when you adapt this design.
 
 ## Understand The Two Durable Stores
 
@@ -70,11 +70,11 @@ SimpleDB keeps two different forms of durable state.
 
 ### Kommander WAL
 
-Each node creates a `SqliteWAL` under its `raft` directory. This stores Raft proposals, terms, commit state, and checkpoints. Kommander uses it to recover the replicated log and consensus state.
+Each node creates a `SqliteWAL` in its `raft` directory. The WAL is the write-ahead log. It stores the Raft proposals, the terms, the commit state, and the checkpoints. Kommander uses it to recover the replicated log and the consensus state.
 
 ### Application Database
 
-`KeyValueStore` owns a separate `values.db` containing the latest value for every key:
+`KeyValueStore` owns a separate `values.db` file. That file contains the latest value of every key:
 
 ```sql
 CREATE TABLE IF NOT EXISTS key_values (
@@ -83,10 +83,10 @@ CREATE TABLE IF NOT EXISTS key_values (
 );
 ```
 
-This is a materialized view of committed commands, not the Raft log itself. Keeping the two responsibilities separate is important:
+This file is a materialized view of the committed commands. It is not the Raft log. The separation of the two responsibilities is important:
 
-- Kommander decides which commands are committed and in what order
-- the application decides how those commands become queryable domain state.
+- Kommander decides the commands that commit and their order.
+- The application decides how those commands become domain state that you can query.
 
 The example uses an idempotent SQLite upsert:
 
@@ -95,11 +95,11 @@ INSERT INTO key_values(key, value) VALUES ($key, $value)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 ```
 
-Idempotency makes restore and repeated application harmless. A production state machine should make every command safe to replay or detect duplicates explicitly.
+Idempotency makes a restore and a repeated application harmless. A production state machine must make each command safe for a replay. It can also detect the duplicates explicitly.
 
 ## Configure One Node
 
-Each process has a public HTTP port and a separate Raft gRPC port. The gRPC endpoint is the address advertised to Kommander peers:
+Each process has a public HTTP port and a separate Raft gRPC port. The gRPC endpoint is the address that Kommander advertises to its peers:
 
 ```csharp
 RaftConfiguration configuration = new()
@@ -123,9 +123,9 @@ RaftConfiguration configuration = new()
 };
 ```
 
-The short election values and disabled quiescence are development choices, not general production recommendations. Production timing must account for network latency, storage stalls, scheduler pressure, and SWIM timing.
+The short election values and the disabled quiescence are development choices. They are not general production recommendations. Production timings must include the network latency, the storage stalls, the scheduler pressure, and the SWIM timings. SWIM is the failure detector of Kommander.
 
-Construct `RaftManager` with static discovery, SQLite WAL storage, gRPC communication, and an HLC:
+Construct `RaftManager` with static discovery, the SQLite WAL storage, the gRPC communication, and a hybrid logical clock:
 
 ```csharp
 IRaft raft = new RaftManager(
@@ -140,11 +140,11 @@ IRaft raft = new RaftManager(
 );
 ```
 
-Static discovery supplies initial contact points. It does not replace the committed membership roster used by dynamic membership.
+Static discovery gives the initial contact points. It does not replace the committed membership roster of dynamic membership.
 
 ## Host REST And gRPC Separately
 
-Kestrel listens for HTTP/1 requests on the public API port and HTTP/2 requests on the Raft port:
+Kestrel listens for HTTP/1 requests on the public API port. It listens for HTTP/2 requests on the Raft port:
 
 ```csharp
 builder.WebHost.ConfigureKestrel(kestrel =>
@@ -157,7 +157,7 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 });
 ```
 
-Register and map Kommander's gRPC endpoints:
+Register the gRPC endpoints of Kommander. Then map them:
 
 ```csharp
 builder.Services.AddKommanderGrpc();
@@ -166,7 +166,7 @@ WebApplication app = builder.Build();
 app.MapGrpcRaftRoutes();
 ```
 
-The REST API belongs to SimpleDB. The gRPC routes belong to Kommander's node-to-node protocol.
+The REST API belongs to SimpleDB. The gRPC routes belong to the node-to-node protocol of Kommander.
 
 ## Define A Replicated Command
 
@@ -176,19 +176,19 @@ The application models a write as a deterministic command:
 public sealed record PutCommand(string Key, string Value);
 ```
 
-It assigns a stable application log type:
+It assigns a stable log type for the application:
 
 ```csharp
 public const string PutLogType = "simpledb.put";
 ```
 
-The type lets one state-machine callback distinguish commands when the application adds more operations later.
+The type lets one callback of the state machine identify the commands. This is useful when the application adds more operations later.
 
-Avoid putting nondeterministic decisions inside the apply callback. If a command needs an identifier, timestamp, price, or selected target, choose that value before replication and include it in the payload. Every node must derive the same state from the same committed bytes.
+Do not put a nondeterministic decision inside the apply callback. A command can need an identifier, a timestamp, a price, or a selected target. Select that value before the replication. Then include it in the payload. Every node must derive the same state from the same committed bytes.
 
-## Register The State Machine Before Joining
+## Register The State Machine Before The Join
 
-`ClusterService` subscribes to both live follower commits and startup restore before calling `JoinCluster`:
+`ClusterService` subscribes to the live follower commits and to the startup restore. It does this before the call to `JoinCluster`:
 
 ```csharp
 public ClusterService(IRaft raft, KeyValueStore store)
@@ -218,13 +218,13 @@ private Task<bool> Apply(int partitionId, RaftLog log)
 }
 ```
 
-This establishes one state transition for restored and newly replicated commands. Returning `false` tells Kommander that the application could not apply the entry.
+This gives one state transition for a restored command and for a newly replicated command. A return value of `false` tells Kommander that the application could not apply the entry.
 
-Keep callbacks deterministic and reasonably fast. Slow database or network work delays the partition executor. External side effects such as email, payments, or webhooks should be performed by a separate idempotent worker after the committed decision has been recorded.
+Keep the callbacks deterministic and sufficiently fast. Slow database work or network work delays the partition executor. Use a separate idempotent worker for an external side effect such as an email, a payment, or a webhook. That worker must run after the system records the committed decision.
 
 ## Join And Leave With The Host Lifecycle
 
-The background service joins the cluster when ASP.NET Core starts:
+The background service joins the cluster at the start of ASP.NET Core:
 
 ```csharp
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -234,7 +234,7 @@ protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 }
 ```
 
-On shutdown it leaves cleanly:
+At shutdown, it leaves cleanly:
 
 ```csharp
 public override async Task StopAsync(CancellationToken cancellationToken)
@@ -246,23 +246,23 @@ public override async Task StopAsync(CancellationToken cancellationToken)
 }
 ```
 
-The API checks `raft.IsInitialized` and returns `503` until partitions have restored and initialized.
+The API examines `raft.IsInitialized`. It returns `503` until the partitions restore and initialize.
 
 ## Route A Key To Its Partition
 
-Every request calculates the partition from the same stable key:
+Each request calculates the partition from the same stable key:
 
 ```csharp
 int partition = raft.GetPartitionKey(key);
 ```
 
-Do not change key normalization casually. If different callers hash different representations of the same logical key, related commands can land in different partitions and lose their expected ordering.
+Do not change the key normalization without care. Two callers can hash different forms of the same logical key. The related commands then go to different partitions. They also lose their expected order.
 
-Partition `0` remains reserved for Kommander system state. `GetPartitionKey` returns a user partition from the replicated partition map.
+Partition `0` stays reserved for the system state of Kommander. `GetPartitionKey` returns a user partition from the replicated partition map.
 
-## Redirect Requests To The Leader
+## Redirect A Request To The Leader
 
-Only the partition leader accepts the write. The example also sends reads to that leader so clients do not read an arbitrary follower's local view.
+Only the partition leader accepts the write. The example also sends the reads to that leader. A client then does not read the local view of an arbitrary follower.
 
 ```csharp
 if (await raft.AmILeaderQuick(partition))
@@ -280,15 +280,15 @@ string location = $"{restBase.TrimEnd('/')}/keys/{Uri.EscapeDataString(key)}";
 return Results.Redirect(location, permanent: false, preserveMethod: true);
 ```
 
-Kommander identifies leaders by their advertised Raft endpoint, such as `127.0.0.1:7102`. SimpleDB therefore keeps an application mapping from each Raft endpoint to its public REST base URL.
+Kommander identifies a leader by its advertised Raft endpoint, such as `127.0.0.1:7102`. Therefore, SimpleDB keeps an application map. The map gives the public REST base URL of each Raft endpoint.
 
-The redirect is HTTP `307 Temporary Redirect`. Preserving the method matters because a normal `302` can turn a redirected `PUT` into a `GET` in some clients.
+The redirect is an HTTP `307 Temporary Redirect`. The preserved method is important. A normal `302` can change a redirected `PUT` into a `GET` in some clients.
 
-If no leader appears within three seconds, the API returns `503`. That is the correct behavior during an election or loss of quorum: retry later instead of pretending the write succeeded.
+The API returns `503` if no leader appears in three seconds. That behavior is correct during an election or a loss of quorum. The client must retry later. The service must not report a write as successful.
 
 ## Replicate A PUT
 
-Once the request reaches the partition leader, serialize the complete command and replicate it:
+The request reaches the partition leader. Serialize the complete command. Then replicate it:
 
 ```csharp
 byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
@@ -313,13 +313,13 @@ if (!result.Success)
 store.Put(key, body.Value);
 ```
 
-`ReplicateLogs` returns success after the proposal reaches quorum and commits. Followers receive committed entries through `OnReplicationReceived`. The proposing leader applies its own command explicitly after success, which is why the final `store.Put` is required in this example.
+`ReplicateLogs` returns success after the proposal reaches quorum and commits. Each follower receives the committed entry through `OnReplicationReceived`. The leader that proposes the command applies it explicitly after the success. That is the reason for the final `store.Put` in this example.
 
-Do not update the application database before `ReplicateLogs` succeeds. Doing so would expose state that the cluster has not committed and might later reject.
+Do not update the application database before `ReplicateLogs` is successful. That update shows state that the cluster did not commit. The cluster can also reject that state later.
 
 ## Serve A GET
 
-After routing to the partition leader, a read uses the local materialized view:
+The request goes to the partition leader first. The read then uses the local materialized view:
 
 ```csharp
 string? value = store.Get(key);
@@ -329,13 +329,13 @@ return value is null
     : Results.Ok(new { key, value, partition });
 ```
 
-This is a practical leader-routed read, but it is not a formal Raft read barrier. There is also a small interval between quorum commit and the leader's explicit `store.Put` where a concurrent read could observe the previous value. Applications requiring strict linearizable-read semantics should design and test an explicit read protocol rather than assuming leader routing alone provides it.
+This is a practical read through the leader. It is not a formal Raft read barrier. There is also a small interval between the quorum commit and the explicit `store.Put` of the leader. A concurrent read in that interval can see the previous value. Your application can need strict linearizable reads. Design and test an explicit read protocol for that requirement. Leader routing alone does not give it.
 
 ## Consistent Results From Any Entry Point
 
-A client can begin a request at any SimpleDB REST endpoint. The contacted node calculates the key's partition and either serves the request as that partition's leader or redirects the client to the node that currently leads it.
+A client can start a request at any SimpleDB REST endpoint. The contacted node calculates the partition of the key. It then serves the request as the leader of that partition, or it redirects the client to the current leader.
 
-Provided the client follows the `307` redirect, it never intentionally reads from an arbitrary follower. All entry points therefore converge on the same committed, leader-owned view for that key. During an election or loss of quorum, the service returns `503` instead of serving a follower value that may be stale.
+The client must follow the `307` redirect. It then never reads from an arbitrary follower on purpose. Therefore, all entry points converge on the same committed view of that key. The leader owns that view. During an election or a loss of quorum, the service returns `503`. It does not serve a follower value that can be stale.
 
 ```text
 GET node 1 ─┐
@@ -343,13 +343,13 @@ GET node 2 ─┼─► current leader for the key's partition ─► committed 
 GET node 3 ─┘
 ```
 
-This consistency choice is important. A simple eventual replicator may accept writes independently on several nodes and reconcile them later. During that interval, two endpoints can return different answers, and the application must define conflict resolution. Kommander makes the opposite tradeoff: a partition accepts ordered writes through one leader and commits through quorum before success is returned. When the cluster cannot identify or support an authoritative leader, it fails the request instead of returning a knowingly divergent answer.
+This choice about consistency is important. A simple eventual replicator can accept writes on several nodes independently. It then reconciles them later. During that interval, two endpoints can return different answers. The application must then define the conflict resolution. Kommander makes the opposite tradeoff. A partition accepts ordered writes through one leader. It commits through quorum before it returns success. The cluster can fail to identify or support an authoritative leader. It then fails the request. It does not return a knowingly divergent answer.
 
-That does not override the read-barrier caveat above. The example demonstrates one committed order and avoids follower reads, but applications requiring strict linearizability must close the leader apply window and implement an explicit Raft read protocol.
+That behavior does not remove the caveat about the read barrier above. The example shows one committed order and prevents follower reads. An application that needs strict linearizability must close the apply window of the leader. It must also implement an explicit Raft read protocol.
 
 ## Run The Three-Node Cluster
 
-The repository includes a script that publishes once and starts three processes:
+The repository includes a script. The script publishes one time and starts three processes:
 
 ```shell
 ./scripts/run-cluster.sh
@@ -361,7 +361,7 @@ The repository includes a script that publishes once and starts three processes:
 | 2 | `http://127.0.0.1:7002` | `127.0.0.1:7102` |
 | 3 | `http://127.0.0.1:7003` | `127.0.0.1:7103` |
 
-Write through any node and allow `curl` to follow the leader redirect:
+Write through any node. Let `curl` follow the leader redirect:
 
 ```shell
 curl -L -X PUT http://127.0.0.1:7001/keys/name \
@@ -375,100 +375,100 @@ Read through another node:
 curl -L http://127.0.0.1:7002/keys/name
 ```
 
-Try several keys and inspect the returned `partition` field. Different keys can route to different partitions and leaders.
+Try several keys. Examine the `partition` field in the result. Different keys can go to different partitions and different leaders.
 
-Data persists under `/tmp/simpledb-cluster` by default. Set `SIMPLEDB_DATA_DIR` to use another location. Remove that directory only when you intentionally want a clean cluster.
+The data persists in `/tmp/simpledb-cluster` by default. Set `SIMPLEDB_DATA_DIR` for another location. Remove that directory only when you want a clean cluster.
 
 ## Grow It Into A Small Distributed Store
 
-This pattern is a useful foundation for small, correctness-sensitive datasets such as:
+This pattern is a useful base for a small dataset that is sensitive to correctness. Examples are:
 
 - application configuration
 - feature flags
-- service routing metadata
+- routing metadata for a service
 - scheduler assignments
-- workflow coordination state
-- tenant or resource placement.
+- coordination state for a workflow
+- placement of a tenant or a resource.
 
-SQLite provides the local queryable view while Kommander provides ordered replication, failover, partition leadership, and durable consensus. Together they form a simple distributed state service whose schema and API remain under application control.
+SQLite gives the local view that you can query. Kommander gives the ordered replication, the failover, the partition leadership, and the durable consensus. Together they make a simple distributed state service. The application still controls the schema and the API.
 
-Kommander can add nodes through dynamic membership. A new node joins as a non-voting learner, catches up, and is promoted to a voter only after it stays within the configured lag threshold. This avoids counting an empty node toward quorum before it has the replicated history.
+Kommander can add a node through dynamic membership. A new node joins as a non-voting learner. It catches up. The cluster promotes it to a voter only after its lag stays inside the configured threshold. This prevents an empty node in the quorum count before it has the replicated history.
 
-The SimpleDB sample itself is fixed to three nodes: `NodeOptions.Validate` expects three REST mappings and `run-cluster.sh` starts exactly three processes. To expand it:
+The SimpleDB sample is fixed at three nodes. `NodeOptions.Validate` expects three REST maps. `run-cluster.sh` starts exactly three processes. Do these steps to expand it:
 
-1. replace the fixed validation and endpoint map with configuration for the full deployed roster
-2. give every node a unique id, gRPC endpoint, REST endpoint, and data directory
-3. use Kommander's dynamic membership join flow instead of treating static discovery as authoritative membership
-4. ensure the new node can rebuild `values.db` from retained logs or an application snapshot
-5. update clients or service discovery so any healthy REST endpoint can be used as the entry point.
+1. Replace the fixed validation and the endpoint map with the configuration of the full deployed roster.
+2. Give every node a unique id, gRPC endpoint, REST endpoint, and data directory.
+3. Use the dynamic membership join flow of Kommander. Do not treat static discovery as the authoritative membership.
+4. Make sure that the new node can rebuild `values.db` from the retained logs or from an application snapshot.
+5. Update the clients or the service discovery. Any healthy REST endpoint can then be the entry point.
 
-Adding voters improves failure tolerance only when quorum remains available. It also increases replication work and may increase commit latency. Prefer an odd voter count and choose it from the failure budget instead of adding replicas without a quorum plan.
+More voters improve the failure tolerance only while the quorum stays available. More voters also increase the replication work. They can increase the commit latency. Prefer an odd number of voters. Select that number from your failure budget. Do not add a replica without a plan for the quorum.
 
-This example uses the default full-replication behavior, so the materialized key/value state is present on every node. With Kommander's replica placement enabled, user partitions can target a replication factor such as RF 3 instead of every voter, and clients can route to the replicas listed by `GetPartitionReplicas`. Your application still owns the SQLite schema, query API, snapshots, and any state-transfer behavior needed when partition layouts change.
+This example uses the default behavior of full replication. Therefore, the materialized key/value state is on every node. With the replica placement of Kommander enabled, a user partition can target a replication factor such as RF 3 instead of every voter. A client can then route to the replicas from `GetPartitionReplicas`. Your application still owns the SQLite schema, the query API, the snapshots, and the transfer of state after a change of the partition layout.
 
 ## Test Failure And Recovery
 
-Use these exercises to understand the behavior beyond the happy path.
+Use these exercises to understand the behavior after the normal path.
 
-### Stop A Non-Leader
+### Stop A Node That Is Not The Leader
 
-Find which node serves a key, then stop a different node. With two of three voters still available, the leader should continue committing writes.
+Find the node that serves a key. Then stop a different node. Two voters of three stay available. The leader must continue to commit writes.
 
 ### Stop The Leader
 
-Stop the process serving a key. Requests can briefly return `503` while that partition elects another leader. Retrying through a surviving node should redirect to the new leader and continue.
+Stop the process that serves a key. The requests can return `503` for a short time. That partition elects another leader. A retry through a node that survives must redirect to the new leader and continue.
 
-Because partitions elect independently, losing one process may trigger leadership changes for several partitions while others were already led elsewhere.
+Each partition elects a leader independently. The loss of one process can cause a change of leader for several partitions. Other partitions already had a leader in another place.
 
 ### Restart A Node
 
-Restart a stopped node with the same id, ports, and data directory. Kommander restores its WAL and calls `OnLogRestored` for retained committed application entries. The idempotent upsert reconciles those entries with `values.db`, then normal replication or backfill catches up later commits.
+Restart a stopped node with the same id, the same ports, and the same data directory. Kommander restores its WAL. It then calls `OnLogRestored` for the retained committed application entries. The idempotent upsert reconciles those entries with `values.db`. Normal replication or backfill then catches up on the later commits. Backfill is the transfer of missing committed log entries from the leader.
 
-### Lose Quorum
+### Lose The Quorum
 
-Stop two nodes. The remaining process cannot safely commit a new write and should return a replication failure or leader-unavailable response. Reads from its local SQLite file may contain old data, but the example's leader routing prevents presenting that node as an authoritative leader.
+Stop two nodes. The remaining process cannot commit a new write safely. It must return a replication failure or a leader-unavailable response. A read from its local SQLite file can contain old data. The leader routing of the example prevents the presentation of that node as an authoritative leader.
 
 ## Recovery Boundaries
 
-The example persists `values.db`, so replaying retained commands is an idempotent reconciliation path. It does not implement application snapshots or state transfer.
+The example persists `values.db`. Therefore, a replay of the retained commands is an idempotent reconciliation path. The example does not implement application snapshots or state transfer.
 
-That matters when adding compaction or elastic partitions:
+That limit is important for compaction and for elastic partitions:
 
-- after old Raft entries are compacted, deleting `values.db` may leave too little retained history to rebuild from the beginning
-- a split changes routing but application rows may also need to move to the new partition's state
-- a new learner that cannot catch up from retained logs needs snapshot installation support.
+- Compaction removes old Raft entries. A deletion of `values.db` after that can leave too little retained history for a rebuild from the start.
+- A split changes the routes. The application rows can also need a move to the state of the new partition.
+- A new learner that cannot catch up from the retained logs needs support for snapshot installation.
 
-Before enabling aggressive compaction or partition splits, define a durable snapshot format and implement the relevant checkpoint and state-transfer behavior.
+Define a durable snapshot format before you enable aggressive compaction or partition splits. Also implement the relevant checkpoint behavior and state-transfer behavior.
 
 ## Production Hardening
 
-Treat SimpleDB as an architectural example. A production service should address:
+Treat SimpleDB as an architectural example. A production service must address these items:
 
-- TLS and node authentication instead of cleartext loopback gRPC
-- externally reachable advertised endpoints and a durable REST-to-Raft endpoint mapping
-- production election, heartbeat, SWIM, and timeout values
+- TLS and node authentication in place of cleartext loopback gRPC
+- advertised endpoints that are reachable from outside, and a durable map from a REST endpoint to a Raft endpoint
+- production values for the elections, the heartbeats, SWIM, and the timeouts
 - request authentication and authorization at the application API
-- payload size limits and input validation
-- idempotency keys and retry behavior for ambiguous client timeouts
-- explicit read-consistency requirements
+- limits on the payload size, and input validation
+- idempotency keys and retry behavior for an ambiguous client timeout
+- explicit requirements for the read consistency
 - checkpoints, snapshots, compaction, and disaster recovery
-- state transfer before elastic splits and merges
+- state transfer before an elastic split or merge
 - admission-control responses such as `ProposalQueueFull`
-- metrics, logs, health checks, and alerting
-- rolling-upgrade and schema-migration behavior.
+- metrics, logs, health checks, and alerts
+- behavior for a rolling upgrade and a schema migration.
 
 ## Next Extensions
 
-Once the basic cluster works, useful exercises are:
+The basic cluster works. These exercises are then useful:
 
-1. add a `simpledb.delete` command and keep the apply handler deterministic
-2. return `ProposalQueueFull` as HTTP `429` with retry guidance
-3. enable transport authentication and TLS
-4. emit checkpoints and measure restart replay time
-5. add a snapshot format for rebuilding `values.db`
-6. implement state transfer and split a hot key range
-7. expose partition load signals and enable automatic leader balancing
-8. add integration tests that stop leaders and verify committed values survive.
+1. Add a `simpledb.delete` command. Keep the apply handler deterministic.
+2. Return `ProposalQueueFull` as the HTTP status `429` with retry guidance.
+3. Enable the transport authentication and TLS.
+4. Emit checkpoints. Measure the replay time at restart.
+5. Add a snapshot format for a rebuild of `values.db`.
+6. Implement state transfer. Split a hot key range.
+7. Publish the partition load signals. Enable automatic leader balancing.
+8. Add integration tests that stop a leader. Verify that the committed values survive.
 
 ## Related Documentation
 

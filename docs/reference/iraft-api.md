@@ -4,14 +4,15 @@
 
 | Area | Members |
 | --- | --- |
-| Lifecycle | `JoinCluster`, `LeaveCluster`, `UpdateNodes` |
+| Lifecycle | `JoinCluster`, `LeaveCluster`, `RequestLeaveAsync`, `UpdateNodes` |
 | Membership | `GetMembership`, `LocalRole`, `OnMembershipChanged` |
-| Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes`, `GetFollowerLagAsync` |
-| Leadership | `AmILeaderQuick`, `AmILeader`, `ConfirmLeadershipAsync`, `WaitForLeader`, `WaitForLeaderStableAsync` |
+| Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes`, `GetFollowerLagAsync`, `GetSnapshotStatuses`, `GetBackfillStatuses` |
+| Leadership | `AmILeaderQuick`, `AmILeader`, `ConfirmLeadershipAsync`, `ConfirmLocalApplicationAsync`, `WaitForLeader`, `WaitForLeaderStableAsync` |
 | Replication | `ReplicateLogs`, `ReplicateEntries`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
-| Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetPartitionGeneration`, `GetPartitionMap`, `GetPartitionReplicas`, `GetEffectiveReplicationFactor`, `SetReplicationFactorAsync`, `RegisterStateMachineTransfer` |
+| Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetNextAvailablePartitionId`, `GetPartitionGeneration`, `GetPartitionMap`, `GetPartitionReplicas`, `GetEffectiveReplicationFactor`, `SetReplicationFactorAsync`, `RegisterStateMachineTransfer` |
 | System partition state | `RegisterSystemStateTransfer`, `SetMinRetainIndex`, `AcquireRetentionHold` |
 | Partition load | `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, `GetPartitionCommitWaitMs` |
+| Diagnostics | `GetStaleProposedSkippedCount`, `GetSnapshotStatuses`, `GetBackfillStatuses` |
 | Partition routing | `GetPartitionKey`, `GetPrefixPartitionKey` |
 | Transport entry points | `Handshake`, `RequestVote`, `Vote`, `AppendLogs`, `CompleteAppendLogs` |
 | Components | `WalAdapter`, `Communication`, `Discovery`, `Configuration`, `HybridLogicalClock`, `ReadScheduler`, `WalScheduler` |
@@ -41,7 +42,20 @@ await raft.JoinCluster(
 );
 ```
 
-Current membership-capable builds join new nodes as learners first and only return once the node has been promoted to a committed voter.
+The join flow adds new nodes as learners first and only returns once the node has been promoted to a committed voter.
+
+Use `RequestLeaveAsync` when you want the cluster removal result without automatically stopping the process:
+
+```csharp
+LeaveClusterResult leave = await raft.RequestLeaveAsync(cancellationToken);
+
+if (leave.Left)
+    await raft.LeaveCluster(dispose: true, cancellationToken);
+```
+
+`RequestLeaveAsync` commits `RemoveMember(self)` when it can and returns a `LeaveClusterResult` with the outcome and membership version. It is useful for decommissioning workflows because a refused or timed-out attempt leaves the node running as a normal participant. `LeaveCluster(...)` is the shutdown-coupled helper; it tries the graceful removal and then stops the node.
+
+Possible outcomes are `Committed`, `NotAMember`, `RefusedInsufficientVoters`, `NotInitialized`, `NoLeader`, `Timeout`, `RefusedDrainInProgress`, and `DrainTimedOut`. `LeaveClusterResult.Left` is true for `Committed` and `NotAMember`; `Terminal` is true for `RefusedInsufficientVoters`. `LeaveClusterResult.Drained` tells whether replica placement evacuated every range that named this node before the final removal.
 
 ## Membership
 
@@ -90,6 +104,20 @@ long? lag = await raft.GetFollowerLagAsync(
 ```
 
 `null` means there is no recorded lag value for that follower and partition on this node.
+
+Leader-side catch-up diagnostics are available through:
+
+```csharp
+IReadOnlyList<RaftSnapshotStatus> snapshot =
+    raft.GetSnapshotStatuses(partitionId: 1);
+
+IReadOnlyList<RaftBackfillStatus> backfill =
+    raft.GetBackfillStatuses(partitionId: 1);
+```
+
+`GetSnapshotStatuses` reports followers that are stuck in snapshot transfer, including failed attempts and last error details. `GetBackfillStatuses` reports followers whose anchored backfill batch cannot be sent because the leader has no committed entry at the follower's anchor. Both are diagnostic views; empty means the partition is not hosted here, this node is not the relevant leader/sender, or no follower is currently stuck.
+
+`GetStaleProposedSkippedCount(partitionId)` returns how many stale proposed duplicates this node refused for that hosted partition since it last started. It returns `-1` when the partition is not hosted locally. Treat the value as a diagnostic floor, not a lifetime total.
 
 ## Partition Load Signals
 
@@ -208,6 +236,17 @@ OrderView order = localProjection.Get(orderId);
 
 Concurrent confirmations coalesce into one in-flight round, and a fresh confirmation can be reused within the heartbeat interval. A `false` result means the node is not the published leader, quorum could not be confirmed within `LeadershipConfirmationTimeout`, apply catch-up did not finish in time, or admission control rejected the request.
 
+Use `ConfirmLocalApplicationAsync` when a local non-leader must prove its applied state has caught up before acting on it:
+
+```csharp
+if (!await raft.ConfirmLocalApplicationAsync(partitionId, cancellationToken))
+    return;
+
+await localMaintenance.PruneFilesReferencedByReplicatedState(cancellationToken);
+```
+
+This is the follower-side read-index primitive. It asks the leader to confirm a same-term commit index, then waits until this node has applied through that index. It returns `false` for every unsafe or unavailable case, including no known leader, quorum confirmation failure, restore in progress, not-hosted partitions under replica placement, transport errors, timeout, or admission rejection. Entries committed after the call starts may or may not be visible, which matches normal read-index freshness.
+
 ## Test Hooks
 
 `IRaft` exposes several advanced members marked with `EditorBrowsable(EditorBrowsableState.Never)`:
@@ -271,7 +310,11 @@ See [System Partition State Snapshots](../guides/system-partition-state-snapshot
 | `ConcurrentMembershipChange` | Another membership change is already in flight. Retry after it commits. |
 | `InsufficientVoters` | The requested removal would leave the cluster unavailable. Do not retry blindly. |
 | `LogMismatch` | A follower rejected an anchored backfill append because its log did not match `PrevLogIndex` / `PrevLogTerm`. The leader backs up and retries. |
-| `SnapshotRequired` | The follower needs entries below the leader's compaction floor. Ordinary log backfill cannot catch it up. |
+| `SnapshotRequired` | Reserved for wire compatibility. The runtime uses snapshot fallback internally and exposes stuck transfer state through `GetSnapshotStatuses`. |
+| `OperationCancelled` | The caller's cancellation token fired before the operation completed. The queued work may still apply. |
+| `FollowerWalSaturated` | A follower could not enqueue replicated entries because its WAL queue was saturated. The leader backs off and retries later. |
+| `MemberNotFound` | A membership operation named an endpoint not present in the committed roster. |
+| `DrainInProgress` | A second decommission drain was refused because another member is already `Leaving`. |
 
 ## Elastic Partition APIs
 
@@ -291,10 +334,13 @@ long generation = raft.GetPartitionGeneration(2);
 IReadOnlyList<RaftPartitionRange> map = raft.GetPartitionMap();
 IReadOnlyList<RaftReplica> replicas = raft.GetPartitionReplicas(2);
 int effectiveRf = raft.GetEffectiveReplicationFactor(2);
+int nextId = raft.GetNextAvailablePartitionId();
 raft.RegisterStateMachineTransfer(new MyTransfer());
 ```
 
 `GetPartitionReplicas` returns the committed replica set for consumer-side routing. An empty list means legacy full replication, where every committed roster voter hosts the partition.
+
+`GetNextAvailablePartitionId` returns one past the highest partition id ever present in the committed map, including removed tombstones. It is advisory, not a reservation. Concurrent callers can receive the same id, and `CreatePartitionAsync` remains the operation that actually wins or loses allocation.
 
 Set a per-partition replication-factor override with:
 

@@ -1,25 +1,25 @@
 # Automatic Leader Balancing
 
-Each Kommander user partition is an independent Raft group with its own leader. Leaders are elected independently, so one node can end up leading many more partitions than its peers. Even with similar leader counts, the busiest partitions can collect on one node.
+Each Kommander user partition is an independent Raft group with its own leader. Each group elects its leader independently. Therefore, one node can lead many more partitions than its peers. The busiest partitions can also collect on one node, even with similar leader counts.
 
-The optional leader balancer gradually redistributes leadership across live voting members. It balances leader count first, then considers measured partition load. This spreads replication, heartbeat, and proposal work without moving partition data or changing partition ranges.
+The optional leader balancer moves leadership across the live voting members in small steps. It balances the leader count first. It then examines the measured partition load. This spreads the work of replication, heartbeats, and proposals. It does not move partition data. It does not change partition ranges.
 
-When [replica placement](../guides/replica-placement.md) is enabled, leadership can move only among the partition's voter replicas. Placement decides which nodes host the range; leader balancing decides which eligible replica should lead it.
+Leadership can move only among the voter replicas of the partition when you enable [replica placement](../guides/replica-placement.md). Placement selects the nodes that host the range. Leader balancing selects the eligible replica that leads it.
 
 ## When To Use It
 
-Leader balancing is useful when:
+Leader balancing is useful in these conditions:
 
-- the cluster has several user partitions
-- one node consistently leads more partitions than its peers
-- leader counts look even but hot partitions are concentrated on one node
-- node-level latency or queue depth follows the current leader distribution.
+- The cluster has several user partitions.
+- One node leads more partitions than its peers at all times.
+- The leader counts look even, but the hot partitions collect on one node.
+- The node-level latency or the queue depth follows the current distribution of leaders.
 
-It is disabled by default. Small clusters with few partitions may not benefit because there are too few leaderships to distribute meaningfully.
+The balancer is disabled by default. A small cluster with few partitions can get no benefit, because there are too few leaderships to distribute.
 
 ## Enable The Balancer
 
-Enable it on every node so every member publishes load reports and can participate consistently:
+Enable the balancer on every node. Then every member publishes load reports. Every member can also take part in a consistent way.
 
 ```csharp
 RaftConfiguration configuration = new()
@@ -28,128 +28,128 @@ RaftConfiguration configuration = new()
 };
 ```
 
-The default settings are intentionally conservative. Start with them before changing move limits or timing.
+The default settings are conservative on purpose. Use them before you change the move limits or the timings.
 
-The balancer exchanges reports through membership gossip. Keep `GossipFanout` greater than `0`, and use a transport that implements `SendGossip`. Kommander's in-memory, gRPC, and REST transports support this path.
+The balancer exchanges reports through membership gossip. Gossip is the exchange of membership messages between nodes. Keep `GossipFanout` above `0`. Use a transport that implements `SendGossip`. The in-memory, gRPC, and REST transports of Kommander support this path.
 
-## How Balancing Works
+## How The Balancer Works
 
-Partition `0`, the system partition, coordinates the cluster. Only its current leader runs balancing passes, which provides one controller for the whole cluster.
+Partition `0` is the system partition. It coordinates the cluster. Only its current leader runs balance passes. This gives one controller for the full cluster.
 
-Every node periodically reports:
+Every node reports these items at regular intervals:
 
-- which partitions it currently leads
-- recent leader-side replicated-log operations per second for each led partition
-- client and WAL queue depth used to estimate pending pressure
-- how long each leadership has been stable.
+- the partitions that it leads now
+- the recent leader-side operations per second in the replicated log of each led partition
+- the client queue depth and the WAL queue depth, which estimate the pending pressure
+- the time that each leadership was stable.
 
-Reports are advisory and remain in memory. They are not appended to the Raft log. Reports older than `LeaderBalancerReportTtl` are ignored.
+The reports are advisory. They stay in memory. The runtime does not append them to the Raft log. The global view ignores each report that is older than `LeaderBalancerReportTtl`.
 
-The load score for a partition is:
+The load score of a partition is:
 
 ```text
 load = LeaderBalancerOpsWeight * log operations/second
      + LeaderBalancerQueueWeight * (client queue depth + WAL queue depth)
 ```
 
-Log operations per second uses an exponentially weighted moving average (EWMA). It counts the leader-side `ReplicateLogs` path and smooths short spikes while still adapting when a partition stays busy or becomes idle. See [Partition Load Signals](../guides/partition-load-signals.md) for the related public accessors.
+The log operations per second value is an exponentially weighted moving average (EWMA). It counts the leader-side `ReplicateLogs` path. It smooths short spikes. It still adapts when a partition stays busy or becomes idle. See [Partition Load Signals](../guides/partition-load-signals.md) for the related public accessors.
 
-## How A Balancing Pass Works
+## How A Balance Pass Works
 
-Every `LeaderBalancerInterval`, the system-partition leader:
+The system-partition leader does these steps at each `LeaderBalancerInterval`:
 
-1. builds a cluster-wide view from fresh reports
-2. reconciles transfers suggested by earlier passes
-3. skips the pass if any live voter is missing a fresh report
-4. plans a limited set of useful moves
-5. asks each partition's current leader to transfer leadership to the selected target.
+1. It builds a cluster-wide view from the fresh reports.
+2. It reconciles the transfers that earlier passes suggested.
+3. It skips the pass if a fresh report from any live voter is missing.
+4. It plans a limited set of useful moves.
+5. It asks the current leader of each partition to transfer leadership to the selected target.
 
-The controller sends suggestions because only a partition's current leader can transfer that partition safely. The recipient verifies that it still leads the partition, the partition is eligible, and the target is a live voter before using the normal Raft leadership-transfer path. Stale or invalid suggestions are ignored.
+The controller sends suggestions, because only the current leader of a partition can transfer that partition safely. The recipient makes three checks before it uses the normal Raft transfer path for leadership. It confirms that it still leads the partition. It confirms that the partition is eligible. It confirms that the target is a live voter. The recipient ignores each stale or invalid suggestion.
 
-The controller does not block while a transfer completes. A later report confirms whether the target became leader. Timed-out suggestions are cleared and may be reconsidered after cooldown.
+The controller does not block during a transfer. A later report confirms if the target became the leader. The controller clears each suggestion that times out. It can select that partition again after the cooldown.
 
-## Balancing Policy
+## Balance Policy
 
 The planner uses two stages.
 
 ### Leader Count
 
-First, it moves leaderships from nodes above the ideal count to nodes below it. `CountDeadband` allows a small difference without causing unnecessary movement. When several partitions are eligible, the planner prefers moving a hotter partition to a cooler node.
+First, the planner moves leaderships from the nodes above the ideal count to the nodes below it. `CountDeadband` permits a small difference without unnecessary movement. The planner prefers to move a hotter partition to a cooler node when several partitions are eligible.
 
 ### Measured Load
 
-When leader counts are already balanced, the planner compares node load. If skew exceeds `LoadImbalanceThreshold`, it can produce a count-neutral swap: a hot partition moves to the cooler node and a cold partition moves in the opposite direction. The swap is used only when it reduces imbalance.
+The planner compares the node load when the leader counts are already balanced. It can plan a count-neutral swap if the skew is more than `LoadImbalanceThreshold`. In a swap, a hot partition moves to the cooler node. A cold partition moves in the opposite direction. The planner uses the swap only when the swap reduces the imbalance.
 
 ## Safety And Churn Controls
 
-A partition is eligible only when:
+A partition is eligible only in these conditions:
 
-- it is in the `Active` lifecycle state
-- its current leader has been stable for at least `MinLeaderStabilityMs`
-- the target is a live voting member of that partition's Raft group
-- it is not in `MoveCooldown`
-- it has no outstanding transfer suggestion.
+- The partition is in the `Active` lifecycle state.
+- Its current leader was stable for a minimum of `MinLeaderStabilityMs`.
+- The target is a live voting member of the Raft group of that partition.
+- The partition is not in `MoveCooldown`.
+- The partition has no outstanding transfer suggestion.
 
-`MaxMovesPerPass` limits new plans in one pass. `MaxConcurrentTransfers` limits transfers already in flight across the cluster.
+`MaxMovesPerPass` limits the new plans in one pass. `MaxConcurrentTransfers` limits the transfers that are already in flight across the cluster.
 
-The balancer changes leadership, not membership, partition ownership, hash ranges, WAL contents, or application state. Every actual move goes through `TransferLeadershipAsync` validation. If the controller has incomplete or stale information, the expected result is a skipped, rejected, or unnecessary suggestion rather than bypassing Raft safety.
+The balancer changes leadership only. It does not change membership, partition ownership, hash ranges, WAL contents, or application state. Each actual move uses the validation in `TransferLeadershipAsync`. The information of the controller can be incomplete or stale. The expected result is then a skipped, rejected, or unnecessary suggestion. The balancer never bypasses Raft safety.
 
 ## Configuration
 
 | Property | Default | Description |
 | --- | ---: | --- |
-| `EnableLeaderBalancer` | `false` | Enables load reports and automatic balancing passes. Configure it consistently on every node. |
-| `LeaderBalancerReportInterval` | `5 s` | How often each node includes its local leadership and load report in gossip. |
-| `LeaderBalancerInterval` | `30 s` | How often the system-partition leader runs a balancing pass. |
-| `LeaderBalancerReportTtl` | `20 s` | Maximum report age accepted by the global view. Must be greater than the report interval. |
-| `CountDeadband` | `1` | Allowed leader-count difference around the ideal before count balancing acts. |
-| `LoadImbalanceThreshold` | `0.25` | Fractional load skew required before load balancing considers a swap. |
-| `MinLeaderStabilityMs` | `5000 ms` | Minimum leadership age before a partition can move. |
-| `MoveCooldown` | `60 s` | Time after success or timeout before that partition can be selected again. |
-| `MaxMovesPerPass` | `4` | Maximum moves planned during one balancing pass. |
-| `MaxConcurrentTransfers` | `2` | Maximum outstanding transfers across the cluster. |
-| `SuggestionTimeout` | `15 s` | Time allowed for a suggested move to appear in a fresh report. |
-| `LeaderBalancerOpsWeight` | `1.0` | Weight of operations per second in the partition load score. |
-| `LeaderBalancerQueueWeight` | `0.5` | Weight of pending queue depth in the partition load score. |
+| `EnableLeaderBalancer` | `false` | Enables the load reports and the automatic balance passes. Configure it in the same way on every node. |
+| `LeaderBalancerReportInterval` | `5 s` | The interval at which each node puts its local leadership report and load report into gossip. |
+| `LeaderBalancerInterval` | `30 s` | The interval at which the system-partition leader runs a balance pass. |
+| `LeaderBalancerReportTtl` | `20 s` | The maximum report age that the global view accepts. It must be more than the report interval. |
+| `CountDeadband` | `1` | The permitted difference in leader count around the ideal count before count balancing acts. |
+| `LoadImbalanceThreshold` | `0.25` | The fractional load skew that is necessary before load balancing examines a swap. |
+| `MinLeaderStabilityMs` | `5000 ms` | The minimum leadership age before a partition can move. |
+| `MoveCooldown` | `60 s` | The time after a success or a timeout before the planner can select that partition again. |
+| `MaxMovesPerPass` | `4` | The maximum number of moves that one balance pass plans. |
+| `MaxConcurrentTransfers` | `2` | The maximum number of outstanding transfers across the cluster. |
+| `SuggestionTimeout` | `15 s` | The time permitted for a suggested move to appear in a fresh report. |
+| `LeaderBalancerOpsWeight` | `1.0` | The weight of the operations per second in the partition load score. |
+| `LeaderBalancerQueueWeight` | `0.5` | The weight of the pending queue depth in the partition load score. |
 
-Keep `SuggestionTimeout` longer than `LeaderBalancerReportInterval` plus expected gossip propagation and leadership-transfer time. Otherwise, successful moves can be recorded as timed out before the new report reaches the controller.
+Keep `SuggestionTimeout` longer than `LeaderBalancerReportInterval` plus the expected gossip propagation time and leadership transfer time. If you do not, the controller can record a successful move as timed out before the new report arrives.
 
-Raise `CountDeadband`, `LoadImbalanceThreshold`, `MoveCooldown`, or `MinLeaderStabilityMs` if leadership changes too often. Raise move limits or shorten `LeaderBalancerInterval` only after metrics show that convergence is too slow.
+Increase `CountDeadband`, `LoadImbalanceThreshold`, `MoveCooldown`, or `MinLeaderStabilityMs` if leadership changes too often. Increase the move limits or decrease `LeaderBalancerInterval` only after the metrics show slow convergence.
 
 ## Metrics
 
-Subscribe to the .NET meter named `Kommander`:
+Subscribe to the .NET meter with the name `Kommander`:
 
 | Metric | Type | Meaning |
 | --- | --- | --- |
-| `raft.balancer.moves_total` | Counter | Suggested moves tagged with `outcome=planned`, `succeeded`, or `timed_out`. |
-| `raft.balancer.skipped_passes_total` | Counter | Passes skipped because the controller lacked a fresh report from every live voter. |
-| `raft.balancer.count_imbalance` | Gauge | Distance between the highest leader count and the target count. |
-| `raft.balancer.load_imbalance` | Gauge | Fractional load skew across nodes. |
+| `raft.balancer.moves_total` | Counter | Suggested moves with the tag `outcome=planned`, `succeeded`, or `timed_out`. |
+| `raft.balancer.skipped_passes_total` | Counter | Passes that the controller skipped because a fresh report from a live voter was missing. |
+| `raft.balancer.count_imbalance` | Gauge | The distance between the highest leader count and the target count. |
+| `raft.balancer.load_imbalance` | Gauge | The fractional load skew across the nodes. |
 
-The imbalance gauges are meaningful on the process hosting the system-partition leader. A healthy rebalance usually shows planned moves followed by successful moves while both imbalance gauges trend downward.
+The imbalance gauges have a meaning on the process that hosts the system-partition leader. A healthy rebalance usually shows planned moves, then successful moves, while both imbalance gauges fall.
 
 ## Troubleshooting
 
-### It Is Enabled But Nothing Moves
+### The Balancer Is Enabled, But Nothing Moves
 
-Check that:
+Check these conditions:
 
-- `EnableLeaderBalancer` is enabled on every node
-- `GossipFanout` is greater than `0`
-- every live voter publishes a fresh report before `LeaderBalancerReportTtl`
-- imbalance exceeds `CountDeadband` or `LoadImbalanceThreshold`
-- eligible partitions are `Active`, stable, and outside cooldown
-- targets are voting members of the relevant partition groups.
+- `EnableLeaderBalancer` is enabled on every node.
+- `GossipFanout` is more than `0`.
+- Every live voter publishes a fresh report before `LeaderBalancerReportTtl`.
+- The imbalance is more than `CountDeadband` or `LoadImbalanceThreshold`.
+- The eligible partitions are `Active` and stable, and their cooldown is complete.
+- The targets are voting members of the relevant partition groups.
 
-A rising `raft.balancer.skipped_passes_total` usually means the global report view is incomplete.
+A rise in `raft.balancer.skipped_passes_total` usually means an incomplete global view of the reports.
 
 ### Suggestions Time Out
 
-Inspect `raft.balancer.moves_total{outcome=timed_out}`. Common causes include stale ownership information, a target that cannot accept the transfer, transport delivery failure, or a `SuggestionTimeout` shorter than report propagation.
+Examine `raft.balancer.moves_total{outcome=timed_out}`. The usual causes are stale ownership information, a target that cannot accept the transfer, or a transport delivery failure. Another cause is a `SuggestionTimeout` that is shorter than the report propagation time.
 
-### Leadership Keeps Moving
+### Leadership Moves Too Often
 
-Increase the deadband, load threshold, stability window, or cooldown. Also confirm that application traffic is not shifting rapidly between partitions; the balancer can only react to the load it observes.
+Increase the deadband, the load threshold, the stability window, or the cooldown. Also confirm that the application traffic does not move quickly between partitions. The balancer can react only to the load that it observes.
 
-For manual transfers and stable-leader waiting, see [Leadership Control](./leadership-control.md). For partition topology changes, see [Elastic Partitions](../guides/elastic-partitions.md).
+For manual transfers and a wait for a stable leader, see [Leadership Control](./leadership-control.md). For changes to the partition topology, see [Elastic Partitions](../guides/elastic-partitions.md).

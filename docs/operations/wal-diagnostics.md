@@ -1,34 +1,34 @@
 # WAL Diagnostics
 
-Kommander exposes WAL visibility helpers and a practical durability switch for test environments.
+Kommander gives visibility helpers for the write-ahead log (WAL). It also gives a practical durability switch for a test environment.
 
 ## WAL Batch Metrics
 
-The WAL scheduler reports batching through:
+The WAL scheduler reports its batches through these metrics:
 
 - `raft.wal.batches_total`
 - `raft.wal.operations_total`
 - `raft.wal.batch_size`
 
-`raft.wal.batches_total` counts scheduler group writes to the storage adapter. A single group write can include work from multiple partitions.
+`raft.wal.batches_total` counts the group writes from the scheduler to the storage adapter. One group write can include work from more than one partition.
 
-`raft.wal.batch_size` records the number of operations drained for each partition inside a group write. It does not report how many partitions were included in the group.
+`raft.wal.batch_size` records the number of operations that the scheduler drains for each partition inside a group write. It does not report the number of partitions in the group.
 
-Under load, a healthy batching pattern usually shows `raft.wal.operations_total` growing faster than `raft.wal.batches_total`, which means multiple WAL operations are being amortized into fewer storage calls.
+Under load, a healthy batch pattern usually shows a rise in `raft.wal.operations_total` that is faster than the rise in `raft.wal.batches_total`. That pattern means that the scheduler amortizes several WAL operations into fewer storage calls.
 
-The scheduler also tracks internal counters that are useful when validating WAL durability tuning:
+The scheduler also keeps internal counters. They are useful when you validate the WAL durability tuning:
 
 - `TotalBatchesWritten`
 - `TotalSyncBatchesWritten`
 - `TotalPartitionsBatched`
 
-`TotalSyncBatchesWritten` is the most direct signal for the single-fsync fast path. With `WalSingleFsyncCommit` disabled, committed writes usually produce both propose and commit sync work. With it enabled, committed-marker-only batches can be written without forcing their own sync.
+`TotalSyncBatchesWritten` is the most direct signal for the single-fsync fast path. An fsync is a durable flush to disk. With `WalSingleFsyncCommit` disabled, a committed write usually causes sync work for the proposal and sync work for the commit. With the setting enabled, the scheduler can write a batch with committed markers only. That batch needs no sync of its own.
 
-`TotalPartitionsBatched / TotalBatchesWritten` is useful when tuning `WalGroupCommitLingerMs`; it should rise when the linger is successfully gathering more partitions into each group write.
+`TotalPartitionsBatched / TotalBatchesWritten` is useful when you tune `WalGroupCommitLingerMs`. The ratio must rise when the linger gathers more partitions into each group write.
 
-## Counting Persisted And Removable Logs
+## Count The Persisted Logs And The Removable Logs
 
-`IWAL` exposes two helpful counting methods:
+`IWAL` gives two helpful count methods:
 
 - `CountPersistedLogs(partitionId)`
 - `CountRemovableLogs(partitionId)`
@@ -37,11 +37,11 @@ The scheduler also tracks internal counters that are useful when validating WAL 
 
 `CountRemovableLogs` returns the number of persisted rows strictly below the last committed checkpoint.
 
-These are useful for:
+These methods are useful for:
 
 - compaction diagnostics
-- WAL-focused tests
-- operational checks that want to estimate how much history is still removable.
+- tests with a focus on the WAL
+- an operational check that estimates the quantity of history that is still removable.
 
 ## Optional Non-Synchronous Writes
 
@@ -52,23 +52,23 @@ IWAL rocks = new RocksDbWAL("./data", "node-1", logger, syncWrites: false);
 IWAL sqlite = new SqliteWAL("./data", "node-1", logger, syncWrites: false);
 ```
 
-This can improve throughput in CI, benchmarks, and some local test runs.
+This setting can improve the throughput in CI, in a benchmark, and in some local test runs.
 
 ## Durability Tradeoff
 
-With `syncWrites: false`, acknowledged writes may still be lost on process or machine crash. Use it only when crash durability is not part of what you are validating.
+With `syncWrites: false`, a process crash or a machine crash can lose an acknowledged write. Use the setting only when crash durability is not part of your validation.
 
-For production latency tuning that preserves quorum durability, prefer [WAL Commit Durability](./wal-commit-durability.md) and the `WalSingleFsyncCommit` / `WalGroupCommitLingerMs` settings over disabling synchronous writes.
+For a production latency change that keeps quorum durability, prefer [WAL Commit Durability](./wal-commit-durability.md). Use the `WalSingleFsyncCommit` setting and the `WalGroupCommitLingerMs` setting. Do not disable the synchronous writes.
 
 ## Shared RocksDB Memory Checks
 
-When a host passes `RocksDbSharedResources` to `RocksDbWAL`, two resource counters help confirm the setup:
+A host can pass `RocksDbSharedResources` to `RocksDbWAL`. Two resource counters then confirm the setup:
 
 - `RocksDbSharedResources.MemtableMemoryUsage`
 - `RocksDbSharedResources.BlockCache.GetUsage()`
 
-`MemtableMemoryUsage` is the clearer write-path signal. It should rise when any database sharing the write-buffer manager writes data.
+`MemtableMemoryUsage` is the clearer signal for the write path. It must rise when any database that shares the write-buffer manager writes data.
 
-`BlockCache.GetUsage()` is read-path oriented. It may not move much in a pure append workload until reads populate the block cache.
+`BlockCache.GetUsage()` applies to the read path. In a pure append workload, it can stay almost constant until reads fill the block cache.
 
-See [Shared RocksDB Memory](./shared-rocksdb-memory.md) for ownership and sizing guidance.
+See [Shared RocksDB Memory](./shared-rocksdb-memory.md) for ownership guidance and size guidance.

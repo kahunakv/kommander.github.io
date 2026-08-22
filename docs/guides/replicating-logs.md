@@ -1,12 +1,12 @@
 # Replicating Logs
 
-Leaders replicate application payloads as ordered log entries. The `type` field is an application-defined string that helps your state machine decide how to interpret `LogData`.
+A leader replicates the application payloads as ordered log entries. The `type` field is a string that the application defines. Your state machine uses it to interpret `LogData`.
 
-Partition `0` is reserved for Kommander's system partition. Use partition `1` or higher for application replication.
+Partition `0` is reserved for the system partition of Kommander. Use partition `1` or a higher number for application replication.
 
-Think of `ReplicateLogs` as "ask the cluster to remember this decision." The call succeeds only after Raft has accepted the proposal according to its quorum rules. After that, each node receives the committed entry through `OnReplicationReceived`.
+`ReplicateLogs` asks the cluster to remember a decision. The call is successful only after Raft accepts the proposal by its quorum rules. Each node then receives the committed entry through `OnReplicationReceived`.
 
-Kommander does not inspect the payload. Most applications serialize a command object to JSON, MessagePack, Protobuf, or another format and use `type` as the command name.
+Kommander does not examine the payload. Most applications serialize a command object to JSON, MessagePack, Protobuf, or another format. They then use `type` as the name of the command.
 
 ## Single Entry
 
@@ -30,24 +30,24 @@ RaftReplicationResult result = await raft.ReplicateLogs(
 );
 ```
 
-Use this overload when all entries share one application `type`.
+Use this overload when all the entries share one application `type`.
 
-If one burst contains different entry types or different generation fences, use [`ReplicateEntries`](./heterogeneous-write-coalescing.md) instead. It accepts a per-entry type and returns a per-entry result while still coalescing the work into fewer proposals.
+Use [`ReplicateEntries`](./heterogeneous-write-coalescing.md) if one burst contains different entry types or different generation fences. That method accepts a type for each entry. It returns a result for each entry. It still coalesces the work into fewer proposals.
 
 ## Result
 
 | Property | Description |
 | --- | --- |
-| `Success` | `true` when the operation completed successfully. |
-| `Status` | Detailed `RaftOperationStatus`. |
-| `TicketId` | Hybrid logical clock timestamp that identifies the proposal. |
-| `LogIndex` | Last log index assigned to the proposal. |
+| `Success` | `true` when the operation completed correctly. |
+| `Status` | The detailed `RaftOperationStatus`. |
+| `TicketId` | The timestamp from the hybrid logical clock that identifies the proposal. |
+| `LogIndex` | The last log index that the runtime assigned to the proposal. |
 
-For most first integrations, check `Success` and `Status`. Use `TicketId` when you disable auto-commit and need to commit or roll back manually. Use `LogIndex` when your application wants to track the committed ordering position.
+Examine `Success` and `Status` in your first integration. Use `TicketId` when you disable the auto-commit and must commit or roll back manually. Use `LogIndex` when your application tracks the committed order position.
 
 ## Manual Commit And Rollback
 
-`ReplicateLogs` auto-commits by default. Set `autoCommit: false` to stop after quorum proposal completion, then explicitly commit or roll back:
+`ReplicateLogs` commits automatically by default. Set `autoCommit: false` to stop after the quorum proposal completes. Then commit or roll back explicitly:
 
 ```csharp
 RaftReplicationResult proposal = await raft.ReplicateLogs(
@@ -65,7 +65,7 @@ if (proposal.Success)
 }
 ```
 
-If you use generation fencing with elastic partitions, pass `expectedGeneration` explicitly and prefer named arguments so the optional-parameter order stays obvious:
+A generation fence protects a partition from a write with an old generation number. Pass `expectedGeneration` explicitly if you use a generation fence with elastic partitions. Prefer named arguments. The order of the optional parameters then stays clear:
 
 ```csharp
 RaftReplicationResult proposal = await raft.ReplicateLogs(
@@ -78,7 +78,7 @@ RaftReplicationResult proposal = await raft.ReplicateLogs(
 );
 ```
 
-Rollback uses the same ticket:
+A rollback uses the same ticket:
 
 ```csharp
 (bool rolledBack, RaftOperationStatus status, long rollbackLogId) =
@@ -93,11 +93,11 @@ Replicate a checkpoint for a user partition:
 RaftReplicationResult checkpoint = await raft.ReplicateCheckpoint(1, cancellationToken);
 ```
 
-Checkpoint entries use `RaftLogType.ProposedCheckpoint`, `CommittedCheckpoint`, or `RolledBackCheckpoint` internally.
+Internally, a checkpoint entry uses `RaftLogType.ProposedCheckpoint`, `CommittedCheckpoint`, or `RolledBackCheckpoint`.
 
 ## Leadership
 
-Only the partition leader can accept proposals:
+Only the partition leader can accept a proposal:
 
 ```csharp
 bool quick = await raft.AmILeaderQuick(1);
@@ -105,6 +105,6 @@ bool leader = await raft.AmILeader(1, cancellationToken);
 string endpoint = await raft.WaitForLeader(1, cancellationToken);
 ```
 
-`AmILeaderQuick` checks cached partition state. `AmILeader` waits up to the internal leadership timeout. `WaitForLeader` returns the elected leader endpoint or throws `RaftException`.
+`AmILeaderQuick` examines the cached partition state. `AmILeader` waits for a maximum of the internal leadership timeout. `WaitForLeader` returns the endpoint of the elected leader, or it throws a `RaftException`.
 
-If the local node is not leader, do not write directly to the WAL yourself. Route the request to the leader or retry later. Raft safety depends on writes going through the partition leader.
+Do not write to the WAL directly if the local node is not the leader. The WAL is the write-ahead log. Route the request to the leader, or retry later. Raft safety depends on writes through the partition leader.

@@ -1,113 +1,113 @@
 # SWIM Failure Detection
 
-Kommander uses a SWIM-style failure detector to track whether cluster nodes appear alive.
+Kommander uses a failure detector in the SWIM style. The detector tracks the apparent liveness of each cluster node.
 
-SWIM is node-level liveness. It answers questions like:
+SWIM gives node-level liveness. It answers questions of this type:
 
-- is `node-a:7000` reachable?
-- should this node be considered `Suspect`?
-- has it stayed unreachable long enough to be considered `Dead`?
+- Is `node-a:7000` reachable?
+- Must this node be `Suspect`?
+- Was it unreachable long enough to be `Dead`?
 
-It does not decide Raft leadership and it does not directly change quorum membership. Those decisions still go through Raft.
+SWIM does not decide Raft leadership. It does not change the quorum membership directly. Raft still makes those decisions.
 
-## Where SWIM Is Used
+## Where Kommander Uses SWIM
 
-SWIM supports two user-visible behaviors:
+SWIM supports two behaviors that a user can see:
 
-- dynamic membership can evict a dead member after the system-partition leader commits a `RemoveMember`
-- partition quiescence lets idle partitions stop per-partition heartbeats while followers use SWIM to notice leader-node failure.
+- Dynamic membership can evict a dead member after the system-partition leader commits a `RemoveMember` entry.
+- Partition quiescence lets an idle partition stop the heartbeats of that partition. Followers then use SWIM to detect the failure of the leader node.
 
-The important boundary is:
+The boundary is important:
 
-- SWIM detects liveness
-- Raft commits membership changes
-- Raft elections still decide partition leadership.
+- SWIM detects liveness.
+- Raft commits the membership changes.
+- Raft elections still decide the partition leadership.
 
-## How Probing Works
+## How A Probe Works
 
-Each node periodically probes another node.
+Each node probes another node at regular intervals.
 
 The normal flow is:
 
-1. send a direct `Ping`
-2. if direct ping times out, ask a few peers to relay indirect `PingReq` probes
-3. if direct and indirect probes fail, mark the target `Suspect`
-4. if it remains suspect for `SuspicionTimeout`, mark it `Dead`.
+1. The node sends a direct `Ping`.
+2. The node asks a few peers to relay indirect `PingReq` probes if the direct ping times out.
+3. The node marks the target `Suspect` if the direct probe and the indirect probes fail.
+4. The node marks the target `Dead` if the target stays suspect for `SuspicionTimeout`.
 
-Indirect probing reduces false positives caused by one bad network path between two nodes.
+An indirect probe reduces the false positives that one bad network path between two nodes causes.
 
 ## Liveness States
 
 | State | Meaning |
 | --- | --- |
-| `Alive` | The node responded recently or refuted suspicion. |
-| `Suspect` | Probes failed, but the node still has time to refute suspicion. |
-| `Dead` | The node stayed unreachable past the suspicion window. |
+| `Alive` | The node responded recently, or it refuted the suspicion. |
+| `Suspect` | The probes failed, but the node still has time to refute the suspicion. |
+| `Dead` | The node stayed unreachable after the suspicion window. |
 
-Quiesced partitions react as soon as the leader node becomes not-`Alive`, so failover starts on `Suspect` rather than waiting for `Dead`.
+A quiesced partition reacts as soon as the leader node is no longer `Alive`. Therefore, the failover starts at `Suspect`. It does not wait for `Dead`.
 
 ## Incarnation And Refutation
 
-SWIM uses an incarnation counter to avoid stale suspicion winning forever.
+SWIM uses an incarnation counter. The counter prevents a stale suspicion that wins forever.
 
-If a healthy node learns that others marked it `Suspect`, it increments its incarnation and gossips a newer `Alive` record. Other nodes accept the newer incarnation and clear the stale suspicion.
+A healthy node can learn that other nodes marked it `Suspect`. It then increments its incarnation and gossips a newer `Alive` record. Gossip is the exchange of membership messages between nodes. The other nodes accept the newer incarnation and clear the stale suspicion.
 
-`Dead` is terminal for ordinary gossip refutation, but the eviction path performs a final direct probe before removal. If the node responds, Kommander resurrects the liveness entry and skips that eviction pass.
+`Dead` is terminal for ordinary refutation through gossip. The eviction path still makes one final direct probe before the removal. If the node responds, Kommander restores the liveness entry and skips that eviction pass.
 
-## Eviction Is Still Raft
+## Raft Still Controls Eviction
 
-SWIM does not remove voters by itself.
+SWIM does not remove a voter by itself.
 
-When a voter is `Dead` for longer than `DeadMemberEvictionGrace`, the system-partition leader may commit a `RemoveMember` entry.
+The system-partition leader can commit a `RemoveMember` entry when a voter is `Dead` for longer than `DeadMemberEvictionGrace`.
 
-Before committing removal, the leader performs one direct last-chance probe bounded by `PingTimeout`. This closes the common restart race where a node becomes reachable again after being marked `Dead` but before the grace period expires.
+Before the leader commits the removal, it makes one direct last-chance probe. `PingTimeout` bounds that probe. This closes the common restart race. In that race, a node becomes reachable again after the `Dead` mark, but before the end of the grace period.
 
 That keeps the safety boundary clear:
 
-- SWIM is advisory liveness
-- the committed roster on partition `0` remains the source of truth
-- quorum changes happen only through Raft.
+- SWIM gives advisory liveness.
+- The committed roster on partition `0` stays the source of truth.
+- Quorum changes occur only through Raft.
 
 ## Configuration
 
 | Property | Default | Description |
 | --- | ---: | --- |
-| `PingInterval` | `1 s` | How often a node probes a random peer. Set to `0` or lower to disable SWIM. |
-| `PingTimeout` | `500 ms` | Direct or indirect probe timeout. Lower values detect failures faster but can increase false positives on slow networks. |
-| `IndirectPingFanout` | `2` | Number of relay peers used after a direct ping timeout. |
-| `SuspicionTimeout` | `5 s` | Time a node may remain `Suspect` before becoming `Dead`. |
-| `DeadMemberEvictionGrace` | `2 min` | How long a node must remain `Dead` before the system-partition leader may evict it. |
-| `EnableAutoRejoin` | `true` | Lets an evicted-but-running node automatically rejoin through dynamic membership. |
+| `PingInterval` | `1 s` | The interval at which a node probes a random peer. Set it to `0` or lower to disable SWIM. |
+| `PingTimeout` | `500 ms` | The timeout of a direct probe or an indirect probe. A lower value detects a failure faster. It can also cause more false positives on a slow network. |
+| `IndirectPingFanout` | `2` | The number of relay peers used after a direct ping times out. |
+| `SuspicionTimeout` | `5 s` | The time that a node can stay `Suspect` before it becomes `Dead`. |
+| `DeadMemberEvictionGrace` | `2 min` | The time that a node must stay `Dead` before the system-partition leader can evict it. |
+| `EnableAutoRejoin` | `true` | Permits an evicted node that still runs to rejoin automatically through dynamic membership. |
 
 When `EnableQuiescence = true`, `PingInterval` must also be:
 
-- greater than `0`
-- lower than `StartElectionTimeout`.
+- more than `0`
+- less than `StartElectionTimeout`.
 
 Kommander validates these constraints at startup.
 
 ## Transport Support
 
-Built-in transports support direct and indirect SWIM probing:
+The built-in transports support the direct SWIM probe and the indirect SWIM probe:
 
 - `InMemoryCommunication`
 - `GrpcCommunication`
 - `RestCommunication`.
 
-Custom transports should implement:
+A custom transport must implement these methods:
 
 - `SendPing`
 - `SendPingReq`.
 
-If a custom transport falls back to the default failure-returning implementations, SWIM will treat probes as failed.
+A custom transport can keep the default implementations that return a failure. SWIM then treats every probe as a failed probe.
 
 ## Operational Notes
 
-- Use `PingInterval` and `PingTimeout` that fit your network latency.
-- Increase `SuspicionTimeout` if transient network stalls create false `Dead` transitions.
-- Keep `DeadMemberEvictionGrace` long enough to cover routine restarts and cold WAL opens.
+- Use a `PingInterval` and a `PingTimeout` that fit the latency of your network.
+- Increase `SuspicionTimeout` if a temporary network stall causes a false `Dead` transition.
+- Keep `DeadMemberEvictionGrace` long enough for routine restarts and cold WAL opens. The WAL is the write-ahead log.
 - Do not disable SWIM while quiescence is enabled.
-- Watch membership changes and liveness logs together when diagnosing evictions.
+- Examine the membership changes and the liveness logs together when you diagnose an eviction.
 
 ## Related Reading
 

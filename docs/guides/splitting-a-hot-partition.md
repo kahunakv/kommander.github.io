@@ -1,42 +1,42 @@
 # Splitting A Hot Partition
 
-Split a partition when one user partition is doing too much work compared with the rest of the cluster.
+Split a partition when one user partition does much more work than the other partitions in the cluster.
 
-Typical signals:
+Typical signals are:
 
-- one tenant or key range dominates request volume
-- one partition's queue depth stays high
-- one partition's leader is much hotter than the others
-- latency for a specific key range grows while the rest of the cluster stays healthy.
+- One tenant or key range dominates the request volume.
+- The queue depth of one partition stays high.
+- The leader of one partition is much hotter than the other leaders.
+- The latency of one key range grows while the other partitions stay healthy.
 
-This guide focuses on the operational flow for a split. For the full API surface, see [Elastic Partitions](./elastic-partitions.md).
+This guide gives the operational flow of a split. For the full API, see [Elastic Partitions](./elastic-partitions.md).
 
-Kommander exposes `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, and `GetPartitionCommitWaitMs` to help distinguish a busy partition from a saturated one. See [Partition Load Signals](./partition-load-signals.md) before building an automatic split trigger.
+Kommander gives `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, and `GetPartitionCommitWaitMs`. They help you separate a busy partition from a saturated partition. Read [Partition Load Signals](./partition-load-signals.md) before you build an automatic split trigger.
 
 ## What A Split Does
 
-For a `HashRange` partition, a split creates a second partition and divides the original hash range in two.
+For a `HashRange` partition, a split creates a second partition. It then divides the original hash range in two parts.
 
-In plain terms:
+In simple terms:
 
-- the source partition keeps part of the keyspace
-- the target partition receives the other part
-- new writes must eventually route using the updated partition map.
+- The source partition keeps one part of the keyspace.
+- The target partition receives the other part.
+- New writes must use the updated partition map.
 
-Kommander can auto-assign the target partition id when you pass `0`.
+Kommander can assign the id of the target partition. Pass `0` for that behavior.
 
-Partition `0` remains reserved for system metadata and can never be used as a user split target.
+Partition `0` stays reserved for the system metadata. It can never be the target of a user split.
 
 ## Before You Split
 
 Check these conditions first:
 
-- the source partition is a user partition with id greater than `0`
-- the local node is leader for the source partition
-- your application is prepared to refresh routing state
-- your application has registered state-transfer behavior if split data must move with the new partition.
+- The source partition is a user partition. Its id is more than `0`.
+- The local node is the leader of the source partition.
+- Your application is ready to refresh its routing state.
+- Your application registered a state-transfer behavior, if the data must move with the new partition.
 
-The split request itself is easy. The hard part is usually application state transfer and rerouting cached keys cleanly.
+The split request is easy. The difficult parts are usually the transfer of the application state and the clean reroute of the cached keys.
 
 ## Basic Split Example
 
@@ -53,21 +53,21 @@ RaftPartitionLifecycleResult result = await raft.SplitPartitionAsync(
 );
 ```
 
-What this means:
+The parameters mean this:
 
-- `sourcePartitionId: 2` splits partition `2`
-- `targetPartitionId: 0` asks Kommander to assign a new user partition id
-- `HashBoundary = null` uses the midpoint of the current hash range
-- `TargetRoutingMode = HashRange` keeps the new partition in normal hash-based routing.
+- `sourcePartitionId: 2` splits partition `2`.
+- `targetPartitionId: 0` asks Kommander to assign a new user partition id.
+- `HashBoundary = null` uses the midpoint of the current hash range.
+- `TargetRoutingMode = HashRange` keeps the new partition in the normal hash-based routing.
 
 ## After The Split Completes
 
-After a successful split:
+Do these steps after a successful split:
 
-1. refresh your partition map
-2. update any routing caches
-3. expect some callers using stale generation information to get `PartitionMoved`
-4. re-route those requests using the latest map.
+1. Refresh your partition map.
+2. Update each routing cache.
+3. Expect a `PartitionMoved` status for a caller with stale generation information.
+4. Route those requests again with the latest map.
 
 Example:
 
@@ -75,41 +75,41 @@ Example:
 IReadOnlyList<RaftPartitionRange> map = raft.GetPartitionMap();
 ```
 
-If you pass `expectedGeneration` on writes, stale callers fail safely instead of silently writing to an outdated partition layout.
+Pass `expectedGeneration` on your writes. A stale caller then fails safely. It does not write to an old partition layout without a warning.
 
-## State Transfer Matters
+## State Transfer Is Important
 
-If your state machine keeps local domain state per partition, a split is not only a routing event. Some data may need to move from the old partition's state into the new partition's state.
+Your state machine can keep local domain state for each partition. A split is then more than a routing event. Some data can need a move from the state of the old partition to the state of the new partition.
 
-That is why Kommander exposes:
+That is the reason for this method:
 
 ```csharp
 raft.RegisterStateMachineTransfer(new MyStateMachineTransfer());
 ```
 
-Without state transfer, a split may change routing but leave the new partition without the application state it needs.
+Without a state transfer, a split changes the routing. The new partition can then have no application state.
 
 ## A Simple Operating Pattern
 
-For a beginner-friendly first implementation:
+Use this sequence for a first implementation:
 
-1. detect sustained high replicated-log rate and WAL saturation
-2. split it at the leader
-3. refresh the partition map on all application nodes
-4. retry `PartitionMoved` writes using the new map
-5. verify the two partitions are led on different nodes when relieving fsync pressure
-6. verify rate, queue depth, and latency improve after routing settles.
+1. Detect a constant high rate in the replicated log and WAL saturation. The WAL is the write-ahead log.
+2. Split the partition at the leader.
+3. Refresh the partition map on all the application nodes.
+4. Retry each `PartitionMoved` write with the new map.
+5. Make sure that different nodes lead the two partitions, if your goal is less fsync pressure. An fsync is a durable flush to disk.
+6. Make sure that the rate, the queue depth, and the latency improve after the routing becomes stable.
 
-Because WAL group commit can combine writes from multiple partitions on one node, splitting in place does not necessarily add fsync capacity. The new partition should ultimately have a leader on another node when disk saturation is the problem.
+The WAL group commit can combine writes from several partitions on one node. Therefore, a split in place does not always add fsync capacity. The new partition needs a leader on another node when the disk saturation is the problem.
 
 ## Good Fit
 
-Splits are a good fit when:
+A split is a good fit in these conditions:
 
-- traffic is skewed toward one partition
-- keys can be cleanly divided
-- the application can tolerate rerouting during the topology change
-- you want to spread leadership and write load across more partitions.
+- The traffic is skewed toward one partition.
+- You can divide the keys cleanly.
+- The application can tolerate a reroute during the change of the topology.
+- You want to spread the leadership and the write load across more partitions.
 
 ## Related Reading
 

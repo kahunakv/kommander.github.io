@@ -1,50 +1,50 @@
 # Checkpointing And Recovery
 
-Checkpoints give your application a durable "safe point" inside a partition's log.
+A checkpoint gives your application a durable safe point inside the log of a partition.
 
-In Kommander, a checkpoint is replicated through Raft just like a normal write. Once it is committed, the WAL can eventually compact entries older than that checkpoint.
+In Kommander, Raft replicates a checkpoint in the same way as a normal write. After the commit, the WAL can compact the entries that are older than that checkpoint. The WAL is the write-ahead log.
 
-This guide explains when to write checkpoints, what they do during restore, and how they relate to compaction.
+This guide tells you three things. It tells you when to write a checkpoint. It tells you what a checkpoint does during a restore. It tells you how a checkpoint relates to compaction.
 
 ## What A Checkpoint Means
 
-Think of a checkpoint as a marker that says:
+A checkpoint is a marker. It says this:
 
-"Everything before this point has been applied, and the partition can recover starting from here."
+"The system applied everything before this point. The partition can recover from this point."
 
-That does **not** mean Kommander serializes your domain state for you. Your application still owns its state machine and restore logic.
+This does **not** mean that Kommander serializes your domain state for you. Your application still owns its state machine and its restore logic.
 
-What Kommander provides is:
+Kommander gives these parts:
 
 - replicated checkpoint entries
-- restore that starts from the latest committed checkpoint boundary in the WAL
-- automatic compaction eligibility for older log history.
+- a restore that starts at the last committed checkpoint boundary in the WAL
+- eligibility for automatic compaction of the older log history.
 
 ## When To Write A Checkpoint
 
-Good times to write a checkpoint:
+Write a checkpoint at these times:
 
 - after a meaningful batch of committed work
-- after rebuilding or refreshing a derived local snapshot
-- after a workflow phase where replaying older history is no longer useful
-- before expecting a partition to accumulate a large amount of additional traffic.
+- after you rebuild or refresh a derived local snapshot
+- after a workflow phase, when a replay of the older history is no longer useful
+- before a partition receives a large quantity of more traffic.
 
-Less useful patterns:
+These patterns are less useful:
 
-- writing a checkpoint after every single command
-- never writing checkpoints at all
-- treating checkpoints as a replacement for application restore logic.
+- a checkpoint after each single command
+- no checkpoint at all
+- a checkpoint in place of the restore logic of the application.
 
-If you never write checkpoints, compaction has little or nothing to reclaim.
+Without a checkpoint, compaction can reclaim little or nothing.
 
 ## Basic Flow
 
 The usual sequence is:
 
-1. replicate normal application entries
-2. apply them through your state machine
-3. periodically replicate a checkpoint
-4. let automatic compaction remove older WAL history over time.
+1. Replicate the normal application entries.
+2. Apply them through your state machine.
+3. Replicate a checkpoint at intervals.
+4. Let automatic compaction remove the older WAL history with time.
 
 Example:
 
@@ -65,64 +65,64 @@ RaftReplicationResult checkpoint = await raft.ReplicateCheckpoint(
 );
 ```
 
-`ReplicateCheckpoint` uses the same quorum path as regular replication. That means it still needs the partition leader and follower acknowledgements to commit.
+`ReplicateCheckpoint` uses the same quorum path as a regular replication. Therefore, it still needs the partition leader and the follower acknowledgements before the commit.
 
-## What Happens During Restore
+## What Occurs During A Restore
 
-On restore, Kommander replays the WAL from the latest committed checkpoint boundary forward.
+At a restore, Kommander replays the WAL forward from the last committed checkpoint boundary.
 
-From the application's point of view, the important implication is simple:
+For the application, the result is simple:
 
-- newer checkpoints reduce how much history may need to be replayed
-- older history may disappear after compaction
-- your restore code must still be correct from the retained checkpoint boundary onward.
+- A newer checkpoint reduces the history that the node can replay.
+- The older history can disappear after compaction.
+- Your restore code must still be correct from the retained checkpoint boundary forward.
 
-If you need deterministic rebuild behavior, keep your restore path compatible with starting from the newest retained checkpoint and replaying the remaining committed entries.
+Your rebuild behavior can need to be deterministic. Keep your restore path compatible with this sequence: start at the newest retained checkpoint, then replay the remaining committed entries.
 
-## Compaction Relationship
+## Relationship To Compaction
 
-Automatic compaction is checkpoint-driven.
+The checkpoints drive the automatic compaction.
 
-The main settings are:
+The primary settings are:
 
 - `CompactEveryOperations`
 - `CompactNumberEntries`
 - `MaxEntriesPerCompaction`
 
-When compaction runs, Kommander:
+At each compaction, Kommander does these steps:
 
-1. finds the last committed checkpoint for the partition
-2. removes entries older than that checkpoint in batches
-3. stops when there is no more eligible work or the pass limit is reached.
+1. It finds the last committed checkpoint of the partition.
+2. It removes the entries that are older than that checkpoint, in batches.
+3. It stops when no eligible work remains, or when it reaches the limit of the pass.
 
-This means checkpoints influence **how much** old WAL can be removed, while the compaction settings influence **how fast** that removal happens.
+Therefore, the checkpoints control **how much** old WAL data the system can remove. The compaction settings control **how fast** the system removes it.
 
 ## A Practical Strategy
 
 For most applications, start with this approach:
 
-- write normal commands freely
-- add checkpoints at stable milestones rather than every write
-- observe WAL growth and restore time
-- increase checkpoint frequency only if replay or storage growth becomes a problem.
+- Write the normal commands freely.
+- Add a checkpoint at a stable milestone. Do not add one at each write.
+- Observe the WAL growth and the restore time.
+- Increase the checkpoint frequency only if the replay time or the storage growth becomes a problem.
 
-Examples of stable milestones:
+Examples of a stable milestone:
 
-- every few hundred or few thousand applied operations
-- after closing an accounting period
-- after finishing a tenant import
-- after completing a durable workflow stage.
+- each few hundred or few thousand applied operations
+- the end of an accounting period
+- the end of a tenant import
+- the end of a durable workflow stage.
 
 ## What Your Application Still Owns
 
-Kommander does not automatically create a business snapshot file or serialize your in-memory domain objects.
+Kommander does not create a business snapshot file automatically. It does not serialize your in-memory domain objects.
 
-Your application still decides:
+Your application still decides these items:
 
-- what state is reconstructed during `OnLogRestored`
-- whether you maintain your own local snapshot representation
-- when a checkpoint is meaningful for your domain
-- whether restore time or WAL growth is acceptable.
+- the state that it reconstructs during `OnLogRestored`
+- the local snapshot representation, if it keeps one
+- the point at which a checkpoint has a meaning for your domain
+- the restore time and the WAL growth that are acceptable.
 
 ## Related Reading
 

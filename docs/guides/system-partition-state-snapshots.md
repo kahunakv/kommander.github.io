@@ -1,67 +1,67 @@
 # System Partition State Snapshots
 
-Partition `0` is Kommander's system partition. Kommander uses it for cluster-wide metadata such as membership and partition maps.
+Partition `0` is the system partition of Kommander. Kommander uses it for cluster-wide metadata such as the membership and the partition maps.
 
-Applications can also replicate their own small cluster-wide control state on partition `0`, as long as they use their own log type. This is useful for things like:
+An application can also replicate its own small cluster-wide control state on partition `0`. It must use its own log type. This is useful for these items:
 
-- a small registry shared by every node
+- a small registry that every node shares
 - feature flags
 - lease metadata
 - routing metadata
-- a compact application control-plane map.
+- a compact control-plane map of the application.
 
-The challenge is compaction. If application entries on partition `0` are deltas, a node that falls behind after old deltas are compacted needs a whole-state repair path. Kommander provides that repair path through `IRaftSystemStateTransfer`.
+Compaction is the difficulty. The application entries on partition `0` can be deltas. A node that falls behind then needs a repair path for the whole state. This is true after the compaction of the old deltas. Kommander gives that repair path through `IRaftSystemStateTransfer`.
 
-## What Problem This Solves
+## The Problem That This Solves
 
-The simplest compaction-safe pattern is to write the entire application control state on every mutation.
+The simplest pattern that is safe for compaction writes the full application control state at each change.
 
-That works, but it becomes expensive:
+That pattern works. It also becomes expensive:
 
-- every small change replicates the whole state
-- WAL writes grow with total state size
-- network traffic grows with total state size
-- frequent updates such as lease renewals become costly.
+- Each small change replicates the whole state.
+- The WAL writes grow with the total size of the state. The WAL is the write-ahead log.
+- The network traffic grows with the total size of the state.
+- A frequent update such as a lease renewal becomes costly.
 
-With system-state snapshots, the application can replicate cheap deltas on partition `0` and provide a whole-state snapshot hook for repair.
+With system-state snapshots, the application replicates cheap deltas on partition `0`. It also gives a hook for a whole-state snapshot for the repair.
 
-## Important Partition 0 Rules
+## Important Rules For Partition 0
 
-Partition `0` is reserved for system-wide state. Application code may use it carefully, but there are rules:
+Partition `0` is reserved for system-wide state. Application code can use it with care. There are rules:
 
-- use your own log type string
-- do not use `_RaftSystem`; that log type is reserved by Kommander
-- register system-state transfer on every node if your partition `0` entries are deltas
-- keep your own local snapshot and restore logic if you want fast restart without fetching a full state snapshot from another node.
+- Use your own string for the log type.
+- Do not use `_RaftSystem`. Kommander reserves that log type.
+- Register the system-state transfer on every node if your partition `0` entries are deltas.
+- Keep your own local snapshot logic and restore logic. A restart is then fast. It does not need a full state snapshot from another node.
 
-User partitions still start at `1`. Elastic partition APIs do not create, split, merge, or remove partition `0`.
+The user partitions still start at `1`. The elastic partition APIs do not create, split, merge, or remove partition `0`.
 
-## Full Snapshots Versus Deltas
+## Full Snapshots Or Deltas
 
-There are two ways to store application state on partition `0`.
+There are two ways to store the application state on partition `0`.
 
 | Pattern | Write Cost | Compaction Safety |
 | --- | --- | --- |
-| Full snapshot per mutation | `O(total state)` per write | Any surviving entry can rebuild state. |
-| Delta per mutation plus `IRaftSystemStateTransfer` | `O(one change)` per write | Below-floor nodes are repaired with a whole-state snapshot. |
+| A full snapshot at each change | `O(total state)` for each write | Any entry that survives can rebuild the state. |
+| A delta at each change, plus `IRaftSystemStateTransfer` | `O(one change)` for each write | A whole-state snapshot repairs a node below the floor. |
 
-Use full snapshots when the state is tiny and changes rarely.
+Use the full snapshot when the state is very small and changes rarely.
 
-Use deltas plus system-state transfer when the state can grow or changes frequently.
+Use the deltas and the system-state transfer when the state can grow or changes frequently.
 
 ## The Integration Contract
 
 The safe delta pattern has five parts:
 
-1. implement `IRaftSystemStateTransfer`
-2. register it on every node
-3. replicate deltas to partition `0` under your own log type
-4. periodically persist a local application snapshot with the committed index it reflects
-5. call `SetMinRetainIndex(0, snapshotIndex + 1)` after the local snapshot is durable.
+1. Implement `IRaftSystemStateTransfer`.
+2. Register it on every node.
+3. Replicate the deltas to partition `0` under your own log type.
+4. Persist a local application snapshot at intervals. Record the committed index of that snapshot.
+5. Call `SetMinRetainIndex(0, snapshotIndex + 1)` after the local snapshot is durable.
 
 ## Implement The Transfer
 
-`IRaftSystemStateTransfer` exports and imports the whole application state for partition `0`.
+`IRaftSystemStateTransfer` exports and imports the whole application state of partition `0`.
 
 ```csharp
 public sealed class ControlStateTransfer : IRaftSystemStateTransfer
@@ -93,15 +93,15 @@ public sealed class ControlStateTransfer : IRaftSystemStateTransfer
 }
 ```
 
-`ExportPartitionState` must return the complete application state as of `upToIndex`. Kommander uses that index to seed the follower checkpoint after import.
+`ExportPartitionState` must return the complete application state at `upToIndex`. Kommander uses that index to seed the follower checkpoint after the import.
 
-`ImportPartitionState` must be atomic. If the process crashes or the import fails halfway through, the old state should remain usable so Kommander can retry.
+`ImportPartitionState` must be atomic. The process can crash, or the import can fail in the middle. The old state must stay usable. Kommander can then retry.
 
 ## Register On Every Node
 
-Registration is local process state. It is not replicated.
+The registration is local process state. Kommander does not replicate it.
 
-Call this on every node, preferably before `JoinCluster`:
+Make this call on every node. Prefer a call before `JoinCluster`:
 
 ```csharp
 raft.RegisterSystemStateTransfer(
@@ -111,9 +111,9 @@ raft.RegisterSystemStateTransfer(
 
 Pass `null` to clear the registration.
 
-This is separate from `RegisterStateMachineTransfer`, which is used for user-partition split and merge data movement. A node can register both.
+This method is separate from `RegisterStateMachineTransfer`. That other method moves the data of a user partition during a split or a merge. One node can register both.
 
-## Replicate Deltas On Partition 0
+## Replicate The Deltas On Partition 0
 
 Use `ReplicateLogs` with `partitionId: 0` and your own log type:
 
@@ -131,21 +131,21 @@ if (result.Status == RaftOperationStatus.Success)
 }
 ```
 
-The committed index returned as `result.LogIndex` is the same value delivered as `RaftLog.Id` in callbacks.
+`result.LogIndex` gives the committed index. The callbacks deliver the same value as `RaftLog.Id`.
 
-Never use `_RaftSystem` as the log type. Kommander reserves it for its own partition maps, membership records, and split or merge metadata.
+Never use `_RaftSystem` as the log type. Kommander reserves it for its own partition maps, its membership records, and its split and merge metadata.
 
-## Restore From Local Snapshot Plus Deltas
+## Restore From A Local Snapshot And The Deltas
 
-If your application keeps its own local snapshot, record the committed index it includes.
+Your application can keep its own local snapshot. Record the committed index inside that snapshot.
 
-On startup:
+At startup, do these steps:
 
-1. load the local application snapshot
-2. remember its committed index, for example `snapshotIndex`
-3. call `SetMinRetainIndex(0, snapshotIndex + 1)`
-4. let Kommander replay retained logs through `OnLogRestored`
-5. apply only restored logs where `log.Id > snapshotIndex`.
+1. Load the local application snapshot.
+2. Remember its committed index. This example calls it `snapshotIndex`.
+3. Call `SetMinRetainIndex(0, snapshotIndex + 1)`.
+4. Let Kommander replay the retained logs through `OnLogRestored`.
+5. Apply only the restored logs with `log.Id > snapshotIndex`.
 
 Example:
 
@@ -166,29 +166,29 @@ raft.OnLogRestored += async (partitionId, log) =>
 };
 ```
 
-The `log.Id > snapshotIndex` check prevents double-applying deltas that were already folded into your local snapshot.
+The `log.Id > snapshotIndex` check prevents a second application of a delta. Your local snapshot already contains that delta.
 
 ## Retain Floor
 
 `SetMinRetainIndex(partitionId, index)` protects a WAL tail from compaction.
 
-For partition `0` delta state, call it after your local snapshot is durable:
+For the delta state on partition `0`, call it after your local snapshot is durable:
 
 ```csharp
 raft.SetMinRetainIndex(0, snapshotIndex + 1);
 ```
 
-This tells compaction to keep entries at or above the first delta not included in your local snapshot.
+This call tells compaction to keep the entries at the first delta outside your local snapshot, and above it.
 
-Important details:
+The important details are:
 
-- the retain floor is in-memory
-- it resets on process restart
-- call it again after loading your local snapshot
-- `0` or negative values mean no protection
-- the effective compaction boundary is the lower of the checkpoint and the retain floor.
+- The retain floor is in memory.
+- It resets at a process restart.
+- Call it again after you load your local snapshot.
+- A value of `0` or a negative value gives no protection.
+- The effective compaction boundary is the lower of the checkpoint and the retain floor.
 
-For temporary work, use `AcquireRetentionHold` instead of overwriting the single retain floor:
+For temporary work, use `AcquireRetentionHold`. Do not overwrite the single retain floor:
 
 ```csharp
 using IDisposable hold = raft.AcquireRetentionHold(
@@ -199,70 +199,70 @@ using IDisposable hold = raft.AcquireRetentionHold(
 await exporter.CopyUnsnapshottedDeltas(cancellationToken);
 ```
 
-Multiple holds compose safely. Kommander retains down to the lowest active hold index, and disposing one handle releases only that hold. Like `SetMinRetainIndex`, holds are in-memory and must be reacquired after restart.
+Several holds compose safely. Kommander retains down to the lowest index of the active holds. The disposal of one handle releases that hold only. A hold is in memory, in the same way as `SetMinRetainIndex`. You must acquire it again after a restart.
 
-## Below-Floor Repair
+## Repair Below The Floor
 
-A node is below the floor when it needs log entries that the leader has already compacted.
+A node is below the floor when it needs log entries that the leader already compacted.
 
-If `IRaftSystemStateTransfer` is registered, Kommander can repair it:
+Kommander can repair that node with `IRaftSystemStateTransfer` registered:
 
-1. the leader exports whole application state through `ExportPartitionState(0, checkpointIndex, ct)`
-2. Kommander streams the snapshot to the follower
-3. the follower imports it through `ImportPartitionState(0, stream, ct)`
-4. Kommander seeds a committed checkpoint at that index
-5. normal replication resumes after the checkpoint.
+1. The leader exports the whole application state through `ExportPartitionState(0, checkpointIndex, ct)`.
+2. Kommander streams the snapshot to the follower.
+3. The follower imports it through `ImportPartitionState(0, stream, ct)`.
+4. Kommander seeds a committed checkpoint at that index.
+5. The normal replication continues after the checkpoint.
 
-The application implements export and import. Kommander handles the snapshot trigger, chunking, transport, and checkpoint seeding.
+The application implements the export and the import. Kommander controls the snapshot trigger, the division into chunks, the transport, and the checkpoint seed.
 
 ## Install Semantics
 
-System-state snapshots use `SnapshotKind.SystemState`.
+A system-state snapshot uses `SnapshotKind.SystemState`.
 
-The leader sends the snapshot as chunks. The follower buffers those chunks under a bounded receive session and installs the completed snapshot on partition `0`'s single-writer executor.
+The leader sends the snapshot as chunks. The follower buffers those chunks in a bounded receive session. It then installs the complete snapshot on the single-writer executor of partition `0`.
 
-That install path matters because it serializes:
+That install path is important, because it serializes these steps:
 
-- stale-leader and term validation
+- the validation of a stale leader and the term
 - your `ImportPartitionState` callback
 - the durable `CommittedCheckpoint` boundary
-- the commit and apply frontier update that lets backfill resume after the snapshot.
+- the update of the commit frontier and the apply frontier, which lets the backfill continue after the snapshot.
 
-The import method must be idempotent for the same `(partitionId, snapshotIndex, lastIncludedTerm)`. If the import succeeds but the WAL checkpoint boundary cannot be written, the leader receives failure and retries the same snapshot.
+The import method must be idempotent for the same `(partitionId, snapshotIndex, lastIncludedTerm)`. The import can succeed while the WAL checkpoint boundary write fails. The leader then receives a failure. It retries the same snapshot.
 
-Snapshot receive buffering is controlled by:
+These settings control the buffer for a snapshot receive:
 
 | Setting | Default | Description |
 | --- | ---: | --- |
-| `SnapshotReceiveSessionTtl` | `30 s` | Idle receive sessions are expired lazily on later snapshot traffic. |
-| `SnapshotMaxPendingSessions` | `8` | Maximum concurrent snapshot receive sessions on one node. |
-| `SnapshotMaxPendingBytes` | `512 MiB` | Maximum bytes buffered across active sessions and completed buffers still installing. |
-| `AllowLegacySnapshotSenders` | `false` | Compatibility switch for older peers that do not send snapshot leader and boundary metadata. |
+| `SnapshotReceiveSessionTtl` | `30 s` | Kommander expires an idle receive session lazily, on later snapshot traffic. |
+| `SnapshotMaxPendingSessions` | `8` | The maximum number of concurrent snapshot receive sessions on one node. |
+| `SnapshotMaxPendingBytes` | `512 MiB` | The maximum bytes in the buffer across the active sessions and the completed buffers in their install. |
+| `AllowLegacySnapshotSenders` | `false` | A compatibility switch for an older peer. That peer does not send the leader metadata and the boundary metadata of a snapshot. |
 
-Keep `AllowLegacySnapshotSenders` disabled in normal clusters. Enable it only for a controlled rolling compatibility window.
+Keep `AllowLegacySnapshotSenders` disabled in a normal cluster. Enable it for a controlled rolling compatibility window only.
 
 ## Checkpoints And Compaction
 
-Compaction is still checkpoint-driven. If you never replicate checkpoints, little or no WAL history becomes eligible for removal.
+The checkpoints still drive the compaction. Without a replicated checkpoint, little or no WAL history becomes eligible for removal.
 
-For partition `0` delta state:
+For the delta state on partition `0`:
 
 ```csharp
 await raft.ReplicateCheckpoint(0, cancellationToken);
 ```
 
-The checkpoint says old history may be removable. The retain floor says how far compaction may actually go without deleting deltas that your local snapshot still needs for offline replay.
+The checkpoint says that the old history can be removable. The retain floor says how far the compaction can go. The compaction must not delete a delta that your local snapshot still needs for an offline replay.
 
 ## Testing Checklist
 
-Useful tests for an application integration:
+These tests are useful for an application integration:
 
-- replicate a delta and assert `RaftReplicationResult.LogIndex` matches the `RaftLog.Id` callback value
-- persist a local snapshot, restart, and apply only restored logs above the snapshot index
-- call `SetMinRetainIndex(0, snapshotIndex + 1)` and verify compaction keeps the unsnapshotted tail
-- acquire multiple retention holds and verify releasing one hold does not remove another consumer's protected tail
-- drive a follower below the compaction floor and assert `ImportPartitionState` is called
-- verify `_RaftSystem` is never used by application writes.
+- Replicate a delta. Assert that `RaftReplicationResult.LogIndex` matches the `RaftLog.Id` value in the callback.
+- Persist a local snapshot. Restart. Apply only the restored logs above the snapshot index.
+- Call `SetMinRetainIndex(0, snapshotIndex + 1)`. Verify that the compaction keeps the tail outside the snapshot.
+- Acquire several retention holds. Verify that the release of one hold keeps the protected tail of another consumer.
+- Drive a follower below the compaction floor. Assert that Kommander calls `ImportPartitionState`.
+- Verify that no application write uses `_RaftSystem`.
 
 ## Related Reading
 

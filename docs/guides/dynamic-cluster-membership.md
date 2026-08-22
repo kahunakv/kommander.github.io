@@ -2,49 +2,49 @@
 
 Kommander can change the cluster roster at runtime.
 
-That means a node can:
+A node can do these operations:
 
 - join an existing cluster
 - start as a non-voting learner
 - catch up
-- be promoted automatically to a voter
+- receive an automatic promotion to a voter
 - leave gracefully
-- be evicted later if failure detection is enabled and supported by the transport.
+- receive an eviction later, if the failure detection is enabled and the transport supports it.
 
-This page covers the user-facing behavior.
+This page gives the behavior that a user can see.
 
 ## The Core Idea
 
 Kommander keeps one authoritative cluster roster on the system partition, partition `0`.
 
-That roster is a committed Raft record, not just a discovery snapshot and not just gossip state.
+That roster is a committed Raft record. It is not a discovery snapshot. It is not gossip state. Gossip is the exchange of membership messages between nodes.
 
-The practical implication is:
+The practical results are:
 
-- quorum is computed from the committed roster
-- learners do not count toward quorum
-- discovery helps nodes find contact points but does not define live membership
-- gossip can spread the roster faster but does not decide who may vote.
-- append-log and snapshot leader RPCs from endpoints outside the committed roster are rejected unless they are already the accepted leader for that term.
+- Kommander computes the quorum from the committed roster.
+- A learner does not count toward the quorum.
+- Discovery helps a node find the contact points. It does not define the live membership.
+- Gossip can spread the roster faster. It does not decide the nodes that can vote.
+- Kommander rejects an append-log RPC or a snapshot RPC from an endpoint outside the committed roster. The one exception is an endpoint that is already the accepted leader of that term.
 
-If you only remember one thing, remember this: membership truth comes from Raft, not from discovery or gossip.
+Remember one thing above all: the membership truth comes from Raft. It does not come from discovery or gossip.
 
 ## Member Roles
 
-Each member is in one of these roles:
+Each member has one of these roles:
 
-- `Learner`: receives replication but does not vote and cannot win elections.
-- `Voter`: counts toward quorum and participates fully in elections.
-- `Leaving`: a graceful-leave state. The node stops campaigning immediately, but it still counts toward quorum until removal commits.
-- `NotMember`: only returned locally by `LocalRole` when the node is not present in the committed roster.
+- `Learner`: The member receives the replication. It does not vote. It cannot win an election.
+- `Voter`: The member counts toward the quorum. It takes a full part in the elections.
+- `Leaving`: This is a committed decommission state for a drain-first leave. The node stops its campaigns. It stays in the peer lists, so the evacuation can catch up from it. It can return to `Voter` if the drain cannot finish.
+- `NotMember`: `LocalRole` returns this role locally when the committed roster does not contain the node.
 
-Typical lifecycle:
+The typical lifecycle is:
 
 `Learner -> Voter -> Leaving -> removed`
 
-## Public API Surface
+## Public API
 
-The main membership-facing APIs are on `IRaft`:
+`IRaft` gives the primary membership methods:
 
 ```csharp
 ClusterMembership roster = raft.GetMembership();
@@ -68,11 +68,11 @@ Each `ClusterMember` contains:
 - `Role`
 - `JoinedVersion`
 
-`MembershipVersion` is the monotonic roster version. Every committed add, promote, or remove increments it.
+`MembershipVersion` is the monotonic version of the roster. Each committed add, promote, or remove increments it.
 
-## Watching Membership Changes
+## Watch The Membership Changes
 
-Use `OnMembershipChanged` when your application needs to observe roster changes for logging, metrics, dashboards, or automation.
+Use `OnMembershipChanged` when your application must observe the roster changes. This is useful for logs, metrics, dashboards, or automation.
 
 ```csharp
 raft.OnMembershipChanged += membership =>
@@ -82,17 +82,17 @@ raft.OnMembershipChanged += membership =>
 };
 ```
 
-Important behavior:
+The important behavior is:
 
-- the callback receives a snapshot of the full roster
-- it fires when this node advances to a newer committed membership version
-- handlers must stay quick and must not block the system coordinator loop.
+- The callback receives a snapshot of the full roster.
+- It fires when this node advances to a newer committed membership version.
+- Each handler must stay fast. It must not block the loop of the system coordinator.
 
-## Joining A Cluster
+## Join A Cluster
 
-You can join either through discovery or through explicit seed endpoints.
+You can join through discovery. You can also join through explicit seed endpoints.
 
-Seed-based join:
+A join with seeds:
 
 ```csharp
 using CancellationTokenSource joinTimeout = new(TimeSpan.FromSeconds(30));
@@ -103,7 +103,7 @@ await raft.JoinCluster(
 );
 ```
 
-Discovery-based join:
+A join with discovery:
 
 ```csharp
 using CancellationTokenSource joinTimeout = new(TimeSpan.FromSeconds(30));
@@ -111,130 +111,166 @@ using CancellationTokenSource joinTimeout = new(TimeSpan.FromSeconds(30));
 await raft.JoinCluster(joinTimeout.Token);
 ```
 
-What happens conceptually:
+The sequence is:
 
-1. the existing cluster commits `AddMember` for the new endpoint
-2. the new node enters as a `Learner`
-3. the leader replicates state to it
-4. once it stays sufficiently caught up, the leader promotes it to `Voter`.
+1. The existing cluster commits `AddMember` for the new endpoint.
+2. The new node enters as a `Learner`.
+3. The leader replicates the state to it.
+4. The leader promotes it to `Voter` after its catch-up stays sufficient.
 
-`JoinCluster(...)` does not return as soon as the node is merely known. It waits until the node becomes a committed voter, or until timeout/cancellation triggers.
+`JoinCluster(...)` does not return when the cluster only knows the node. It waits for the node to become a committed voter. It also returns at a timeout or a cancellation.
 
-## Graceful Leave
+## Graceful Leave And Decommission
 
-A node can leave with:
+A node can leave with this call:
 
 ```csharp
 await raft.LeaveCluster(dispose: true);
 ```
 
-Behavior:
+`LeaveCluster` is the helper for a shutdown. Its behavior is:
 
-1. the node marks itself `Leaving`
-2. it stops campaigning immediately
-3. the cluster commits `RemoveMember(self)` on partition `0`
-4. the node shuts down.
+1. The node marks itself `Leaving`.
+2. It stops its campaigns immediately.
+3. The cluster commits `RemoveMember(self)` on partition `0`.
+4. The node shuts down.
 
-If the node is the system-partition leader, it removes itself under the old quorum and then steps down.
+The node can be the system-partition leader. It then removes itself under the old quorum. After that, it steps down.
+
+For a controlled decommission, use `RequestLeaveAsync` first:
+
+```csharp
+LeaveClusterResult result = await raft.RequestLeaveAsync(cancellationToken);
+
+if (result.Left)
+    await raft.LeaveCluster(dispose: true, cancellationToken);
+```
+
+`RequestLeaveAsync` asks the cluster to remove the local node from the committed roster. It does not stop the node. An operator or a host service can then examine the result before the end of the process.
+
+`RequestLeaveAsync` uses a drain-first decommission in one case. That case is an active replica placement with the leaving node in the committed partition map:
+
+1. The cluster commits the member role as `Leaving`.
+2. The placement passes add replacement replicas on the nodes that stay.
+3. The learners catch up. The cluster promotes them.
+4. Kommander removes the replicas on the leaving node.
+5. The final `RemoveMember` commits when no active range names the leaving node.
+
+This sequence keeps the durability of each partition during a planned removal. The leaving node stays available as a replication source during the drain. Kommander stops its campaigns while its committed role is `Leaving`.
+
+The important results are:
+
+- `Committed`: Kommander removed the node from the roster.
+- `NotAMember`: The roster did not contain the node.
+- `RefusedInsufficientVoters`: The removal leaves the cluster with no voter.
+- `RefusedDrainInProgress`: Another member drains now. Retry after that drain ends.
+- `NotInitialized`: The local node has no committed roster to leave yet.
+- `NoLeader`: Kommander could not resolve the system-partition leader.
+- `Timeout`: The cancellation token or the deadline of the caller bounded the request.
+- `DrainTimedOut`: The evacuation did not finish before `DecommissionDrainTimeout`. The role returned to `Voter`.
+
+`LeaveClusterResult.Left` is true for `Committed` and for `NotAMember`. `LeaveClusterResult.Drained` tells you if the evacuation moved every replica that named the node before the removal. After a refused request or a failed request, the node stays a normal participant, or it becomes one again. After a committed removal, it stops its campaigns. Shut it down, or restart it through the normal join path.
+
+Only one member can be `Leaving` at a time. Do not use RF 1 for a planned decommission workflow. A range can have the leaving node as its only voter. That range cannot drain safely after a loss of leadership during the drain.
 
 ## Automatic Promotion
 
-Promotion from learner to voter is automatic.
+The promotion from a learner to a voter is automatic.
 
-The leader promotes a learner only after it stays close enough to the committed log for long enough. That is controlled by:
+The leader promotes a learner after two conditions. The learner must stay sufficiently close to the committed log. It must hold that position for a sufficient time. These settings control the conditions:
 
 - `LearnerPromotionLag`
 - `LearnerPromotionStableWindow`
 
-This is what lets nodes join without harming quorum availability during catch-up.
+Therefore, a node can join without harm to the quorum availability during its catch-up.
 
 ## Catch-Up And Snapshot Repair
 
-Kommander uses bounded log backfill to catch learners up.
+Kommander uses bounded log backfill for the catch-up of a learner. Backfill is the transfer of missing committed log entries from the leader.
 
-That works while the learner still needs entries above the current compaction floor. If the WAL has already compacted away the history a learner needs, the leader switches to snapshot installation when the relevant application transfer hook is registered.
+Backfill works while the learner needs entries above the current compaction floor. The WAL can already compact the history that a learner needs. The WAL is the write-ahead log. The leader then changes to snapshot installation. This needs the relevant application transfer hook.
 
 In practical terms:
 
-- learners first catch up from retained committed log history
-- partition `0` application deltas can be repaired through `IRaftSystemStateTransfer`
-- user partition state movement uses `IRaftStateMachineTransfer`
-- a heavily compacted cluster can still block promotion if the needed transfer hook is missing
-- a join timeout can mean the learner could not catch up from retained WAL and could not install a snapshot.
+- A learner catches up from the retained committed log history first.
+- `IRaftSystemStateTransfer` can repair the application deltas on partition `0`.
+- `IRaftStateMachineTransfer` moves the state of a user partition.
+- A heavily compacted cluster can still block a promotion when the necessary transfer hook is missing.
+- A join timeout can mean two things. The learner could not catch up from the retained WAL. The learner could not install a snapshot.
 
-See [Log Backfill And Catch-Up](./log-backfill-and-catch-up.md) for ordinary follower catch-up and [Snapshot Installation](../operations/snapshot-installation.md) for the below-floor repair path.
+See [Log Backfill And Catch-Up](./log-backfill-and-catch-up.md) for the ordinary catch-up of a follower. See [Snapshot Installation](../operations/snapshot-installation.md) for the repair path below the floor.
 
 ## Failure Detection And Eviction
 
-Kommander also has a SWIM-style failure detector:
+Kommander also has a failure detector in the SWIM style:
 
-- direct ping
-- indirect ping through peers
-- `Suspect`
-- then `Dead`
-- then eventual eviction by the system-partition leader.
+- a direct ping
+- an indirect ping through the peers
+- the `Suspect` state
+- then the `Dead` state
+- then an eviction by the system-partition leader.
 
 For the full liveness model, see [SWIM Failure Detection](./swim-failure-detection.md).
 
-Kommander enables SWIM by default:
+Kommander enables SWIM by default. `PingInterval` defaults to `1 second`.
 
-`PingInterval` defaults to `1 second`.
+Set `PingInterval` to `0` or lower only when you want no failure detection. Then also set `EnableQuiescence = false`. A quiesced partition depends on SWIM to detect a dead leader node.
 
-Set `PingInterval` to `0` or lower only when you intentionally want to disable failure detection. If you do that, also set `EnableQuiescence = false`, because quiesced partitions rely on SWIM to notice a dead leader node.
+## Transport Support
 
-## Transport Support Today
+The transport support is:
 
-Current practical state:
+- The roster commits and the join flow work on `InMemory`, gRPC, and REST.
+- The RPCs for a graceful leave work on `InMemory`, gRPC, and REST.
+- The cross-partition remote lag checks for a learner promotion work on `InMemory`, gRPC, and REST.
+- The snapshot installation works on `InMemory`, gRPC, and REST.
+- The direct SWIM probe and the indirect SWIM probe work on `InMemory`, gRPC, and REST.
+- The gossip anti-entropy works on `InMemory`, gRPC, and REST.
 
-- roster commits and join flow work on `InMemory`, `gRPC`, and `REST`
-- graceful leave RPCs are wired on `InMemory`, `gRPC`, and `REST`
-- cross-partition remote lag checks for learner promotion are wired on `InMemory`, `gRPC`, and `REST`
-- snapshot installation is wired on `InMemory`, `gRPC`, and `REST`
-- SWIM direct and indirect ping probing is wired on `InMemory`, `gRPC`, and `REST`
-- gossip anti-entropy is wired on `InMemory`, `gRPC`, and `REST`.
+For a gRPC cluster and a REST cluster today, this means:
 
-What that means for gRPC and REST clusters today:
-
-- joining works
-- graceful leave works through the transport RPC path
-- learner promotion can use remote follower lag checks instead of relying only on local observations
-- below-floor repair can use the snapshot install RPC when the relevant transfer hook is registered
-- committed membership changes still replicate through Raft
-- SWIM failure detection works through the transport
-- gossip-based roster convergence and leader-balancer load reports work through the transport.
+- A join works.
+- A graceful leave works through the transport RPC path.
+- A learner promotion can use remote checks of the follower lag. It does not depend on local observations only.
+- A repair below the floor can use the snapshot install RPC. This needs the relevant transfer hook.
+- The committed membership changes still replicate through Raft.
+- The SWIM failure detection works through the transport.
+- The roster convergence through gossip works through the transport. The load reports of the leader balancer also work.
 
 ## Important Status Values
 
-Membership operations can surface these relevant statuses:
+A membership operation can give these relevant statuses:
 
 - `Success`
 - `StaleMembership`
 - `ConcurrentMembershipChange`
 - `InsufficientVoters`
 
-How to interpret them:
+Interpret them in this way:
 
-- `StaleMembership`: the roster changed since the operation was computed. Re-read membership and retry.
-- `ConcurrentMembershipChange`: another membership change is already in flight. Retry after it commits.
-- `InsufficientVoters`: removal would make the cluster unavailable. Do not retry blindly.
+- `StaleMembership`: The roster changed after the computation of the operation. Read the membership again. Then retry.
+- `ConcurrentMembershipChange`: Another membership change is in flight. Retry after it commits.
+- `InsufficientVoters`: The removal makes the cluster unavailable. Do not retry without an examination.
 
 ## Eviction Races And Auto-Rejoin
 
-Dead-member eviction is intentionally conservative.
+The eviction of a dead member is conservative on purpose.
 
-`DeadMemberEvictionGrace` defaults to `2 minutes`. When a member has stayed `Dead` past that grace period, the system-partition leader performs one final direct probe before committing `RemoveMember`. If the endpoint responds, Kommander marks it alive and skips eviction for that pass.
+`DeadMemberEvictionGrace` defaults to `2 minutes`. A member can stay `Dead` after that grace period. The system-partition leader then makes one final direct probe before it commits `RemoveMember`. If the endpoint responds, Kommander marks it alive. It then skips the eviction in that pass.
 
-This avoids evicting a node that briefly crossed into `Dead` during a slow restart but became reachable again before removal committed.
+This prevents the eviction of a node that entered the `Dead` state for a short time during a slow restart. That node becomes reachable again before the commit of the removal.
 
-If a running node discovers that it was removed from the committed roster, `EnableAutoRejoin = true` lets it automatically run the join flow again. The node re-enters as a learner and is promoted back to voter after normal catch-up. Auto-rejoin is suppressed during graceful leave and before a node has ever finished joining.
+A node that runs can find that Kommander removed it from the committed roster. With `EnableAutoRejoin = true`, the node runs the join flow again automatically. It enters as a learner. It returns to the voter role after a normal catch-up. Kommander suppresses the auto-rejoin during a graceful leave. It also suppresses it before the first successful join of the node.
 
-Disable auto-rejoin only when your operational model intentionally removes live nodes remotely and expects those processes to remain outside the cluster while still running.
+Disable the auto-rejoin only for one operational model. In that model, you remove a live node remotely on purpose. You expect that process to stay outside the cluster while it runs.
 
-## Configuration Knobs
+## Configuration Settings
 
-The main membership-related settings are:
+The primary settings for the membership are:
 
 - `BackfillThreshold`
+- `BackfillEnabled`
+- `FollowerSaturationBackoff`
 - `MaxBackfillEntriesPerRound`
 - `LearnerPromotionLag`
 - `LearnerPromotionStableWindow`
@@ -246,18 +282,20 @@ The main membership-related settings are:
 - `SuspicionTimeout`
 - `DeadMemberEvictionGrace`
 - `EnableAutoRejoin`
+- `DecommissionDrainTimeout`
+- `PlacementPassInterval`
 - `EnableQuiescence`
 - `QuiesceAfter`
 
-See [Configuration](../reference/configuration.md) for defaults and operational notes.
+See [Configuration](../reference/configuration.md) for the defaults and the operational notes.
 
 ## Practical Advice
 
-- Treat discovery as a way to find contact points, not as the source of truth for who can vote.
-- Wire `OnMembershipChanged` into logs or metrics so every roster change is observable.
-- Keep `EnableQuiescence = false` if you intentionally disable SWIM with `PingInterval = 0`.
-- If a learner never becomes a voter, inspect catch-up and compaction behavior before assuming elections are broken.
-- Partition `0` is reserved for Kommander system state. Membership changes are committed there, not through user partitions.
+- Use discovery to find the contact points. It is not the source of truth for the nodes that can vote.
+- Connect `OnMembershipChanged` to your logs or your metrics. Every roster change is then observable.
+- Keep `EnableQuiescence = false` if you disable SWIM with `PingInterval = 0`.
+- A learner can stay a learner. Examine the catch-up behavior and the compaction behavior first. Do not assume that the elections are broken.
+- Partition `0` is reserved for the system state of Kommander. The membership changes commit there. They do not commit through a user partition.
 
 ## Related Reading
 

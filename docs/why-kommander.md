@@ -88,7 +88,7 @@ Checkpoints and bounded compaction keep old recoverable history under control. P
 
 ### Security And Diagnostics
 
-The network transports support TLS-aware configuration, shared-secret request authentication, replay protection, and certificate thumbprint controls.
+The network transports support TLS-aware configuration, shared-secret request authentication, replay protection, and mutual TLS for per-node transport identity. gRPC and REST deployments can use client certificates and SHA-256 thumbprint pinning when cluster nodes need to authenticate each other during the TLS handshake.
 
 Metrics and structured logs expose partition queue depth, WAL queue depth and batching, operation latency by class, stale completions, heartbeat and election delay, leader-balancer behavior, and admission rejections. The goal is to make slow or degraded behavior explainable during load tests and production incidents.
 

@@ -1,38 +1,38 @@
 # Merging Idle Partitions
 
-Merge partitions when the cluster has more user partitions than the workload really needs.
+Merge two partitions when the cluster has more user partitions than the workload needs.
 
-Typical reasons:
+Typical reasons are:
 
-- two adjacent hash ranges are both lightly loaded
-- a past split solved a traffic spike that no longer exists
-- you want fewer active leaders and less partition overhead
-- a drained source partition should be folded back into its neighbor.
+- Two adjacent hash ranges both have a light load.
+- An earlier split solved a traffic spike that no longer exists.
+- You want fewer active leaders and less partition overhead.
+- A drained source partition must go back into its neighbor.
 
-This guide explains the application-facing merge flow. For the full lifecycle API, see [Elastic Partitions](./elastic-partitions.md).
+This guide gives the merge flow for the application. For the full lifecycle API, see [Elastic Partitions](./elastic-partitions.md).
 
 ## What A Merge Does
 
 A merge combines two user partitions into one survivor partition.
 
-For `HashRange` partitions:
+For a `HashRange` partition:
 
-- the ranges must be adjacent
-- the survivor absorbs the source range
-- the source partition is drained and then removed.
+- The two ranges must be adjacent.
+- The survivor absorbs the source range.
+- Kommander drains the source partition, then removes it.
 
-Kommander does not merge the system partition. Partition `0` is reserved and cannot participate in user merges.
+Kommander does not merge the system partition. Partition `0` is reserved. It can never take part in a user merge.
 
 ## Leadership Requirement
 
-Unlike create and remove, merge needs leadership on **both** partitions involved.
+A create operation and a remove operation need one leader. A merge needs the leadership of **both** partitions.
 
-That means the local node must be leader for:
+Therefore, the local node must be the leader of these partitions:
 
 - the survivor partition
 - the source partition.
 
-If leadership is split across nodes, move leadership first or call the merge from the node that already leads both partitions.
+Two different nodes can hold the two leaderships. Move one leadership first. You can also call the merge from the node that already leads both partitions.
 
 ## Basic Merge Example
 
@@ -51,57 +51,57 @@ RaftPartitionLifecycleResult result = await raft.MergePartitionsAsync(
 
 In this example:
 
-- partition `2` survives
-- partition `3` is drained
-- the final active hash range belongs to partition `2`.
+- Partition `2` survives.
+- Kommander drains partition `3`.
+- The final active hash range belongs to partition `2`.
 
-## What Changes For Callers
+## What Changes For The Callers
 
-After a merge:
+Do these steps after a merge:
 
-1. refresh the partition map
-2. stop routing new work to the removed source partition
-3. retry stale writes that fail with `PartitionMoved`
-4. rebalance any local workers or caches keyed by partition id.
+1. Refresh the partition map.
+2. Stop the route of new work to the removed source partition.
+3. Retry each stale write that fails with `PartitionMoved`.
+4. Rebalance the local workers or the caches that use the partition id as their key.
 
-If your application caches `partitionId -> worker` assignments, this is the moment to tear down the source worker and move traffic to the survivor.
+Your application can cache an assignment from a partition id to a worker. This is the moment to stop the source worker. Move that traffic to the survivor.
 
 ## State Transfer Considerations
 
-Like splits, merges can require application-level state transfer.
+A merge can need a state transfer at the application level. A split has the same requirement.
 
-If your state machine keeps partition-local indexes, projections, or caches, the survivor may need to absorb state that previously belonged to the source partition.
+Your state machine can keep an index, a projection, or a cache for each partition. The survivor then can need the state of the source partition.
 
-Use:
+Use this method:
 
 ```csharp
 raft.RegisterStateMachineTransfer(new MyStateMachineTransfer());
 ```
 
-Treat the merge as both:
+Treat the merge as two events:
 
-- a partition-map change
-- an application-state movement event.
+- a change of the partition map
+- a move of the application state.
 
 ## A Safe Merge Workflow
 
 For most applications, this is the practical sequence:
 
-1. verify both partitions are lightly loaded
-2. verify the local node leads both partitions
-3. call `MergePartitionsAsync`
-4. refresh partition routing everywhere
-5. watch for `PartitionMoved` retries to settle
-6. verify only the survivor remains active.
+1. Make sure that both partitions have a light load.
+2. Make sure that the local node leads both partitions.
+3. Call `MergePartitionsAsync`.
+4. Refresh the partition routing on all the nodes.
+5. Watch the `PartitionMoved` retries until they stop.
+6. Make sure that only the survivor stays active.
 
 ## Good Fit
 
-Merges are a good fit when:
+A merge is a good fit in these conditions:
 
-- earlier splits left too many mostly idle partitions
-- the cluster has unnecessary leadership overhead
-- adjacent ranges can be recombined cleanly
-- the application can update routing and state ownership after the change.
+- Earlier splits left too many mostly idle partitions.
+- The cluster has unnecessary leadership overhead.
+- You can recombine the adjacent ranges cleanly.
+- The application can update its routing and its state ownership after the change.
 
 ## Related Reading
 

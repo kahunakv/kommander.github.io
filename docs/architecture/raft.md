@@ -32,6 +32,16 @@ The log index is the committed position of an entry in the partition's ordered h
 
 Followers that fall behind are repaired through bounded log backfill. The live replication path handles followers that are keeping up; the backfill path sends missing committed entries with a log-matching anchor so a follower cannot grow gaps or keep a divergent uncommitted tail. See [Log Backfill And Catch-Up](../guides/log-backfill-and-catch-up.md).
 
+## Safety Details Kommander Handles
+
+Several edge cases are handled inside the Raft runtime so application code can stay focused on applying committed commands:
+
+- Higher-term votes and append acknowledgements fence old leaders quickly, so a node that learns about a newer term steps down instead of continuing to publish stale leadership.
+- Pipelined commits are applied in log order on the leader, even when a later proposal reaches quorum before an earlier one.
+- Prior-term entries inherited by a newly elected leader are drained through the promotion barrier before leadership is published to applications.
+- Unresolved proposed WAL entries are retried or repaired through the Raft/backfill path instead of leaving followers with holes.
+- The hybrid logical clock allocates unique proposal timestamps under concurrent callers, preserving a stable ordering key for tickets and diagnostics.
+
 ## Idle Partitions
 
 When partition quiescence is enabled, an idle partition can stop sending per-partition heartbeats after `QuiesceAfter`. The leader sends a quiesce marker, followers stay quiet while SWIM reports the leader node as alive, and any real write wakes the partition. See [Partition Quiescence](../guides/partition-quiescence.md).

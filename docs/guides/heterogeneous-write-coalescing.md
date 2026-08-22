@@ -1,8 +1,8 @@
 # Heterogeneous Write Coalescing
 
-`ReplicateEntries` lets an application send a batch of differently typed entries to one partition in one call.
+`ReplicateEntries` lets an application send a batch of entries with different types to one partition in one call.
 
-Use it when your service naturally produces several independent records at once, such as:
+Use it when your service makes several independent records at one time. Examples are:
 
 - key/value updates
 - lock records
@@ -10,15 +10,15 @@ Use it when your service naturally produces several independent records at once,
 - metadata entries
 - a transaction prepare record.
 
-`ReplicateLogs` is still the right API when every payload has the same log type and the same commit behavior. `ReplicateEntries` is for mixed batches where each entry needs its own type, result, and generation fence.
+`ReplicateLogs` is still the correct API when every payload has the same log type and the same commit behavior. `ReplicateEntries` is for a mixed batch. Each entry in that batch needs its own type, its own result, and its own generation fence. A generation fence protects a partition from a write with an old generation number.
 
-## Why Use It
+## Why To Use It
 
 With `ReplicateLogs`, one call has one partition, one log type, one `autoCommit` value, one generation fence, and one result for the proposal.
 
-If a consumer has multiple unrelated record types, it usually has to make multiple calls.
+A consumer with several unrelated record types must usually make several calls.
 
-`ReplicateEntries` accepts one list where each entry carries its own metadata:
+`ReplicateEntries` accepts one list. Each entry in that list carries its own metadata:
 
 ```csharp
 RaftBatchReplicationResult result = await raft.ReplicateEntries(
@@ -33,7 +33,7 @@ RaftBatchReplicationResult result = await raft.ReplicateEntries(
 );
 ```
 
-Kommander can turn that into fewer proposals and fewer replication round trips, while returning one result per input entry.
+Kommander can change that list into fewer proposals and fewer replication round trips. It still returns one result for each input entry.
 
 ## Batch Shape
 
@@ -48,10 +48,10 @@ public readonly record struct RaftProposalEntry(
 );
 ```
 
-The batch targets one partition. Inside that batch, the shape is:
+The batch has one target partition. Inside that batch, the shape is:
 
-- a leading auto-commit group
-- optionally followed by one manual group.
+- a first group of auto-commit entries
+- one optional manual group after it.
 
 Valid examples:
 
@@ -68,11 +68,11 @@ Invalid examples:
 [ manual, auto ]
 ```
 
-The manual group must be last because rollback removes a suffix. If a manual entry sat in the middle, rolling it back could also remove entries appended after it.
+The manual group must be last, because a rollback removes a suffix. A manual entry in the middle causes a risk. Its rollback can also remove the entries after it.
 
 ## Auto-Commit Batch
 
-An auto-commit-only batch is the common case:
+A batch with auto-commit entries only is the common case:
 
 ```csharp
 RaftBatchReplicationResult result = await raft.ReplicateEntries(
@@ -88,18 +88,18 @@ RaftBatchReplicationResult result = await raft.ReplicateEntries(
 );
 ```
 
-When it succeeds:
+After a successful call:
 
-- `result.Success` is `true`
-- `result.Status` is `Success`
-- each admitted entry has a `RaftEntryResult`
-- auto-commit entries have `Status = Success`
-- auto-commit entries have `Ticket = HLCTimestamp.Zero`
-- each entry reports its own `LogIndex`.
+- `result.Success` is `true`.
+- `result.Status` is `Success`.
+- Each admitted entry has a `RaftEntryResult`.
+- Each auto-commit entry has `Status = Success`.
+- Each auto-commit entry has `Ticket = HLCTimestamp.Zero`.
+- Each entry reports its own `LogIndex`.
 
-The result list is index-aligned to the input list. `result.Entries[2]` describes the third input entry.
+The index of the result list agrees with the index of the input list. `result.Entries[2]` describes the third input entry.
 
-## Trailing Manual Group
+## Manual Group At The End
 
 A batch can end with manual entries:
 
@@ -116,15 +116,15 @@ RaftBatchReplicationResult result = await raft.ReplicateEntries(
 );
 ```
 
-The auto prefix commits first. The manual suffix is proposed after that and remains pending.
+The auto prefix commits first. Kommander proposes the manual suffix after that. The manual suffix then stays pending.
 
-Manual entries report:
+A manual entry reports these values:
 
 - `Status = Pending`
-- their assigned `LogIndex`
+- its assigned `LogIndex`
 - a shared ticket.
 
-Use `result.TicketId` to finish the manual group:
+Use `result.TicketId` to complete the manual group:
 
 ```csharp
 HLCTimestamp ticket = result.TicketId;
@@ -132,15 +132,15 @@ HLCTimestamp ticket = result.TicketId;
 await raft.CommitLogs(1, ticket, cancellationToken);
 ```
 
-Or roll it back:
+You can also roll it back:
 
 ```csharp
 await raft.RollbackLogs(1, ticket, cancellationToken);
 ```
 
-The manual group is a clean suffix, so rolling it back does not remove the already committed auto prefix.
+The manual group is a clean suffix. Therefore, its rollback does not remove the auto prefix that already committed.
 
-## Per-Entry Generation Fencing
+## Generation Fence For Each Entry
 
 Each entry has its own `ExpectedGeneration`.
 
@@ -157,20 +157,20 @@ RaftBatchReplicationResult result = await raft.ReplicateEntries(
 );
 ```
 
-Generation behavior:
+The generation behavior is:
 
-- `ExpectedGeneration = 0` disables the fence for that entry
-- a matching nonzero generation admits the entry
-- a stale nonzero generation drops only that entry with `PartitionMoved`
-- siblings can still commit.
+- `ExpectedGeneration = 0` disables the fence for that entry.
+- A generation above zero that matches admits the entry.
+- A stale generation above zero drops that entry only, with `PartitionMoved`.
+- The other entries can still commit.
 
-If every entry is fenced out, nothing is appended and the overall result reports `PartitionMoved`.
+The fence can reject every entry. Kommander then appends nothing. The overall result reports `PartitionMoved`.
 
-This is useful with elastic partitions, where a key range can move after a split or merge. Callers can inspect per-entry results, refresh the partition map for stale entries, and retry only the entries that moved.
+This behavior is useful with elastic partitions, because a key range can move after a split or a merge. A caller can examine the result of each entry. It can then refresh the partition map for the stale entries. It can retry only the entries that moved.
 
-## Reading Results
+## Read The Results
 
-`ReplicateEntries` returns `RaftBatchReplicationResult`:
+`ReplicateEntries` returns a `RaftBatchReplicationResult`:
 
 ```csharp
 public sealed class RaftBatchReplicationResult
@@ -188,65 +188,65 @@ public readonly record struct RaftEntryResult(
 );
 ```
 
-Per-entry status:
+The status of each entry is:
 
 | Status | Meaning | `LogIndex` | `Ticket` |
 | --- | --- | ---: | --- |
-| `Success` | Auto-commit entry was appended and committed. | Assigned log index | `HLCTimestamp.Zero` |
-| `Pending` | Manual entry was appended and is waiting for `CommitLogs` or `RollbackLogs`. | Assigned log index | Shared manual ticket |
-| `PartitionMoved` | Entry was fenced out and not appended. | `-1` | `HLCTimestamp.Zero` |
-| Other status | Entry was not appended because the batch or proposal failed. | `-1` | `HLCTimestamp.Zero` |
+| `Success` | Kommander appended and committed the auto-commit entry. | The assigned log index | `HLCTimestamp.Zero` |
+| `Pending` | Kommander appended the manual entry. The entry waits for `CommitLogs` or `RollbackLogs`. | The assigned log index | The shared manual ticket |
+| `PartitionMoved` | The fence rejected the entry. Kommander did not append it. | `-1` | `HLCTimestamp.Zero` |
+| Other status | Kommander did not append the entry, because the batch or the proposal failed. | `-1` | `HLCTimestamp.Zero` |
 
-Overall result:
+The overall result is:
 
-- `Success = true` means at least one entry was admitted and appended
-- individual entries can still be `PartitionMoved`
-- `Success = false` means a batch-level rejection, leadership failure, or all entries fenced out.
+- `Success = true` means that Kommander admitted and appended a minimum of one entry.
+- An individual entry can still be `PartitionMoved`.
+- `Success = false` means a rejection of the batch, a leadership failure, or a fence that rejected all the entries.
 
-Always inspect `Entries` when using per-entry fences.
+Always examine `Entries` when you use a fence for each entry.
 
 ## Rejections
 
-Kommander rejects the whole batch before appending anything when the shape is invalid.
+Kommander rejects the whole batch before it appends anything when the shape is invalid.
 
-Examples:
+Examples are:
 
-- an auto-commit entry appears after a manual entry
-- the reserved `_RaftSystem` log type is used on partition `0`.
+- An auto-commit entry comes after a manual entry.
+- The batch uses the reserved `_RaftSystem` log type on partition `0`.
 
-If some entries are fenced and some are admitted, that is not a whole-batch rejection. The fenced entries keep their result slots with `PartitionMoved`.
+A batch can have some fenced entries and some admitted entries. That case is not a rejection of the whole batch. Each fenced entry keeps its result slot with `PartitionMoved`.
 
-## Ordering And Durability
+## Order And Durability
 
-`ReplicateEntries` reduces proposal and transport overhead. It does not bypass the normal Raft or WAL rules.
+`ReplicateEntries` reduces the proposal overhead and the transport overhead. It does not bypass the normal Raft rules or WAL rules. The WAL is the write-ahead log.
 
-Important guarantees:
+The important guarantees are:
 
-- all entries target one partition
-- auto entries commit before any trailing manual group is proposed
-- manual rollback affects only the trailing manual suffix
-- per-entry `LogIndex` values identify the committed log order
-- followers receive ordinary typed `RaftLog` records through the same restore and replication callbacks.
+- All the entries have one target partition.
+- The auto entries commit before Kommander proposes a manual group at the end.
+- A manual rollback affects the manual suffix only.
+- The `LogIndex` value of each entry identifies the committed log order.
+- Each follower receives ordinary typed `RaftLog` records. They arrive through the same restore callback and replication callback.
 
-WAL sync behavior is governed by the same scheduler settings as other writes:
+The same scheduler settings control the WAL sync behavior for these writes and for the other writes:
 
 - `WalGroupCommitLingerMs`
 - `MaxWalGroupBatchPartitions`
 - `MaxWalBatchSize`
 - `WriteIOThreads`.
 
-An auto-commit-only `ReplicateEntries` call is one proposal. A batch with a manual suffix is two proposals: the auto group commits first, then the manual group is proposed. Their WAL writes can still coalesce with other work through the scheduler, but a single fsync across both groups is not guaranteed.
+A `ReplicateEntries` call with auto-commit entries only is one proposal. A batch with a manual suffix is two proposals. The auto group commits first. Kommander then proposes the manual group. The WAL writes can still coalesce with other work through the scheduler. One fsync across both groups is not guaranteed. An fsync is a durable flush to disk.
 
 ## When Not To Use It
 
-Keep using `ReplicateLogs` when:
+Continue with `ReplicateLogs` in these conditions:
 
-- all payloads share one type
-- all payloads share one fate
-- one result for the whole proposal is enough
-- the simpler API is easier to read.
+- All the payloads share one type.
+- All the payloads share one fate.
+- One result for the whole proposal is sufficient.
+- The simpler API is easier to read.
 
-Do not use one `ReplicateEntries` call for multiple independent manual transactions. There is only one trailing manual group and therefore one manual ticket.
+Do not use one `ReplicateEntries` call for several independent manual transactions. There is one manual group at the end. Therefore, there is one manual ticket.
 
 ## Related Reading
 

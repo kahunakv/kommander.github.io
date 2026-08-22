@@ -1,30 +1,30 @@
 # Snapshot Installation
 
-Snapshot installation is the path Kommander uses when ordinary log backfill cannot repair a lagging node.
+Kommander uses snapshot installation when ordinary log backfill cannot repair a node that lags behind. Backfill is the transfer of missing committed log entries from the leader.
 
-Backfill works while the leader still has the missing committed log entries. After compaction removes those entries, a follower or learner needs a compact application snapshot instead of individual log records.
+Backfill works while the leader still holds the missing committed log entries. Compaction removes those entries. A follower or a learner then needs a compact snapshot of the application state instead of the individual log records.
 
 ## When It Runs
 
-Snapshot installation can run when:
+Snapshot installation can run in these conditions:
 
-- a follower is behind the leader's compaction floor
-- a learner joins after old history has been compacted
-- partition `0` application deltas need whole-state repair
-- a user partition split or merge needs range state movement.
+- A follower is below the compaction floor of the leader.
+- A learner joins after the compaction of old history.
+- The application deltas on partition `0` need a repair of the whole state.
+- A split or a merge of a user partition needs a move of the range state.
 
-Kommander chooses the snapshot kind from the partition and registered transfer hooks:
+Kommander selects the snapshot kind from the partition and the registered transfer hooks:
 
 | Snapshot kind | Used for | Required hook |
 | --- | --- | --- |
-| `Range` | User-partition range movement for splits and merges. | `IRaftStateMachineTransfer` |
-| `SystemState` | Whole application state on partition `0`. | `IRaftSystemStateTransfer` |
+| `Range` | The move of a user-partition range for a split or a merge. | `IRaftStateMachineTransfer` |
+| `SystemState` | The whole application state on partition `0`. | `IRaftSystemStateTransfer` |
 
-Partition `0` is still reserved for system-wide state. Application writes there must use their own log type, never `_RaftSystem`.
+Partition `0` stays reserved for system-wide state. An application write there must use its own log type. It must never use `_RaftSystem`.
 
 ## Receive Contract
 
-Large snapshots are split into bounded chunks. Every chunk in one transfer carries the same session metadata:
+Kommander divides a large snapshot into bounded chunks. Every chunk in one transfer carries the same session metadata:
 
 - `SessionId`
 - `PartitionId`
@@ -34,37 +34,37 @@ Large snapshots are split into bounded chunks. Every chunk in one transfer carri
 - `LastIncludedTerm`
 - `SnapshotKind`.
 
-The receiver accepts chunks only in order. An exact duplicate of the immediately previous chunk is treated as idempotent success. Skipped, reordered, negative, or metadata-changing chunks reject and drop the session.
+The receiver accepts the chunks in order only. It treats an exact duplicate of the immediately previous chunk as an idempotent success. It rejects a skipped, reordered, or negative chunk and drops the session. It also rejects a chunk that changes the metadata.
 
 ## Bounded Memory
 
-The follower keeps in-progress snapshot sessions bounded.
+The follower keeps the in-progress receive sessions bounded.
 
 | Setting | Default | Description |
 | --- | ---: | --- |
-| `SnapshotReceiveSessionTtl` | `30 s` | Idle time before an incomplete receive session is expired on the next receive sweep. |
-| `SnapshotMaxPendingSessions` | `8` | Maximum concurrent receive sessions across all partitions on one node. |
-| `SnapshotMaxPendingBytes` | `512 MiB` | Maximum total bytes buffered by active and installing snapshot sessions. |
-| `AllowLegacySnapshotSenders` | `false` | Temporarily accepts snapshot senders that do not populate the leader and boundary metadata fields. |
+| `SnapshotReceiveSessionTtl` | `30 s` | The idle time before the next receive sweep expires an incomplete receive session. |
+| `SnapshotMaxPendingSessions` | `8` | The maximum number of concurrent receive sessions across all partitions on one node. |
+| `SnapshotMaxPendingBytes` | `512 MiB` | The maximum total bytes that the active sessions and the sessions in install hold in a buffer. |
+| `AllowLegacySnapshotSenders` | `false` | Accepts snapshot senders that do not fill the leader fields and the boundary fields. Use it temporarily. |
 
-When a new session or chunk would exceed the count or byte cap, Kommander evicts the least recently active pending sessions first. A single snapshot that cannot fit inside `SnapshotMaxPendingBytes` is rejected.
+A new session or a new chunk can exceed the count cap or the byte cap. Kommander then evicts the pending sessions with the oldest activity first. Kommander rejects one snapshot that cannot fit inside `SnapshotMaxPendingBytes`.
 
-Completed snapshot buffers remain charged against the byte cap while their install is running, so a slow application import cannot let memory grow without bound.
+A completed snapshot buffer stays charged against the byte cap during its install. Therefore, a slow application import cannot let the memory grow without a bound.
 
-## Durable Install Ordering
+## Durable Install Order
 
-The final chunk is not imported directly on the transport thread. Kommander stages the complete snapshot and sends the install to that partition's single-writer executor.
+Kommander does not import the final chunk directly on the transport thread. It stages the complete snapshot. It then sends the install to the single-writer executor of that partition.
 
-The executor performs the durable sequence:
+The executor does the durable sequence:
 
-1. reject stale leaders by term and accepted leader endpoint
-2. adopt a higher leader term using the same step-down rule as other leader RPCs
-3. call the application import hook
-4. install a durable `CommittedCheckpoint` boundary in the WAL
-5. seed the in-memory commit and apply frontiers from the snapshot boundary
-6. allow normal backfill to resume after `SnapshotIndex`.
+1. It rejects a stale leader by the term and the accepted leader endpoint.
+2. It adopts a higher leader term with the same step-down rule as the other leader RPCs.
+3. It calls the import hook of the application.
+4. It installs a durable `CommittedCheckpoint` boundary in the WAL. The WAL is the write-ahead log.
+5. It seeds the in-memory commit frontier and apply frontier from the snapshot boundary.
+6. It permits normal backfill again after `SnapshotIndex`.
 
-This keeps snapshot import, term changes, WAL mutation, and application delivery serialized with every other partition operation.
+This order keeps the snapshot import, the term changes, the WAL changes, and the application delivery serial with every other partition operation.
 
 ## Application Import Requirements
 
@@ -74,36 +74,36 @@ Your import method must be idempotent for the snapshot identity:
 (partitionId, SnapshotIndex, LastIncludedTerm)
 ```
 
-If the application import succeeds but the WAL boundary write fails, the sender sees failure and retries the snapshot. The second import must leave the same final state.
+The application import can succeed while the WAL boundary write fails. The sender then sees a failure and retries the snapshot. The second import must leave the same final state.
 
-Prefer an atomic replace pattern for snapshot files or embedded stores:
+Prefer an atomic replace pattern for a snapshot file or an embedded store:
 
-1. write imported state to a temporary location
-2. validate it
-3. atomically swap it into place
-4. record the snapshot index with the state.
+1. Write the imported state to a temporary location.
+2. Validate it.
+3. Swap it into place atomically.
+4. Record the snapshot index with the state.
 
 ## WAL Boundary Behavior
 
-Installing a snapshot boundary writes a durable `CommittedCheckpoint` at `SnapshotIndex`.
+An install of a snapshot boundary writes a durable `CommittedCheckpoint` at `SnapshotIndex`.
 
-If the follower already has a log entry at that index with the same term, Kommander keeps the suffix above the boundary. If the term does not match, the suffix is truncated and normal backfill repairs it from the leader.
+The follower can already have a log entry at that index with the same term. Kommander then keeps the suffix above the boundary. If the term is different, Kommander truncates the suffix. Normal backfill then repairs the suffix from the leader.
 
-The boundary write is implemented across the built-in WAL backends:
+Each built-in WAL backend implements the boundary write:
 
 | WAL | Boundary behavior |
 | --- | --- |
-| `RocksDbWAL` | Deletes conflicting suffix entries and writes the checkpoint in one RocksDB `WriteBatch`. |
-| `SqliteWAL` | Probes the boundary term, deletes conflicting suffix entries, and upserts the checkpoint in one SQLite transaction under the shard lock. |
+| `RocksDbWAL` | Deletes the conflicting suffix entries and writes the checkpoint in one RocksDB `WriteBatch`. |
+| `SqliteWAL` | Probes the boundary term, deletes the conflicting suffix entries, and upserts the checkpoint. It uses one SQLite transaction under the shard lock. |
 | `InMemoryWAL` | Applies the same retain-or-truncate rule under its in-memory partition guard. |
 
 ## Operational Notes
 
-- Register snapshot transfer hooks before `JoinCluster`.
-- Keep `SnapshotMaxPendingBytes` comfortably above your largest snapshot plus one in-flight install.
-- Enable `GrpcEnableSnapshotCompression` when snapshots are large and network bandwidth is tighter than CPU.
-- Keep `AllowLegacySnapshotSenders = false` for normal clusters.
-- If a learner join times out after heavy compaction, verify the relevant transfer hook is registered on every node.
+- Register the snapshot transfer hooks before `JoinCluster`.
+- Keep `SnapshotMaxPendingBytes` well above the size of your largest snapshot plus one install in flight.
+- Enable `GrpcEnableSnapshotCompression` when the snapshots are large and the network bandwidth is tighter than the CPU.
+- Keep `AllowLegacySnapshotSenders = false` for a normal cluster.
+- A learner join can time out after heavy compaction. Register the relevant transfer hook on every node.
 
 ## Related Reading
 

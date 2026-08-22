@@ -41,6 +41,8 @@ When a follower is behind the leader's committed index by more than:
 
 the leader starts sending bounded backfill rounds.
 
+`BackfillThreshold` is not a disable switch. It controls the actively-behind trigger, but idle-tail and crash-restart repair paths can still need backfill. Set `BackfillEnabled = false` only when a deployment intentionally does not want Kommander to catch lagging followers up through log shipping or snapshot fallback.
+
 You can inspect observed follower lag with:
 
 ```csharp
@@ -51,6 +53,20 @@ long? lag = await raft.GetFollowerLagAsync(
 ```
 
 `null` means the local node does not have a recorded lag value for that follower and partition.
+
+Leaders also expose refusal diagnostics:
+
+```csharp
+IReadOnlyList<RaftBackfillStatus> statuses =
+    raft.GetBackfillStatuses(partitionId);
+```
+
+An entry means the leader cannot safely send an anchored batch to that follower because no committed entry exists at the follower's anchor. `AnchorIndex`, `FirstAvailableIndex`, and `LastCheckpoint` help separate two cases:
+
+- the anchor sits in an unresolved proposed range that must be repaired before backfill can continue
+- the anchor is below the compaction floor and the follower needs snapshot installation.
+
+This is diagnostic only. It is a point-in-time leader-side view and should not be used as a correctness gate.
 
 ## Anchored Backfill
 
@@ -86,17 +102,13 @@ The cache is intentionally short-lived. It exists only for the current heartbeat
 
 Empty reads are shared too. If the leader has compacted past a requested range, every follower waiting at that same anchor can move to the snapshot decision without repeating the same empty WAL read.
 
-## Compaction Floor And SnapshotRequired
+## Compaction Floor And Snapshot Repair
 
 Backfill can only send entries that the leader still has.
 
 Automatic compaction removes older log history below committed checkpoints. That creates a compaction floor: the earliest retained log index.
 
-If a follower needs entries below that floor, the leader cannot backfill them. In that case the runtime reports:
-
-- `RaftOperationStatus.SnapshotRequired`
-
-That status means the follower needs snapshot installation rather than ordinary log backfill.
+If a follower needs entries below that floor, the leader cannot backfill them. The runtime falls through to snapshot installation when the relevant transfer hook is registered. If snapshot transfer cannot proceed or keeps failing, inspect `GetSnapshotStatuses(partitionId)`.
 
 This matters for dynamic membership: a brand-new learner joining a heavily compacted cluster may need `IRaftSystemStateTransfer` for partition `0` state or `IRaftStateMachineTransfer` for user-partition range state.
 
@@ -112,7 +124,9 @@ If the missing index is at or below the checkpoint floor, the gap is treated as 
 
 | Property | Default | Description |
 | --- | ---: | --- |
-| `BackfillThreshold` | `10` | Follower lag must exceed this before backfill starts. Smaller values start backfill earlier. |
+| `BackfillEnabled` | `true` | Master switch for leader-driven backfill and snapshot fallback. `false` leaves lagging followers stale unless another path catches them up. |
+| `BackfillThreshold` | `10` | Follower lag must exceed this before the actively-behind backfill trigger starts. Smaller values start active backfill earlier. |
+| `FollowerSaturationBackoff` | `1 s` | Pause entry-carrying backfill to a follower after it reports WAL saturation. Heartbeats continue. |
 | `MaxBackfillEntriesPerRound` | `128` | Maximum committed entries sent in one backfill round. Larger values catch up faster but send larger batches. |
 
 Compaction settings also affect catch-up indirectly:
@@ -121,14 +135,16 @@ Compaction settings also affect catch-up indirectly:
 - `CompactNumberEntries`
 - `MaxEntriesPerCompaction`.
 
-More aggressive compaction can make `SnapshotRequired` more likely for far-behind followers.
+More aggressive compaction can make snapshot repair more likely for far-behind followers.
 
 ## Operational Notes
 
 - Small follower delays should settle through live replication.
 - Persistent lag beyond `BackfillThreshold` should trigger backfill.
+- Raising `BackfillThreshold` very high does not disable every repair path; use `BackfillEnabled = false` for that.
 - If lag does not shrink, inspect WAL read latency, transport failures, and follower health.
-- If `SnapshotRequired` appears, the follower needs state below the retained WAL floor.
+- If `GetBackfillStatuses(partitionId)` stays non-empty, compare `LastCheckpoint` with `FirstAvailableIndex` to decide whether you are waiting on unresolved proposed entries or need snapshot repair.
+- If `GetSnapshotStatuses(partitionId)` stays non-empty, the follower likely needs state below the retained WAL floor and snapshot repair is stuck or retrying.
 - If several learners join at once, shared backfill reads reduce leader-side storage and encoding work, but `MaxBackfillEntriesPerRound` still controls per-round catch-up size.
 - For learner promotion, lag must stay within `LearnerPromotionLag` for `LearnerPromotionStableWindow`.
 
