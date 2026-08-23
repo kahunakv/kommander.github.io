@@ -556,6 +556,50 @@ Example</a></li>
 <li><a href="#configuration-summary" id="toc-configuration-summary"><span class="toc-section-number">15.13</span> Configuration Summary</a></li>
 <li><a href="#summary-13" id="toc-summary-13"><span class="toc-section-number">15.14</span> Summary</a></li>
 </ul></li>
+<li><a href="#leadership-balancing" id="toc-leadership-balancing"><span class="toc-section-number">16</span> Leadership Balancing</a>
+<ul>
+<li><a href="#the-problem-uneven-leadership" id="toc-the-problem-uneven-leadership"><span class="toc-section-number">16.1</span> The Problem: Uneven
+Leadership</a></li>
+<li><a href="#enabling-the-leader-balancer" id="toc-enabling-the-leader-balancer"><span class="toc-section-number">16.2</span> Enabling the Leader
+Balancer</a></li>
+<li><a href="#how-load-reports-work" id="toc-how-load-reports-work"><span class="toc-section-number">16.3</span> How Load Reports Work</a></li>
+<li><a href="#the-globalleadershipview" id="toc-the-globalleadershipview"><span class="toc-section-number">16.4</span> The GlobalLeadershipView</a></li>
+<li><a href="#the-two-tier-planning-algorithm" id="toc-the-two-tier-planning-algorithm"><span class="toc-section-number">16.5</span> The Two-Tier Planning
+Algorithm</a></li>
+<li><a href="#per-move-safety-filters" id="toc-per-move-safety-filters"><span class="toc-section-number">16.6</span> Per-Move Safety Filters</a></li>
+<li><a href="#the-transfer-mechanism" id="toc-the-transfer-mechanism"><span class="toc-section-number">16.7</span> The Transfer Mechanism</a></li>
+<li><a href="#preventing-oscillation" id="toc-preventing-oscillation"><span class="toc-section-number">16.8</span> Preventing Oscillation</a></li>
+<li><a href="#load-metrics" id="toc-load-metrics"><span class="toc-section-number">16.9</span> Load Metrics</a></li>
+<li><a href="#timing-configuration" id="toc-timing-configuration"><span class="toc-section-number">16.10</span> Timing Configuration</a></li>
+<li><a href="#concurrency-limits" id="toc-concurrency-limits"><span class="toc-section-number">16.11</span> Concurrency Limits</a></li>
+<li><a href="#configuration-summary-1" id="toc-configuration-summary-1"><span class="toc-section-number">16.12</span> Configuration Summary</a></li>
+<li><a href="#complete-example" id="toc-complete-example"><span class="toc-section-number">16.13</span> Complete Example</a></li>
+<li><a href="#summary-14" id="toc-summary-14"><span class="toc-section-number">16.14</span> Summary</a></li>
+</ul></li>
+<li><a href="#observability-and-diagnostics" id="toc-observability-and-diagnostics"><span class="toc-section-number">17</span> Observability and Diagnostics</a>
+<ul>
+<li><a href="#the-three-primary-health-signals" id="toc-the-three-primary-health-signals"><span class="toc-section-number">17.1</span> The Three Primary Health
+Signals</a></li>
+<li><a href="#commit-index" id="toc-commit-index"><span class="toc-section-number">17.2</span> Commit Index</a></li>
+<li><a href="#snapshot-and-backfill-status" id="toc-snapshot-and-backfill-status"><span class="toc-section-number">17.3</span> Snapshot and Backfill
+Status</a></li>
+<li><a href="#stale-proposed-count" id="toc-stale-proposed-count"><span class="toc-section-number">17.4</span> Stale Proposed Count</a></li>
+<li><a href="#node-activity" id="toc-node-activity"><span class="toc-section-number">17.5</span> Node Activity</a></li>
+<li><a href="#cluster-membership-and-partition-map" id="toc-cluster-membership-and-partition-map"><span class="toc-section-number">17.6</span> Cluster Membership and Partition
+Map</a></li>
+<li><a href="#kommandermetrics-opentelemetry-integration" id="toc-kommandermetrics-opentelemetry-integration"><span class="toc-section-number">17.7</span> KommanderMetrics: OpenTelemetry
+Integration</a></li>
+<li><a href="#structured-logging" id="toc-structured-logging"><span class="toc-section-number">17.8</span> Structured Logging</a></li>
+<li><a href="#wal-phase-instrumentation" id="toc-wal-phase-instrumentation"><span class="toc-section-number">17.9</span> WAL Phase
+Instrumentation</a></li>
+<li><a href="#building-a-health-endpoint" id="toc-building-a-health-endpoint"><span class="toc-section-number">17.10</span> Building a Health
+Endpoint</a></li>
+<li><a href="#metric-alerting-guidelines" id="toc-metric-alerting-guidelines"><span class="toc-section-number">17.11</span> Metric Alerting
+Guidelines</a></li>
+<li><a href="#diagnostic-queries-in-context" id="toc-diagnostic-queries-in-context"><span class="toc-section-number">17.12</span> Diagnostic Queries in
+Context</a></li>
+<li><a href="#summary-15" id="toc-summary-15"><span class="toc-section-number">17.13</span> Summary</a></li>
+</ul></li>
 </ul>
 </nav>
 <h1 data-number="1" id="preface"><span class="header-section-number">1</span> Preface</h1>
@@ -8530,6 +8574,1448 @@ the path that commits membership changes.</li>
 the voter set unsafely.</li>
 <li>The next chapter covers leadership balancing: how to distribute
 write load evenly across nodes.</li>
+</ul>
+<h1 data-number="16" id="leadership-balancing"><span class="header-section-number">16</span> Leadership Balancing</h1>
+<p>Elections are random. When a cluster starts or recovers from a
+failure, the node that wins each partition’s election becomes its
+leader. Over time, one node can end up leading most partitions while the
+others sit idle. All write traffic flows through the leader, so an
+uneven leadership distribution creates an uneven write load.</p>
+<p>The leader balancer watches how leaderships are distributed and
+transfers them to equalize the load.</p>
+<h2 data-number="16.1" id="the-problem-uneven-leadership"><span class="header-section-number">16.1</span> The Problem: Uneven
+Leadership</h2>
+<p>A three-node cluster with 12 partitions after random elections:</p>
+<pre><code>  Node A: leads P1, P2, P3, P4, P5, P6, P7    (7 partitions)
+  Node B: leads P8, P9                          (2 partitions)
+  Node C: leads P10, P11, P12                   (3 partitions)
+
+  Node A handles 58% of all write traffic.
+  Nodes B and C are underutilized.</code></pre>
+<p>The ideal distribution is 4 partitions per node. Node A leads 3 more
+than it should. The balancer detects this and transfers 3 leaderships
+from A to B and C.</p>
+<p>After balancing:</p>
+<pre><code>  Node A: leads P1, P2, P3, P4                  (4 partitions)
+  Node B: leads P5, P8, P9, P10                 (4 partitions)
+  Node C: leads P6, P7, P11, P12                (4 partitions)
+
+  Each node handles ~33% of write traffic.</code></pre>
+<h2 data-number="16.2" id="enabling-the-leader-balancer"><span class="header-section-number">16.2</span> Enabling the Leader
+Balancer</h2>
+<p>The balancer is off by default. Enable it in the configuration:</p>
+<div class="sourceCode" id="cb248"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb248-1"><a href="#cb248-1" aria-hidden="true" tabindex="-1"></a>RaftConfiguration configuration <span class="op">=</span> <span class="kw">new</span><span class="op">()</span></span>
+<span id="cb248-2"><a href="#cb248-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb248-3"><a href="#cb248-3" aria-hidden="true" tabindex="-1"></a>    NodeName <span class="op">=</span> <span class="st">&quot;node-a&quot;</span><span class="op">,</span></span>
+<span id="cb248-4"><a href="#cb248-4" aria-hidden="true" tabindex="-1"></a>    Host <span class="op">=</span> <span class="st">&quot;localhost&quot;</span><span class="op">,</span></span>
+<span id="cb248-5"><a href="#cb248-5" aria-hidden="true" tabindex="-1"></a>    Port <span class="op">=</span> <span class="dv">8001</span><span class="op">,</span></span>
+<span id="cb248-6"><a href="#cb248-6" aria-hidden="true" tabindex="-1"></a>    InitialPartitions <span class="op">=</span> <span class="dv">12</span><span class="op">,</span></span>
+<span id="cb248-7"><a href="#cb248-7" aria-hidden="true" tabindex="-1"></a>    EnableLeaderBalancer <span class="op">=</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb248-8"><a href="#cb248-8" aria-hidden="true" tabindex="-1"></a>    LeaderBalancerInterval <span class="op">=</span> TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">30</span><span class="op">)</span></span>
+<span id="cb248-9"><a href="#cb248-9" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span></code></pre></div>
+<p><code>EnableLeaderBalancer</code> is the master switch. When
+<code>false</code>, the balancer loop never runs and no transfer
+suggestions are sent.</p>
+<p>Enable it only after all nodes in the cluster run a version that
+supports the feature. The flag is revertible at runtime through a
+rolling restart.</p>
+<h2 data-number="16.3" id="how-load-reports-work"><span class="header-section-number">16.3</span> How Load Reports Work</h2>
+<p>Each node periodically builds a <strong>NodeLoadReport</strong> and
+sends it through gossip. The report contains:</p>
+<ul>
+<li>The node’s endpoint.</li>
+<li>A monotonically increasing version counter.</li>
+<li>A list of partitions the node leads, with per-partition load
+metrics.</li>
+<li>The node’s zone (if configured).</li>
+</ul>
+<div class="sourceCode" id="cb249"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb249-1"><a href="#cb249-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> <span class="kw">class</span> NodeLoadReport</span>
+<span id="cb249-2"><a href="#cb249-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb249-3"><a href="#cb249-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">string</span> Endpoint <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span> <span class="op">=</span> <span class="st">&quot;&quot;</span><span class="op">;</span></span>
+<span id="cb249-4"><a href="#cb249-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> ReportVersion <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb249-5"><a href="#cb249-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> HLCTimestamp Time <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb249-6"><a href="#cb249-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">string</span><span class="op">?</span> Zone <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb249-7"><a href="#cb249-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> List<span class="op">&lt;</span>PartitionLoad<span class="op">&gt;</span> Leaderships <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span> <span class="op">=</span> <span class="op">[];</span></span>
+<span id="cb249-8"><a href="#cb249-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Load reports are never committed to the Raft log. They are high-churn
+and purely advisory. A stale or dropped report only delays a balancing
+decision. It never violates Raft safety.</p>
+<p>The receiver keeps only the highest <code>ReportVersion</code> per
+endpoint. Out-of-order arrivals are discarded.</p>
+<h3 data-number="16.3.1" id="partitionload"><span class="header-section-number">16.3.1</span> PartitionLoad</h3>
+<p>Each entry in the report carries per-partition metrics:</p>
+<div class="sourceCode" id="cb250"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb250-1"><a href="#cb250-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> <span class="kw">class</span> PartitionLoad</span>
+<span id="cb250-2"><a href="#cb250-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb250-3"><a href="#cb250-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> PartitionId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb250-4"><a href="#cb250-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">double</span> Load <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb250-5"><a href="#cb250-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> LeaderSinceMs <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb250-6"><a href="#cb250-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">double</span> LogOpsPerSecond <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb250-7"><a href="#cb250-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> WalQueueDepth <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb250-8"><a href="#cb250-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">double</span> CommitWaitMs <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb250-9"><a href="#cb250-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Load</code></td>
+<td>Composite load scalar (computed from ops/sec and queue depth)</td>
+</tr>
+<tr>
+<td><code>LeaderSinceMs</code></td>
+<td>Milliseconds since this node became leader of the partition</td>
+</tr>
+<tr>
+<td><code>LogOpsPerSecond</code></td>
+<td>EWMA rate of <code>ReplicateLogs</code> operations per second</td>
+</tr>
+<tr>
+<td><code>WalQueueDepth</code></td>
+<td>WAL write operations queued for this partition</td>
+</tr>
+<tr>
+<td><code>CommitWaitMs</code></td>
+<td>EWMA of enqueue-to-durable commit-wait latency</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="16.3.2" id="the-load-formula"><span class="header-section-number">16.3.2</span> The Load Formula</h3>
+<p>The composite load score per partition is:</p>
+<pre><code>Load = LeaderBalancerOpsWeight x OpsPerSecond
+     + LeaderBalancerQueueWeight x (clientDepth + walDepth)</code></pre>
+<p>The default weights are:</p>
+<div class="sourceCode" id="cb252"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb252-1"><a href="#cb252-1" aria-hidden="true" tabindex="-1"></a>LeaderBalancerOpsWeight <span class="op">=</span> <span class="fl">1.0</span>    <span class="co">// default</span></span>
+<span id="cb252-2"><a href="#cb252-2" aria-hidden="true" tabindex="-1"></a>LeaderBalancerQueueWeight <span class="op">=</span> <span class="fl">0.5</span>  <span class="co">// default</span></span></code></pre></div>
+<p>Higher <code>OpsWeight</code> makes the balancer more sensitive to
+throughput differences. Higher <code>QueueWeight</code> makes it more
+sensitive to backlog buildup.</p>
+<h2 data-number="16.4" id="the-globalleadershipview"><span class="header-section-number">16.4</span> The GlobalLeadershipView</h2>
+<p>The P0 leader aggregates all load reports into a
+<code>GlobalLeadershipView</code>. This is the planner’s input. It
+contains:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LeadersByNode</code></td>
+<td>Maps each endpoint to the partition ids it leads</td>
+</tr>
+<tr>
+<td><code>LoadByNode</code></td>
+<td>Maps each endpoint to its aggregate load (sum of partition
+loads)</td>
+</tr>
+<tr>
+<td><code>PartitionOwner</code></td>
+<td>Maps each partition id to the endpoint that leads it</td>
+</tr>
+<tr>
+<td><code>PartitionLoad</code></td>
+<td>Maps each partition id to its load score</td>
+</tr>
+<tr>
+<td><code>PartitionLeaderSinceMs</code></td>
+<td>Maps each partition id to its leadership tenure</td>
+</tr>
+<tr>
+<td><code>LiveVoters</code></td>
+<td>The set of Voter-role members that are alive</td>
+</tr>
+<tr>
+<td><code>FreshReportEndpoints</code></td>
+<td>Endpoints with non-expired reports</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="16.4.1" id="completeness-check"><span class="header-section-number">16.4.1</span> Completeness Check</h3>
+<p>Before planning any moves, the planner calls
+<code>IsComplete()</code>. This check passes only when every live voter
+has a fresh report. If any live voter is silent (no report within the
+TTL), the planner emits zero moves.</p>
+<p>This is a safety valve. An incomplete view means the planner cannot
+see the full leadership distribution. It could make a bad decision.
+Instead, it waits for the missing reports.</p>
+<h2 data-number="16.5" id="the-two-tier-planning-algorithm"><span class="header-section-number">16.5</span> The Two-Tier Planning
+Algorithm</h2>
+<p>The <code>LeaderBalancePlanner</code> uses two tiers. They run in
+order. The second tier runs only when the first tier produces no
+moves.</p>
+<h3 data-number="16.5.1" id="tier-1-count-balancing"><span class="header-section-number">16.5.1</span> Tier 1: Count Balancing</h3>
+<p>Equalize the number of leaderships per node.</p>
+<pre><code>  Ideal distribution:  total_partitions / live_nodes
+    12 partitions / 3 nodes = 4 per node
+
+  Over-loaded:  count &gt; ceil + CountDeadband - 1
+  Under-loaded: count &lt; floor</code></pre>
+<p>The count tier picks the hottest eligible partition from the most
+over-loaded node and moves it to the most under-loaded node. It repeats
+until no over-loaded or under-loaded nodes remain, or until
+<code>MaxMovesPerPass</code> is reached.</p>
+<p>“Hottest” means the partition with the highest load score. The
+balancer moves the busiest partition first, because that move has the
+largest effect on load equalization.</p>
+<pre><code>  Before count balancing:
+
+  Node A: [P1=100, P2=50, P3=30, P4=20, P5=10, P6=5, P7=2]  count=7
+  Node B: [P8=40, P9=15]                                       count=2
+  Node C: [P10=25, P11=10, P12=5]                              count=3
+
+  Ideal = 4.  CountDeadband = 1.
+  Over threshold = ceil(4) + 1 - 1 = 4.  Under threshold = floor(4) = 4.
+
+  Node A (7) is over 4 → over-loaded
+  Node B (2) is under 4 → under-loaded
+
+  Move 1: P1 (load=100) from A to B     → A=6, B=3
+  Move 2: P2 (load=50)  from A to B     → A=5, B=4
+  Move 3: P3 (load=30)  from A to C     → A=4, C=4
+
+  After:
+  Node A: [P4, P5, P6, P7]   count=4
+  Node B: [P1, P2, P8, P9]   count=4
+  Node C: [P3, P10, P11, P12] count=4</code></pre>
+<h3 data-number="16.5.2" id="tier-2-load-balancing"><span class="header-section-number">16.5.2</span> Tier 2: Load Balancing</h3>
+<p>When counts are already balanced but aggregate load is skewed, the
+load tier fires.</p>
+<p>Load skew is measured as:</p>
+<pre><code>skew = (maxLoad - minLoad) / maxLoad</code></pre>
+<p>If the skew exceeds <code>LoadImbalanceThreshold</code> (default:
+25%), the load tier emits a <strong>count-neutral swap</strong>: one
+partition moves from the hot node to the cold node, and one moves in the
+opposite direction. The count stays the same on both nodes.</p>
+<pre><code>  Counts are balanced (4 each), but:
+
+  Node A: total load = 200  (P1=100, P4=50, P7=30, P10=20)
+  Node B: total load = 70   (P2=25, P5=20, P8=15, P11=10)
+
+  Skew = (200 - 70) / 200 = 0.65 → exceeds 0.25 threshold
+
+  Swap: P1 (load=100) from A to B
+        P11 (load=10) from B to A
+
+  After swap:
+  Node A: total load = 110   (P11=10, P4=50, P7=30, P10=20)
+  Node B: total load = 160   (P1=100, P2=25, P5=20, P8=15)</code></pre>
+<p>The swap only fires if it strictly reduces the load spread. If the
+swap would not improve the distribution, it is skipped.</p>
+<p>At most one swap per pass. The balancer re-evaluates on the next
+interval after the transferred partitions have settled.</p>
+<h2 data-number="16.6" id="per-move-safety-filters"><span class="header-section-number">16.6</span> Per-Move Safety Filters</h2>
+<p>Every candidate move must pass all of these filters:</p>
+<ol type="1">
+<li><strong>Partition is Active.</strong> Partitions in
+<code>Splitting</code>, <code>Draining</code>, or <code>Removed</code>
+state are excluded.</li>
+<li><strong>Leadership is stable.</strong> The leader must have held the
+partition for at least <code>MinLeaderStabilityMs</code> (default: 5
+seconds). This prevents the balancer from immediately shuffling a
+partition that just won an election.</li>
+<li><strong>Target is a live voter.</strong> The target endpoint must be
+a Voter in the committed roster and must be alive according to
+SWIM.</li>
+<li><strong>Partition is not in cooldown.</strong> After a transfer, the
+partition is excluded from further moves for <code>MoveCooldown</code>
+(default: 60 seconds).</li>
+</ol>
+<h2 data-number="16.7" id="the-transfer-mechanism"><span class="header-section-number">16.7</span> The Transfer Mechanism</h2>
+<p>A <code>LeaderMove</code> is an advisory suggestion. The P0 leader
+sends the suggestion to the current leader of the partition. The current
+leader validates the suggestion and executes it through Raft’s
+<strong>leadership transfer</strong> mechanism.</p>
+<pre><code>  P0 leader (balancer):
+    &quot;Move partition 5 from node-a to node-b&quot;
+       │
+       ▼
+  Suggestion sent to node-a
+       │
+       ▼
+  node-a validates:
+    - Am I still the leader of partition 5?
+    - Is node-b alive and caught up?
+       │
+       ├── No → drop the suggestion (safe)
+       │
+       └── Yes → TransferLeadershipAsync(partitionId=5, to=node-b)
+             │
+             ▼
+  Raft leadership transfer:
+    - node-a stops accepting new proposals
+    - node-a sends remaining log entries to node-b
+    - node-a sends a TimeoutNow to node-b
+    - node-b starts an election and wins
+    - node-b is now the leader of partition 5</code></pre>
+<p>Dropping or ignoring a <code>LeaderMove</code> never violates Raft
+safety. The worst outcome is a wasted or skipped move. The balancer
+tries again on the next pass.</p>
+<h2 data-number="16.8" id="preventing-oscillation"><span class="header-section-number">16.8</span> Preventing Oscillation</h2>
+<p>Without safeguards, the balancer can oscillate: move a partition from
+A to B, then on the next pass, move it back from B to A.</p>
+<p>Three mechanisms prevent this:</p>
+<h3 data-number="16.8.1" id="movecooldown"><span class="header-section-number">16.8.1</span> MoveCooldown</h3>
+<div class="sourceCode" id="cb258"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb258-1"><a href="#cb258-1" aria-hidden="true" tabindex="-1"></a>MoveCooldown <span class="op">=</span> TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">60</span><span class="op">)</span>   <span class="co">// default</span></span></code></pre></div>
+<p>After a transfer suggestion is confirmed or times out, the partition
+is excluded from further moves for 60 seconds. This gives the new leader
+time to establish a stable load profile.</p>
+<h3 data-number="16.8.2" id="minleaderstabilityms"><span class="header-section-number">16.8.2</span> MinLeaderStabilityMs</h3>
+<div class="sourceCode" id="cb259"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb259-1"><a href="#cb259-1" aria-hidden="true" tabindex="-1"></a>MinLeaderStabilityMs <span class="op">=</span> <span class="dv">5000</span>   <span class="co">// default (5 seconds)</span></span></code></pre></div>
+<p>A partition must have been on the same leader for at least 5 seconds
+before the balancer considers moving it. A freshly elected leader’s load
+profile is not representative.</p>
+<h3 data-number="16.8.3" id="countdeadband"><span class="header-section-number">16.8.3</span> CountDeadband</h3>
+<div class="sourceCode" id="cb260"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb260-1"><a href="#cb260-1" aria-hidden="true" tabindex="-1"></a>CountDeadband <span class="op">=</span> <span class="dv">1</span>   <span class="co">// default</span></span></code></pre></div>
+<p>The minimum count imbalance before the count tier emits moves. With a
+deadband of 1, a node must exceed the natural ceiling by 2 or more
+before the balancer considers it over-loaded. This prevents
+flip-flopping around a perfectly balanced distribution.</p>
+<h2 data-number="16.9" id="load-metrics"><span class="header-section-number">16.9</span> Load Metrics</h2>
+<p>Kommander exposes three per-partition load metrics. These metrics
+work for both locally led partitions and remote ones:</p>
+<h3 data-number="16.9.1" id="getpartitionlogopspersecond"><span class="header-section-number">16.9.1</span>
+GetPartitionLogOpsPerSecond</h3>
+<div class="sourceCode" id="cb261"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb261-1"><a href="#cb261-1" aria-hidden="true" tabindex="-1"></a><span class="dt">double</span> opsPerSec <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionLogOpsPerSecond</span><span class="op">(</span>partitionId<span class="op">);</span></span></code></pre></div>
+<p>Returns the EWMA rate of <code>ReplicateLogs</code> operations per
+second.</p>
+<ul>
+<li><strong>Local path (this node leads the partition):</strong> Reads
+directly from the in-process accumulator. No gossip lag.</li>
+<li><strong>Remote path (another node leads the partition):</strong>
+Reads from the most recent gossip load report. May trail by up to one
+<code>LeaderBalancerReportInterval</code> plus propagation delay.</li>
+</ul>
+<h3 data-number="16.9.2" id="getpartitionwalqueuedepth"><span class="header-section-number">16.9.2</span>
+GetPartitionWalQueueDepth</h3>
+<div class="sourceCode" id="cb262"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb262-1"><a href="#cb262-1" aria-hidden="true" tabindex="-1"></a><span class="dt">int</span> queueDepth <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionWalQueueDepth</span><span class="op">(</span>partitionId<span class="op">);</span></span></code></pre></div>
+<p>Returns the number of WAL write operations queued for this partition.
+When <code>LogOpsPerSecond</code> plateaus while this value rises, the
+partition is fsync-bound.</p>
+<h3 data-number="16.9.3" id="getpartitioncommitwaitms"><span class="header-section-number">16.9.3</span>
+GetPartitionCommitWaitMs</h3>
+<div class="sourceCode" id="cb263"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb263-1"><a href="#cb263-1" aria-hidden="true" tabindex="-1"></a><span class="dt">double</span> commitWaitMs <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionCommitWaitMs</span><span class="op">(</span>partitionId<span class="op">);</span></span></code></pre></div>
+<p>Returns the EWMA of enqueue-to-durable commit-wait latency in
+milliseconds. This complements queue depth: depth counts operations;
+commit-wait measures how long each operation waits. Under fsync
+pressure, both rise together while ops/sec plateaus.</p>
+<h2 data-number="16.10" id="timing-configuration"><span class="header-section-number">16.10</span> Timing Configuration</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Property</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LeaderBalancerReportInterval</code></td>
+<td>5 seconds</td>
+<td>How often each node emits a load report through gossip.</td>
+</tr>
+<tr>
+<td><code>LeaderBalancerInterval</code></td>
+<td>30 seconds</td>
+<td>How often the P0 leader runs a planning pass.</td>
+</tr>
+<tr>
+<td><code>LeaderBalancerReportTtl</code></td>
+<td>20 seconds</td>
+<td>Maximum age of a report before it is expired from the view.</td>
+</tr>
+<tr>
+<td><code>SuggestionTimeout</code></td>
+<td>15 seconds</td>
+<td>How long the P0 leader waits for a move to be confirmed.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>LeaderBalancerReportInterval.</strong> Shorter intervals give
+fresher data at the cost of more gossip traffic.</p>
+<p><strong>LeaderBalancerInterval.</strong> Shorter intervals react
+faster to leadership skew but add coordinator overhead.</p>
+<p><strong>LeaderBalancerReportTtl.</strong> Must be greater than
+<code>LeaderBalancerReportInterval</code> to tolerate at least one
+missed emission. A node that goes silent is excluded from the planning
+view. Its phantom leaderships are not carried forward.</p>
+<p><strong>SuggestionTimeout.</strong> After timeout, the partition is
+eligible again (subject to <code>MoveCooldown</code>). The move may or
+may not have completed.</p>
+<h2 data-number="16.11" id="concurrency-limits"><span class="header-section-number">16.11</span> Concurrency Limits</h2>
+<div class="sourceCode" id="cb264"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb264-1"><a href="#cb264-1" aria-hidden="true" tabindex="-1"></a>MaxMovesPerPass <span class="op">=</span> <span class="dv">4</span>           <span class="co">// default</span></span>
+<span id="cb264-2"><a href="#cb264-2" aria-hidden="true" tabindex="-1"></a>MaxConcurrentTransfers <span class="op">=</span> <span class="dv">2</span>    <span class="co">// default</span></span></code></pre></div>
+<p><strong>MaxMovesPerPass.</strong> The maximum number of
+<code>LeaderMove</code> suggestions emitted in a single planner pass.
+Limits the blast radius of a bad planning decision.</p>
+<p><strong>MaxConcurrentTransfers.</strong> The maximum number of
+in-flight transfer suggestions the P0 leader tracks simultaneously. Once
+this limit is reached, no new moves are dispatched until outstanding
+ones confirm or time out.</p>
+<h2 data-number="16.12" id="configuration-summary-1"><span class="header-section-number">16.12</span> Configuration Summary</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Property</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>EnableLeaderBalancer</code></td>
+<td><code>false</code></td>
+<td>Master switch for the balancer.</td>
+</tr>
+<tr>
+<td><code>LeaderBalancerReportInterval</code></td>
+<td>5 seconds</td>
+<td>Load report emission interval.</td>
+</tr>
+<tr>
+<td><code>LeaderBalancerInterval</code></td>
+<td>30 seconds</td>
+<td>Planning pass interval.</td>
+</tr>
+<tr>
+<td><code>LeaderBalancerReportTtl</code></td>
+<td>20 seconds</td>
+<td>Report expiry.</td>
+</tr>
+<tr>
+<td><code>CountDeadband</code></td>
+<td>1</td>
+<td>Minimum count imbalance before count-tier moves.</td>
+</tr>
+<tr>
+<td><code>LoadImbalanceThreshold</code></td>
+<td>0.25</td>
+<td>Fractional load skew before load-tier swaps.</td>
+</tr>
+<tr>
+<td><code>MinLeaderStabilityMs</code></td>
+<td>5,000 ms</td>
+<td>Minimum leadership tenure before eligibility.</td>
+</tr>
+<tr>
+<td><code>MoveCooldown</code></td>
+<td>60 seconds</td>
+<td>Post-move cooldown per partition.</td>
+</tr>
+<tr>
+<td><code>MaxMovesPerPass</code></td>
+<td>4</td>
+<td>Moves per planning pass.</td>
+</tr>
+<tr>
+<td><code>MaxConcurrentTransfers</code></td>
+<td>2</td>
+<td>In-flight transfer limit.</td>
+</tr>
+<tr>
+<td><code>LeaderBalancerOpsWeight</code></td>
+<td>1.0</td>
+<td>Ops/sec weight in the load formula.</td>
+</tr>
+<tr>
+<td><code>LeaderBalancerQueueWeight</code></td>
+<td>0.5</td>
+<td>Queue depth weight in the load formula.</td>
+</tr>
+<tr>
+<td><code>SuggestionTimeout</code></td>
+<td>15 seconds</td>
+<td>In-flight suggestion expiry.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="16.13" id="complete-example"><span class="header-section-number">16.13</span> Complete Example</h2>
+<div class="sourceCode" id="cb265"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb265-1"><a href="#cb265-1" aria-hidden="true" tabindex="-1"></a>RaftConfiguration configuration <span class="op">=</span> <span class="kw">new</span><span class="op">()</span></span>
+<span id="cb265-2"><a href="#cb265-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb265-3"><a href="#cb265-3" aria-hidden="true" tabindex="-1"></a>    NodeName <span class="op">=</span> <span class="st">&quot;node-a&quot;</span><span class="op">,</span></span>
+<span id="cb265-4"><a href="#cb265-4" aria-hidden="true" tabindex="-1"></a>    Host <span class="op">=</span> <span class="st">&quot;localhost&quot;</span><span class="op">,</span></span>
+<span id="cb265-5"><a href="#cb265-5" aria-hidden="true" tabindex="-1"></a>    Port <span class="op">=</span> <span class="dv">8001</span><span class="op">,</span></span>
+<span id="cb265-6"><a href="#cb265-6" aria-hidden="true" tabindex="-1"></a>    InitialPartitions <span class="op">=</span> <span class="dv">16</span><span class="op">,</span></span>
+<span id="cb265-7"><a href="#cb265-7" aria-hidden="true" tabindex="-1"></a>    ReplicationFactor <span class="op">=</span> <span class="dv">3</span><span class="op">,</span></span>
+<span id="cb265-8"><a href="#cb265-8" aria-hidden="true" tabindex="-1"></a>    EnableLeaderBalancer <span class="op">=</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb265-9"><a href="#cb265-9" aria-hidden="true" tabindex="-1"></a>    LeaderBalancerInterval <span class="op">=</span> TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">30</span><span class="op">),</span></span>
+<span id="cb265-10"><a href="#cb265-10" aria-hidden="true" tabindex="-1"></a>    CountDeadband <span class="op">=</span> <span class="dv">1</span><span class="op">,</span></span>
+<span id="cb265-11"><a href="#cb265-11" aria-hidden="true" tabindex="-1"></a>    LoadImbalanceThreshold <span class="op">=</span> <span class="fl">0.25</span><span class="op">,</span></span>
+<span id="cb265-12"><a href="#cb265-12" aria-hidden="true" tabindex="-1"></a>    MaxMovesPerPass <span class="op">=</span> <span class="dv">4</span><span class="op">,</span></span>
+<span id="cb265-13"><a href="#cb265-13" aria-hidden="true" tabindex="-1"></a>    MaxConcurrentTransfers <span class="op">=</span> <span class="dv">2</span><span class="op">,</span></span>
+<span id="cb265-14"><a href="#cb265-14" aria-hidden="true" tabindex="-1"></a>    MoveCooldown <span class="op">=</span> TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">60</span><span class="op">),</span></span>
+<span id="cb265-15"><a href="#cb265-15" aria-hidden="true" tabindex="-1"></a>    MinLeaderStabilityMs <span class="op">=</span> <span class="dv">5000</span><span class="op">,</span></span>
+<span id="cb265-16"><a href="#cb265-16" aria-hidden="true" tabindex="-1"></a>    LeaderBalancerOpsWeight <span class="op">=</span> <span class="fl">1.0</span><span class="op">,</span></span>
+<span id="cb265-17"><a href="#cb265-17" aria-hidden="true" tabindex="-1"></a>    LeaderBalancerQueueWeight <span class="op">=</span> <span class="fl">0.5</span></span>
+<span id="cb265-18"><a href="#cb265-18" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span></code></pre></div>
+<h3 data-number="16.13.1" id="monitoring-load"><span class="header-section-number">16.13.1</span> Monitoring Load</h3>
+<div class="sourceCode" id="cb266"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb266-1"><a href="#cb266-1" aria-hidden="true" tabindex="-1"></a>IReadOnlyList<span class="op">&lt;</span>RaftPartitionRange<span class="op">&gt;</span> map <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionMap</span><span class="op">();</span></span>
+<span id="cb266-2"><a href="#cb266-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb266-3"><a href="#cb266-3" aria-hidden="true" tabindex="-1"></a><span class="kw">foreach</span> <span class="op">(</span>RaftPartitionRange range <span class="kw">in</span> map<span class="op">)</span></span>
+<span id="cb266-4"><a href="#cb266-4" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb266-5"><a href="#cb266-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> pid <span class="op">=</span> range<span class="op">.</span><span class="fu">PartitionId</span><span class="op">;</span></span>
+<span id="cb266-6"><a href="#cb266-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">double</span> ops <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionLogOpsPerSecond</span><span class="op">(</span>pid<span class="op">);</span></span>
+<span id="cb266-7"><a href="#cb266-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> depth <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionWalQueueDepth</span><span class="op">(</span>pid<span class="op">);</span></span>
+<span id="cb266-8"><a href="#cb266-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">double</span> waitMs <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionCommitWaitMs</span><span class="op">(</span>pid<span class="op">);</span></span>
+<span id="cb266-9"><a href="#cb266-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb266-10"><a href="#cb266-10" aria-hidden="true" tabindex="-1"></a>    Console<span class="op">.</span><span class="fu">WriteLine</span><span class="op">(</span></span>
+<span id="cb266-11"><a href="#cb266-11" aria-hidden="true" tabindex="-1"></a>        $<span class="st">&quot;P{pid}: ops/s={ops:F1}  queue={depth}  &quot;</span></span>
+<span id="cb266-12"><a href="#cb266-12" aria-hidden="true" tabindex="-1"></a>        <span class="op">+</span> $<span class="st">&quot;commitWait={waitMs:F1}ms&quot;</span></span>
+<span id="cb266-13"><a href="#cb266-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">);</span></span>
+<span id="cb266-14"><a href="#cb266-14" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h3 data-number="16.13.2" id="detecting-hotspots"><span class="header-section-number">16.13.2</span> Detecting Hotspots</h3>
+<div class="sourceCode" id="cb267"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb267-1"><a href="#cb267-1" aria-hidden="true" tabindex="-1"></a><span class="dt">double</span> avgOps <span class="op">=</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb267-2"><a href="#cb267-2" aria-hidden="true" tabindex="-1"></a><span class="dt">int</span> count <span class="op">=</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb267-3"><a href="#cb267-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb267-4"><a href="#cb267-4" aria-hidden="true" tabindex="-1"></a><span class="kw">foreach</span> <span class="op">(</span>RaftPartitionRange range <span class="kw">in</span> map<span class="op">)</span></span>
+<span id="cb267-5"><a href="#cb267-5" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb267-6"><a href="#cb267-6" aria-hidden="true" tabindex="-1"></a>    avgOps <span class="op">+=</span> raft<span class="op">.</span><span class="fu">GetPartitionLogOpsPerSecond</span><span class="op">(</span>range<span class="op">.</span><span class="fu">PartitionId</span><span class="op">);</span></span>
+<span id="cb267-7"><a href="#cb267-7" aria-hidden="true" tabindex="-1"></a>    count<span class="op">++;</span></span>
+<span id="cb267-8"><a href="#cb267-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb267-9"><a href="#cb267-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb267-10"><a href="#cb267-10" aria-hidden="true" tabindex="-1"></a>avgOps <span class="op">/=</span> count<span class="op">;</span></span>
+<span id="cb267-11"><a href="#cb267-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb267-12"><a href="#cb267-12" aria-hidden="true" tabindex="-1"></a><span class="kw">foreach</span> <span class="op">(</span>RaftPartitionRange range <span class="kw">in</span> map<span class="op">)</span></span>
+<span id="cb267-13"><a href="#cb267-13" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb267-14"><a href="#cb267-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">double</span> ops <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionLogOpsPerSecond</span><span class="op">(</span>range<span class="op">.</span><span class="fu">PartitionId</span><span class="op">);</span></span>
+<span id="cb267-15"><a href="#cb267-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>ops <span class="op">&gt;</span> avgOps <span class="op">*</span> <span class="dv">3</span><span class="op">)</span></span>
+<span id="cb267-16"><a href="#cb267-16" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb267-17"><a href="#cb267-17" aria-hidden="true" tabindex="-1"></a>        Console<span class="op">.</span><span class="fu">WriteLine</span><span class="op">(</span></span>
+<span id="cb267-18"><a href="#cb267-18" aria-hidden="true" tabindex="-1"></a>            $<span class="st">&quot;Hotspot: P{range.PartitionId} at {ops:F1} ops/s &quot;</span></span>
+<span id="cb267-19"><a href="#cb267-19" aria-hidden="true" tabindex="-1"></a>            <span class="op">+</span> $<span class="st">&quot;(avg={avgOps:F1})&quot;</span></span>
+<span id="cb267-20"><a href="#cb267-20" aria-hidden="true" tabindex="-1"></a>        <span class="op">);</span></span>
+<span id="cb267-21"><a href="#cb267-21" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb267-22"><a href="#cb267-22" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>A partition with 3 times the average ops/sec is a hotspot candidate.
+The leader balancer handles count-level redistribution automatically.
+For extreme hotspots, consider splitting the partition (Chapter 14).</p>
+<h2 data-number="16.14" id="summary-14"><span class="header-section-number">16.14</span> Summary</h2>
+<ul>
+<li>The leader balancer is off by default. Enable it with
+<code>EnableLeaderBalancer = true</code>.</li>
+<li>Each node emits a <code>NodeLoadReport</code> through gossip. The P0
+leader aggregates these into a <code>GlobalLeadershipView</code>.</li>
+<li>The planner uses a two-tier strategy: count tier (equalize
+leadership count) then load tier (equalize aggregate load through
+count-neutral swaps).</li>
+<li>The planner requires a complete view. If any live voter has no fresh
+report, zero moves are emitted.</li>
+<li>Moves use Raft’s leadership transfer mechanism. A dropped or ignored
+suggestion never violates safety.</li>
+<li><code>MoveCooldown</code> (default: 60 seconds) prevents
+oscillation. <code>MinLeaderStabilityMs</code> (default: 5 seconds)
+prevents premature moves.</li>
+<li>Load is computed as
+<code>OpsWeight x OpsPerSecond + QueueWeight x QueueDepth</code>. Tune
+the weights for your workload.</li>
+<li><code>GetPartitionLogOpsPerSecond</code>,
+<code>GetPartitionWalQueueDepth</code>, and
+<code>GetPartitionCommitWaitMs</code> expose per-partition load metrics
+for monitoring.</li>
+<li>The next chapter covers transport security and node
+authentication.</li>
+</ul>
+<h1 data-number="17" id="observability-and-diagnostics"><span class="header-section-number">17</span> Observability and
+Diagnostics</h1>
+<p>Your cluster is running. How do you know it is healthy? Is a follower
+lagging? Is the WAL under pressure? Is the leader balancer oscillating?
+You need observability to answer these questions.</p>
+<p>Kommander exposes three layers of observability:</p>
+<ol type="1">
+<li><strong>Diagnostic APIs.</strong> Methods on the <code>IRaft</code>
+interface that return per-partition and per-node health data.</li>
+<li><strong>OpenTelemetry metrics.</strong> Counters, histograms, and
+gauges emitted through <code>System.Diagnostics.Metrics</code>.</li>
+<li><strong>Structured logging.</strong> High-performance log messages
+generated with <code>[LoggerMessage]</code> source generators.</li>
+</ol>
+<p>This chapter covers all three layers and shows how to build a health
+endpoint that combines them.</p>
+<h2 data-number="17.1" id="the-three-primary-health-signals"><span class="header-section-number">17.1</span> The Three Primary Health
+Signals</h2>
+<p>Three per-partition methods form the core of runtime monitoring:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Method</th>
+<th>Returns</th>
+<th>What it measures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GetPartitionLogOpsPerSecond(int)</code></td>
+<td><code>double</code></td>
+<td>Throughput: the EWMA rate of replicated operations per second.</td>
+</tr>
+<tr>
+<td><code>GetPartitionWalQueueDepth(int)</code></td>
+<td><code>int</code></td>
+<td>Saturation: the number of WAL write operations queued for the
+partition.</td>
+</tr>
+<tr>
+<td><code>GetPartitionCommitWaitMs(int)</code></td>
+<td><code>double</code></td>
+<td>Latency: the EWMA time from enqueue to durable commit, in
+milliseconds.</td>
+</tr>
+</tbody>
+</table>
+<p>Each method follows a two-tier resolution path:</p>
+<ol type="1">
+<li><strong>Local fast path.</strong> If the partition is hosted on this
+node and this node is the leader, the value comes from the in-process
+executor and WAL scheduler. No network call.</li>
+<li><strong>Gossip path.</strong> If this node is not the leader, the
+value comes from the most recent <code>NodeLoadReport</code> received
+through gossip. The leader broadcasts its load report periodically.</li>
+</ol>
+<p>All three return <code>0</code> when the partition is not hosted or
+no data is available.</p>
+<pre><code>  Healthy partition:
+
+  OpsPerSecond = 1200.5     (throughput is steady)
+  WalQueueDepth = 0         (WAL is keeping up)
+  CommitWaitMs = 1.8        (fsync latency is low)
+
+  Partition under pressure:
+
+  OpsPerSecond = 3500.0     (high throughput)
+  WalQueueDepth = 42        (writes are queuing)
+  CommitWaitMs = 18.7       (fsync latency is rising)</code></pre>
+<h3 data-number="17.1.1" id="ewma-accumulators"><span class="header-section-number">17.1.1</span> EWMA Accumulators</h3>
+<p>The throughput and latency values use exponentially weighted moving
+averages (EWMA). These smooth out short spikes and reflect recent
+behavior.</p>
+<p><strong>PartitionLoadAccumulator</strong> tracks ops/sec with
+continuous-time exponential decay. The half-life is approximately 6.9
+seconds. A burst of operations raises the rate quickly. When the burst
+stops, the rate decays toward zero over several half-lives.</p>
+<p><strong>PartitionWaitAccumulator</strong> tracks commit-wait latency
+with geometric per-sample decay (alpha = 0.3). Each new sample blends
+into the running average. The accumulator converges in 4 to 5
+samples.</p>
+<h2 data-number="17.2" id="commit-index"><span class="header-section-number">17.2</span> Commit Index</h2>
+<div class="sourceCode" id="cb269"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb269-1"><a href="#cb269-1" aria-hidden="true" tabindex="-1"></a><span class="dt">long</span> commitIndex <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetCommitIndex</span><span class="op">(</span>partitionId<span class="op">);</span></span></code></pre></div>
+<p>Returns the highest contiguously committed log index for the
+partition. This is the gap-aware frontier: all entries up to and
+including this index are committed and applied. Returns <code>-1</code>
+when the partition is not hosted or nothing is committed.</p>
+<h3 data-number="17.2.1" id="replication-lag"><span class="header-section-number">17.2.1</span> Replication Lag</h3>
+<p>Compare the leader’s commit index to a follower’s commit index to
+measure replication lag:</p>
+<pre><code>  Leader:    GetCommitIndex(5) = 48230
+  Follower:  GetCommitIndex(5) = 48215
+  Lag:       15 entries
+
+  Leader:    GetCommitIndex(5) = 48230
+  Follower:  GetCommitIndex(5) = 48230
+  Lag:       0 (caught up)</code></pre>
+<p>A small lag (a few entries) is normal during active writes. A growing
+lag means the follower cannot keep up. Possible causes:</p>
+<ul>
+<li>Slow storage on the follower (high fsync latency).</li>
+<li>Network congestion between the leader and the follower.</li>
+<li>The follower is processing a snapshot install.</li>
+</ul>
+<h2 data-number="17.3" id="snapshot-and-backfill-status"><span class="header-section-number">17.3</span> Snapshot and Backfill
+Status</h2>
+<h3 data-number="17.3.1" id="getsnapshotstatuses"><span class="header-section-number">17.3.1</span> GetSnapshotStatuses</h3>
+<div class="sourceCode" id="cb271"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb271-1"><a href="#cb271-1" aria-hidden="true" tabindex="-1"></a>IReadOnlyList<span class="op">&lt;</span>RaftSnapshotStatus<span class="op">&gt;</span> statuses <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetSnapshotStatuses</span><span class="op">(</span>partitionId<span class="op">);</span></span></code></pre></div>
+<p>Returns the leader-side snapshot transfer status for each follower
+that needs a snapshot. The list is empty when no snapshot transfers are
+in progress. It is also empty when this node is not the leader.</p>
+<p>Each <code>RaftSnapshotStatus</code> contains:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Property</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FollowerEndpoint</code></td>
+<td><code>string</code></td>
+<td>The follower receiving the snapshot.</td>
+</tr>
+<tr>
+<td><code>FailedAttempts</code></td>
+<td><code>int</code></td>
+<td>Number of failed transfer attempts.</td>
+</tr>
+<tr>
+<td><code>LastError</code></td>
+<td><code>string?</code></td>
+<td>The most recent error message.</td>
+</tr>
+<tr>
+<td><code>Unproducible</code></td>
+<td><code>bool</code></td>
+<td><code>true</code> if the application cannot produce a snapshot.</td>
+</tr>
+<tr>
+<td><code>InFlight</code></td>
+<td><code>bool</code></td>
+<td><code>true</code> if a transfer is in progress now.</td>
+</tr>
+<tr>
+<td><code>InFlightFor</code></td>
+<td><code>TimeSpan?</code></td>
+<td>How long the current transfer has been running.</td>
+</tr>
+<tr>
+<td><code>FirstFailureAt</code></td>
+<td><code>DateTimeOffset?</code></td>
+<td>When the first failure occurred.</td>
+</tr>
+<tr>
+<td><code>LastFailureAt</code></td>
+<td><code>DateTimeOffset?</code></td>
+<td>When the most recent failure occurred.</td>
+</tr>
+<tr>
+<td><code>RetryBackoffRemaining</code></td>
+<td><code>TimeSpan</code></td>
+<td>Time until the next retry attempt.</td>
+</tr>
+</tbody>
+</table>
+<p>Watch for:</p>
+<ul>
+<li><code>FailedAttempts &gt; 0</code>: The transfer failed and is
+retrying with exponential backoff.</li>
+<li><code>Unproducible = true</code>: The application’s state transfer
+callback returned no data. Check your
+<code>IRaftPartitionStateTransfer</code> implementation.</li>
+<li><code>InFlightFor</code> growing beyond a few seconds: The transfer
+is slow. Large snapshots on constrained networks cause this.</li>
+</ul>
+<h3 data-number="17.3.2" id="getbackfillstatuses"><span class="header-section-number">17.3.2</span> GetBackfillStatuses</h3>
+<div class="sourceCode" id="cb272"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb272-1"><a href="#cb272-1" aria-hidden="true" tabindex="-1"></a>IReadOnlyList<span class="op">&lt;</span>RaftBackfillStatus<span class="op">&gt;</span> statuses <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetBackfillStatuses</span><span class="op">(</span>partitionId<span class="op">);</span></span></code></pre></div>
+<p>Returns the leader-side backfill refusal status for each follower
+that requested entries the leader no longer holds. The list is empty
+when no refusals occurred.</p>
+<p>Each <code>RaftBackfillStatus</code> contains:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Property</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FollowerEndpoint</code></td>
+<td><code>string</code></td>
+<td>The follower that requested entries.</td>
+</tr>
+<tr>
+<td><code>AnchorIndex</code></td>
+<td><code>long</code></td>
+<td>The log index the follower asked for.</td>
+</tr>
+<tr>
+<td><code>FirstAvailableIndex</code></td>
+<td><code>long</code></td>
+<td>The oldest index the leader still holds.</td>
+</tr>
+<tr>
+<td><code>LastCheckpoint</code></td>
+<td><code>long</code></td>
+<td>The leader’s last committed checkpoint.</td>
+</tr>
+<tr>
+<td><code>Occurrences</code></td>
+<td><code>int</code></td>
+<td>How many times this follower was refused.</td>
+</tr>
+<tr>
+<td><code>FirstRefusedAt</code></td>
+<td><code>DateTimeOffset</code></td>
+<td>When the first refusal occurred.</td>
+</tr>
+<tr>
+<td><code>LastRefusedAt</code></td>
+<td><code>DateTimeOffset</code></td>
+<td>When the most recent refusal occurred.</td>
+</tr>
+</tbody>
+</table>
+<p>A backfill refusal means the follower fell so far behind that the
+leader compacted away the entries it needs. The follower must receive a
+full snapshot instead of incremental backfill. A persistent pattern of
+refusals suggests one of these problems:</p>
+<ul>
+<li>Compaction is too aggressive for the cluster’s catch-up speed.</li>
+<li>The follower was offline for a long time.</li>
+<li>Network bandwidth between the leader and follower is not
+sufficient.</li>
+</ul>
+<h2 data-number="17.4" id="stale-proposed-count"><span class="header-section-number">17.4</span> Stale Proposed Count</h2>
+<div class="sourceCode" id="cb273"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb273-1"><a href="#cb273-1" aria-hidden="true" tabindex="-1"></a><span class="dt">long</span> count <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetStaleProposedSkippedCount</span><span class="op">(</span>partitionId<span class="op">);</span></span></code></pre></div>
+<p>Returns the number of duplicate <code>Proposed</code> entries that
+the WAL handler refused since the last partition start. A stale proposal
+occurs when a WAL completion arrives for the wrong partition, term, or
+operation ID.</p>
+<ul>
+<li>Returns <code>-1</code> when the partition is not hosted.</li>
+<li>Returns <code>0</code> when hosted but no duplicates occurred.</li>
+</ul>
+<p>A non-zero count is not an error. It can happen during leader
+transitions when proposals from the old term arrive after the new term
+started. A steadily growing count at high rate may indicate a
+configuration problem or a network partition that causes repeated
+retries.</p>
+<h2 data-number="17.5" id="node-activity"><span class="header-section-number">17.5</span> Node Activity</h2>
+<h3 data-number="17.5.1" id="getactivenodes"><span class="header-section-number">17.5.1</span> GetActiveNodes</h3>
+<div class="sourceCode" id="cb274"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb274-1"><a href="#cb274-1" aria-hidden="true" tabindex="-1"></a>IReadOnlyList<span class="op">&lt;</span><span class="dt">string</span><span class="op">&gt;</span> activeNodes <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetActiveNodes</span><span class="op">(</span>TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">30</span><span class="op">));</span></span></code></pre></div>
+<p>Returns all non-local node endpoints that had activity within the
+specified window. The list is sorted alphabetically. Use this to verify
+cluster health: the list should contain all peer endpoints.</p>
+<h3 data-number="17.5.2" id="getlastnodeactivity"><span class="header-section-number">17.5.2</span> GetLastNodeActivity</h3>
+<div class="sourceCode" id="cb275"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb275-1"><a href="#cb275-1" aria-hidden="true" tabindex="-1"></a>HLCTimestamp lastSeen <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetLastNodeActivity</span><span class="op">(</span><span class="st">&quot;https://node-b:8001&quot;</span><span class="op">);</span></span></code></pre></div>
+<p>Returns the most recent activity timestamp for the specified endpoint
+across all partitions. Returns <code>HLCTimestamp.Zero</code> if the
+node was never seen.</p>
+<h3 data-number="17.5.3" id="nodeactivitytracker"><span class="header-section-number">17.5.3</span> NodeActivityTracker</h3>
+<p>The <code>NodeActivityTracker</code> is the internal component that
+records all node activity. It uses a two-level
+<code>ConcurrentDictionary</code>: endpoint to partition to
+timestamp.</p>
+<p>Every Raft RPC (vote request, append entries, heartbeat) updates the
+tracker. The tracker stores both general activity timestamps and
+heartbeat timestamps separately. This lets you distinguish between “the
+node sent us data” and “the node sent us a heartbeat.”</p>
+<pre><code>  NodeActivityTracker internal state:
+
+  lastActivity:
+    &quot;https://node-b:8001&quot; → { partition 0: T+5.2, partition 3: T+4.8 }
+    &quot;https://node-c:8001&quot; → { partition 0: T+5.0, partition 1: T+3.1 }
+
+  lastHeartbeat:
+    &quot;https://node-b:8001&quot; → { partition 0: T+5.2, partition 3: T+4.7 }
+    &quot;https://node-c:8001&quot; → { partition 0: T+4.9, partition 1: T+3.0 }</code></pre>
+<h2 data-number="17.6" id="cluster-membership-and-partition-map"><span class="header-section-number">17.6</span> Cluster Membership and
+Partition Map</h2>
+<p>Two methods provide the cluster topology:</p>
+<div class="sourceCode" id="cb277"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb277-1"><a href="#cb277-1" aria-hidden="true" tabindex="-1"></a>ClusterMembership membership <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetMembership</span><span class="op">();</span></span>
+<span id="cb277-2"><a href="#cb277-2" aria-hidden="true" tabindex="-1"></a>IReadOnlyList<span class="op">&lt;</span>RaftPartitionRange<span class="op">&gt;</span> partitionMap <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionMap</span><span class="op">();</span></span></code></pre></div>
+<p><code>GetMembership()</code> returns a point-in-time snapshot of the
+committed cluster membership. Each <code>ClusterMember</code>
+contains:</p>
+<ul>
+<li><code>Endpoint</code>: The node’s address.</li>
+<li><code>NodeId</code>: The node’s numeric identifier.</li>
+<li><code>Role</code>: One of <code>Voter</code>, <code>Learner</code>,
+<code>Leaving</code>, or <code>NotMember</code>.</li>
+<li><code>JoinedVersion</code>: The membership version at which the node
+joined.</li>
+</ul>
+<p><code>GetPartitionMap()</code> returns a copy of the current
+partition map. Each <code>RaftPartitionRange</code> contains the
+partition ID, hash range, generation, state, routing mode, replicas, and
+replication factor.</p>
+<h2 data-number="17.7" id="kommandermetrics-opentelemetry-integration"><span class="header-section-number">17.7</span> KommanderMetrics:
+OpenTelemetry Integration</h2>
+<p>The <code>KommanderMetrics</code> class registers a
+<code>System.Diagnostics.Metrics.Meter</code> named
+<code>&quot;Kommander&quot;</code>. All instruments are static and shared across
+the process. When no metric listener is attached, the overhead is
+zero.</p>
+<h3 data-number="17.7.1" id="counters"><span class="header-section-number">17.7.1</span> Counters</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Instrument</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>raft.executor.operations_total</code></td>
+<td>ops</td>
+<td>Total operations processed by partition executors, tagged by
+class.</td>
+</tr>
+<tr>
+<td><code>raft.executor.rejections_total</code></td>
+<td>ops</td>
+<td>Client proposals rejected because the per-partition queue was
+full.</td>
+</tr>
+<tr>
+<td><code>raft.wal.batches_total</code></td>
+<td>batches</td>
+<td>WAL write batches dispatched to the storage adapter.</td>
+</tr>
+<tr>
+<td><code>raft.wal.operations_total</code></td>
+<td>ops</td>
+<td>Individual WAL write operations completed.</td>
+</tr>
+<tr>
+<td><code>raft.wal.compaction_passes_total</code></td>
+<td>passes</td>
+<td>Compaction passes invoked, tagged by outcome.</td>
+</tr>
+<tr>
+<td><code>raft.wal.compaction_blocked_by_durability_floor_total</code></td>
+<td>passes</td>
+<td>Compaction passes blocked by the application durability floor.</td>
+</tr>
+<tr>
+<td><code>raft.snapshot.transfer_failures_total</code></td>
+<td>failures</td>
+<td>Failed snapshot transfer attempts, tagged by cause.</td>
+</tr>
+<tr>
+<td><code>raft.stale_completions_total</code></td>
+<td>ops</td>
+<td>WAL completions discarded as stale.</td>
+</tr>
+<tr>
+<td><code>raft.elections_started_total</code></td>
+<td>elections</td>
+<td>Election attempts (transitions to candidate), tagged by
+partition.</td>
+</tr>
+<tr>
+<td><code>raft.heartbeats_sent_total</code></td>
+<td>heartbeats</td>
+<td>Heartbeat messages sent by leader partitions.</td>
+</tr>
+<tr>
+<td><code>raft.balancer.moves_total</code></td>
+<td>moves</td>
+<td>Leadership transfer moves, tagged by outcome (<code>planned</code>,
+<code>succeeded</code>, <code>timed_out</code>).</td>
+</tr>
+<tr>
+<td><code>raft.balancer.skipped_passes_total</code></td>
+<td>passes</td>
+<td>Balancer passes skipped because the global view was incomplete.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="17.7.2" id="histograms"><span class="header-section-number">17.7.2</span> Histograms</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Instrument</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>raft.executor.operation_duration_ms</code></td>
+<td>ms</td>
+<td>Per-operation dispatch latency in the partition executor, tagged by
+class.</td>
+</tr>
+<tr>
+<td><code>raft.wal.batch_size</code></td>
+<td>ops</td>
+<td>Distribution of WAL write batch sizes.</td>
+</tr>
+<tr>
+<td><code>raft.wal.durability_floor_lag</code></td>
+<td>entries</td>
+<td>Entries between the application durability floor and the last
+checkpoint.</td>
+</tr>
+<tr>
+<td><code>raft.heartbeat_delay_ms</code></td>
+<td>ms</td>
+<td>Interval between consecutive heartbeats sent by a leader
+partition.</td>
+</tr>
+<tr>
+<td><code>raft.election_delay_ms</code></td>
+<td>ms</td>
+<td>Time since last heartbeat when an election was triggered.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="17.7.3" id="observable-gauges"><span class="header-section-number">17.7.3</span> Observable Gauges</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Instrument</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>raft.executor.client_queue_depth</code></td>
+<td>ops</td>
+<td>Current client proposals pending in each partition executor’s
+queue.</td>
+</tr>
+<tr>
+<td><code>raft.wal.queue_depth</code></td>
+<td>ops</td>
+<td>Current pending or in-flight WAL operations per partition.</td>
+</tr>
+<tr>
+<td><code>raft.balancer.count_imbalance</code></td>
+<td>ratio</td>
+<td>Max node leadership count minus target (P0 leader only).</td>
+</tr>
+<tr>
+<td><code>raft.balancer.load_imbalance</code></td>
+<td>ratio</td>
+<td>Fractional load imbalance:
+<code>(maxLoad / meanLoad) - 1</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The observable gauges use weak references to registered executor and
+scheduler instances. This prevents the metrics system from keeping
+disposed partitions alive. The gauge callback iterates live instances
+and reports their current state.</p>
+<h3 data-number="17.7.4" id="connecting-to-opentelemetry"><span class="header-section-number">17.7.4</span> Connecting to
+OpenTelemetry</h3>
+<p>Register the <code>Kommander</code> meter with your OpenTelemetry
+pipeline:</p>
+<div class="sourceCode" id="cb278"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb278-1"><a href="#cb278-1" aria-hidden="true" tabindex="-1"></a>builder<span class="op">.</span><span class="fu">Services</span><span class="op">.</span><span class="fu">AddOpenTelemetry</span><span class="op">()</span></span>
+<span id="cb278-2"><a href="#cb278-2" aria-hidden="true" tabindex="-1"></a>    <span class="op">.</span><span class="fu">WithMetrics</span><span class="op">(</span>metrics <span class="op">=&gt;</span></span>
+<span id="cb278-3"><a href="#cb278-3" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb278-4"><a href="#cb278-4" aria-hidden="true" tabindex="-1"></a>        metrics<span class="op">.</span><span class="fu">AddMeter</span><span class="op">(</span><span class="st">&quot;Kommander&quot;</span><span class="op">);</span></span>
+<span id="cb278-5"><a href="#cb278-5" aria-hidden="true" tabindex="-1"></a>        metrics<span class="op">.</span><span class="fu">AddPrometheusExporter</span><span class="op">();</span></span>
+<span id="cb278-6"><a href="#cb278-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">});</span></span></code></pre></div>
+<p>All Kommander instruments are then available in your metrics backend
+(Prometheus, Grafana, Datadog, or any OpenTelemetry-compatible
+collector).</p>
+<h2 data-number="17.8" id="structured-logging"><span class="header-section-number">17.8</span> Structured Logging</h2>
+<p>Kommander uses <code>[LoggerMessage]</code> source-generated log
+methods throughout the codebase. These generate zero allocations when
+the log level is not enabled. The library defines over 60 message
+templates that cover:</p>
+<ul>
+<li>WAL restore progress and completion.</li>
+<li>Voting decisions and election outcomes.</li>
+<li>Proposal submission and commit acknowledgment.</li>
+<li>Rollback events.</li>
+<li>Heartbeat send and receive.</li>
+<li>Backfill progress and refusals.</li>
+<li>Snapshot install start and completion.</li>
+<li>Compaction pass results.</li>
+<li>Membership changes (join, leave, promotion).</li>
+<li>Replica placement decisions.</li>
+<li>Transport authentication results.</li>
+</ul>
+<h3 data-number="17.8.1" id="what-to-watch-for"><span class="header-section-number">17.8.1</span> What to Watch For</h3>
+<p><strong>Warning level.</strong> These messages indicate conditions
+that need attention but do not stop the cluster:</p>
+<ul>
+<li>Configuration validation warnings at startup (for example, a setting
+that reduces durability).</li>
+<li>Compaction passes that find no checkpoint.</li>
+<li>Snapshot transfer failures.</li>
+<li>Backfill refusals.</li>
+<li>Clock skew warnings during authentication.</li>
+</ul>
+<p><strong>Error level.</strong> These messages indicate failures:</p>
+<ul>
+<li>WAL write failures.</li>
+<li>Transport errors between nodes.</li>
+<li>Unhandled exceptions in partition executors.</li>
+</ul>
+<p><strong>Information level.</strong> These messages are useful for
+understanding cluster behavior:</p>
+<ul>
+<li>Election started and completed.</li>
+<li>Leader transitions.</li>
+<li>Node join and leave events.</li>
+<li>Snapshot transfers started and completed.</li>
+</ul>
+<h3 data-number="17.8.2" id="configuration"><span class="header-section-number">17.8.2</span> Configuration</h3>
+<p>Pass your logger through <code>RaftConfiguration</code>:</p>
+<div class="sourceCode" id="cb279"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb279-1"><a href="#cb279-1" aria-hidden="true" tabindex="-1"></a>RaftConfiguration configuration <span class="op">=</span> <span class="kw">new</span><span class="op">()</span></span>
+<span id="cb279-2"><a href="#cb279-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb279-3"><a href="#cb279-3" aria-hidden="true" tabindex="-1"></a>    NodeName <span class="op">=</span> <span class="st">&quot;node-a&quot;</span><span class="op">,</span></span>
+<span id="cb279-4"><a href="#cb279-4" aria-hidden="true" tabindex="-1"></a>    Host <span class="op">=</span> <span class="st">&quot;localhost&quot;</span><span class="op">,</span></span>
+<span id="cb279-5"><a href="#cb279-5" aria-hidden="true" tabindex="-1"></a>    Port <span class="op">=</span> <span class="dv">8001</span><span class="op">,</span></span>
+<span id="cb279-6"><a href="#cb279-6" aria-hidden="true" tabindex="-1"></a>    Logger <span class="op">=</span> app<span class="op">.</span><span class="fu">Logger</span></span>
+<span id="cb279-7"><a href="#cb279-7" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span></code></pre></div>
+<p>Kommander uses the standard <code>ILogger</code> interface. Set the
+log level through your logging framework’s configuration.</p>
+<h2 data-number="17.9" id="wal-phase-instrumentation"><span class="header-section-number">17.9</span> WAL Phase Instrumentation</h2>
+<p>The <code>WalPhaseInstrumentation</code> class provides detailed
+latency decomposition for the WAL write path. It is disabled by default
+because it adds per-operation overhead.</p>
+<p>When enabled, it records three phases:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Phase</th>
+<th>What it measures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LeaderPropose</code></td>
+<td>Time to write the <code>Proposed</code> entry and fsync.</td>
+</tr>
+<tr>
+<td><code>LeaderCommit</code></td>
+<td>Time to write the <code>Committed</code> entry (with or without
+fsync).</td>
+</tr>
+<tr>
+<td><code>FollowerAppend</code></td>
+<td>Time for a follower to write an appended entry.</td>
+</tr>
+</tbody>
+</table>
+<p>For each phase, the instrumentation reports:</p>
+<ul>
+<li>Enqueued count.</li>
+<li>Mean latency.</li>
+<li>P50 latency (median).</li>
+<li>P99 latency.</li>
+</ul>
+<p>Enable it only for targeted performance investigations. The overhead
+is small but not zero.</p>
+<h2 data-number="17.10" id="building-a-health-endpoint"><span class="header-section-number">17.10</span> Building a Health
+Endpoint</h2>
+<p>Combine the diagnostic APIs into a health endpoint that reports
+cluster status:</p>
+<div class="sourceCode" id="cb280"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb280-1"><a href="#cb280-1" aria-hidden="true" tabindex="-1"></a>app<span class="op">.</span><span class="fu">MapGet</span><span class="op">(</span><span class="st">&quot;/health&quot;</span><span class="op">,</span> <span class="op">(</span>IRaft raft<span class="op">)</span> <span class="op">=&gt;</span></span>
+<span id="cb280-2"><a href="#cb280-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb280-3"><a href="#cb280-3" aria-hidden="true" tabindex="-1"></a>    ClusterMembership membership <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetMembership</span><span class="op">();</span></span>
+<span id="cb280-4"><a href="#cb280-4" aria-hidden="true" tabindex="-1"></a>    IReadOnlyList<span class="op">&lt;</span>RaftPartitionRange<span class="op">&gt;</span> partitions <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionMap</span><span class="op">();</span></span>
+<span id="cb280-5"><a href="#cb280-5" aria-hidden="true" tabindex="-1"></a>    IReadOnlyList<span class="op">&lt;</span><span class="dt">string</span><span class="op">&gt;</span> activeNodes <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetActiveNodes</span><span class="op">(</span>TimeSpan<span class="op">.</span><span class="fu">FromSeconds</span><span class="op">(</span><span class="dv">30</span><span class="op">));</span></span>
+<span id="cb280-6"><a href="#cb280-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb280-7"><a href="#cb280-7" aria-hidden="true" tabindex="-1"></a>    List<span class="op">&lt;</span><span class="dt">object</span><span class="op">&gt;</span> partitionHealth <span class="op">=</span> <span class="op">[];</span></span>
+<span id="cb280-8"><a href="#cb280-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb280-9"><a href="#cb280-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">foreach</span> <span class="op">(</span>RaftPartitionRange partition <span class="kw">in</span> partitions<span class="op">)</span></span>
+<span id="cb280-10"><a href="#cb280-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb280-11"><a href="#cb280-11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">int</span> pid <span class="op">=</span> partition<span class="op">.</span><span class="fu">PartitionId</span><span class="op">;</span></span>
+<span id="cb280-12"><a href="#cb280-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb280-13"><a href="#cb280-13" aria-hidden="true" tabindex="-1"></a>        partitionHealth<span class="op">.</span><span class="fu">Add</span><span class="op">(</span><span class="kw">new</span></span>
+<span id="cb280-14"><a href="#cb280-14" aria-hidden="true" tabindex="-1"></a>        <span class="op">{</span></span>
+<span id="cb280-15"><a href="#cb280-15" aria-hidden="true" tabindex="-1"></a>            partitionId <span class="op">=</span> pid<span class="op">,</span></span>
+<span id="cb280-16"><a href="#cb280-16" aria-hidden="true" tabindex="-1"></a>            generation <span class="op">=</span> partition<span class="op">.</span><span class="fu">Generation</span><span class="op">,</span></span>
+<span id="cb280-17"><a href="#cb280-17" aria-hidden="true" tabindex="-1"></a>            state <span class="op">=</span> partition<span class="op">.</span><span class="fu">State</span><span class="op">.</span><span class="fu">ToString</span><span class="op">(),</span></span>
+<span id="cb280-18"><a href="#cb280-18" aria-hidden="true" tabindex="-1"></a>            replicas <span class="op">=</span> partition<span class="op">.</span><span class="fu">Replicas</span><span class="op">.</span><span class="fu">Count</span><span class="op">,</span></span>
+<span id="cb280-19"><a href="#cb280-19" aria-hidden="true" tabindex="-1"></a>            replicationFactor <span class="op">=</span> partition<span class="op">.</span><span class="fu">ReplicationFactor</span><span class="op">,</span></span>
+<span id="cb280-20"><a href="#cb280-20" aria-hidden="true" tabindex="-1"></a>            commitIndex <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetCommitIndex</span><span class="op">(</span>pid<span class="op">),</span></span>
+<span id="cb280-21"><a href="#cb280-21" aria-hidden="true" tabindex="-1"></a>            opsPerSecond <span class="op">=</span> Math<span class="op">.</span><span class="fu">Round</span><span class="op">(</span>raft<span class="op">.</span><span class="fu">GetPartitionLogOpsPerSecond</span><span class="op">(</span>pid<span class="op">),</span> <span class="dv">1</span><span class="op">),</span></span>
+<span id="cb280-22"><a href="#cb280-22" aria-hidden="true" tabindex="-1"></a>            walQueueDepth <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetPartitionWalQueueDepth</span><span class="op">(</span>pid<span class="op">),</span></span>
+<span id="cb280-23"><a href="#cb280-23" aria-hidden="true" tabindex="-1"></a>            commitWaitMs <span class="op">=</span> Math<span class="op">.</span><span class="fu">Round</span><span class="op">(</span>raft<span class="op">.</span><span class="fu">GetPartitionCommitWaitMs</span><span class="op">(</span>pid<span class="op">),</span> <span class="dv">1</span><span class="op">),</span></span>
+<span id="cb280-24"><a href="#cb280-24" aria-hidden="true" tabindex="-1"></a>            staleProposedSkipped <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetStaleProposedSkippedCount</span><span class="op">(</span>pid<span class="op">),</span></span>
+<span id="cb280-25"><a href="#cb280-25" aria-hidden="true" tabindex="-1"></a>            snapshotTransfers <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetSnapshotStatuses</span><span class="op">(</span>pid<span class="op">).</span><span class="fu">Select</span><span class="op">(</span>s <span class="op">=&gt;</span> <span class="kw">new</span></span>
+<span id="cb280-26"><a href="#cb280-26" aria-hidden="true" tabindex="-1"></a>            <span class="op">{</span></span>
+<span id="cb280-27"><a href="#cb280-27" aria-hidden="true" tabindex="-1"></a>                follower <span class="op">=</span> s<span class="op">.</span><span class="fu">FollowerEndpoint</span><span class="op">,</span></span>
+<span id="cb280-28"><a href="#cb280-28" aria-hidden="true" tabindex="-1"></a>                failedAttempts <span class="op">=</span> s<span class="op">.</span><span class="fu">FailedAttempts</span><span class="op">,</span></span>
+<span id="cb280-29"><a href="#cb280-29" aria-hidden="true" tabindex="-1"></a>                lastError <span class="op">=</span> s<span class="op">.</span><span class="fu">LastError</span><span class="op">,</span></span>
+<span id="cb280-30"><a href="#cb280-30" aria-hidden="true" tabindex="-1"></a>                inFlight <span class="op">=</span> s<span class="op">.</span><span class="fu">InFlight</span><span class="op">,</span></span>
+<span id="cb280-31"><a href="#cb280-31" aria-hidden="true" tabindex="-1"></a>                retryBackoffRemaining <span class="op">=</span> s<span class="op">.</span><span class="fu">RetryBackoffRemaining</span><span class="op">.</span><span class="fu">TotalSeconds</span></span>
+<span id="cb280-32"><a href="#cb280-32" aria-hidden="true" tabindex="-1"></a>            <span class="op">}),</span></span>
+<span id="cb280-33"><a href="#cb280-33" aria-hidden="true" tabindex="-1"></a>            backfillRefusals <span class="op">=</span> raft<span class="op">.</span><span class="fu">GetBackfillStatuses</span><span class="op">(</span>pid<span class="op">).</span><span class="fu">Select</span><span class="op">(</span>b <span class="op">=&gt;</span> <span class="kw">new</span></span>
+<span id="cb280-34"><a href="#cb280-34" aria-hidden="true" tabindex="-1"></a>            <span class="op">{</span></span>
+<span id="cb280-35"><a href="#cb280-35" aria-hidden="true" tabindex="-1"></a>                follower <span class="op">=</span> b<span class="op">.</span><span class="fu">FollowerEndpoint</span><span class="op">,</span></span>
+<span id="cb280-36"><a href="#cb280-36" aria-hidden="true" tabindex="-1"></a>                anchorIndex <span class="op">=</span> b<span class="op">.</span><span class="fu">AnchorIndex</span><span class="op">,</span></span>
+<span id="cb280-37"><a href="#cb280-37" aria-hidden="true" tabindex="-1"></a>                firstAvailableIndex <span class="op">=</span> b<span class="op">.</span><span class="fu">FirstAvailableIndex</span><span class="op">,</span></span>
+<span id="cb280-38"><a href="#cb280-38" aria-hidden="true" tabindex="-1"></a>                occurrences <span class="op">=</span> b<span class="op">.</span><span class="fu">Occurrences</span></span>
+<span id="cb280-39"><a href="#cb280-39" aria-hidden="true" tabindex="-1"></a>            <span class="op">})</span></span>
+<span id="cb280-40"><a href="#cb280-40" aria-hidden="true" tabindex="-1"></a>        <span class="op">});</span></span>
+<span id="cb280-41"><a href="#cb280-41" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb280-42"><a href="#cb280-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb280-43"><a href="#cb280-43" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> Results<span class="op">.</span><span class="fu">Ok</span><span class="op">(</span><span class="kw">new</span></span>
+<span id="cb280-44"><a href="#cb280-44" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb280-45"><a href="#cb280-45" aria-hidden="true" tabindex="-1"></a>        membership <span class="op">=</span> <span class="kw">new</span></span>
+<span id="cb280-46"><a href="#cb280-46" aria-hidden="true" tabindex="-1"></a>        <span class="op">{</span></span>
+<span id="cb280-47"><a href="#cb280-47" aria-hidden="true" tabindex="-1"></a>            version <span class="op">=</span> membership<span class="op">.</span><span class="fu">MembershipVersion</span><span class="op">,</span></span>
+<span id="cb280-48"><a href="#cb280-48" aria-hidden="true" tabindex="-1"></a>            members <span class="op">=</span> membership<span class="op">.</span><span class="fu">Members</span><span class="op">.</span><span class="fu">Select</span><span class="op">(</span>m <span class="op">=&gt;</span> <span class="kw">new</span></span>
+<span id="cb280-49"><a href="#cb280-49" aria-hidden="true" tabindex="-1"></a>            <span class="op">{</span></span>
+<span id="cb280-50"><a href="#cb280-50" aria-hidden="true" tabindex="-1"></a>                endpoint <span class="op">=</span> m<span class="op">.</span><span class="fu">Endpoint</span><span class="op">,</span></span>
+<span id="cb280-51"><a href="#cb280-51" aria-hidden="true" tabindex="-1"></a>                nodeId <span class="op">=</span> m<span class="op">.</span><span class="fu">NodeId</span><span class="op">,</span></span>
+<span id="cb280-52"><a href="#cb280-52" aria-hidden="true" tabindex="-1"></a>                role <span class="op">=</span> m<span class="op">.</span><span class="fu">Role</span><span class="op">.</span><span class="fu">ToString</span><span class="op">()</span></span>
+<span id="cb280-53"><a href="#cb280-53" aria-hidden="true" tabindex="-1"></a>            <span class="op">})</span></span>
+<span id="cb280-54"><a href="#cb280-54" aria-hidden="true" tabindex="-1"></a>        <span class="op">},</span></span>
+<span id="cb280-55"><a href="#cb280-55" aria-hidden="true" tabindex="-1"></a>        activeNodes<span class="op">,</span></span>
+<span id="cb280-56"><a href="#cb280-56" aria-hidden="true" tabindex="-1"></a>        partitions <span class="op">=</span> partitionHealth</span>
+<span id="cb280-57"><a href="#cb280-57" aria-hidden="true" tabindex="-1"></a>    <span class="op">});</span></span>
+<span id="cb280-58"><a href="#cb280-58" aria-hidden="true" tabindex="-1"></a><span class="op">});</span></span></code></pre></div>
+<h3 data-number="17.10.1" id="reading-the-health-response"><span class="header-section-number">17.10.1</span> Reading the Health
+Response</h3>
+<p>A healthy response looks like this (three nodes, two partitions):</p>
+<div class="sourceCode" id="cb281"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb281-1"><a href="#cb281-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb281-2"><a href="#cb281-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;membership&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb281-3"><a href="#cb281-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;version&quot;</span><span class="fu">:</span> <span class="dv">3</span><span class="fu">,</span></span>
+<span id="cb281-4"><a href="#cb281-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;members&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb281-5"><a href="#cb281-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;endpoint&quot;</span><span class="fu">:</span> <span class="st">&quot;https://node-a:8001&quot;</span><span class="fu">,</span> <span class="dt">&quot;nodeId&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span> <span class="dt">&quot;role&quot;</span><span class="fu">:</span> <span class="st">&quot;Voter&quot;</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb281-6"><a href="#cb281-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;endpoint&quot;</span><span class="fu">:</span> <span class="st">&quot;https://node-b:8001&quot;</span><span class="fu">,</span> <span class="dt">&quot;nodeId&quot;</span><span class="fu">:</span> <span class="dv">2</span><span class="fu">,</span> <span class="dt">&quot;role&quot;</span><span class="fu">:</span> <span class="st">&quot;Voter&quot;</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb281-7"><a href="#cb281-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span> <span class="dt">&quot;endpoint&quot;</span><span class="fu">:</span> <span class="st">&quot;https://node-c:8001&quot;</span><span class="fu">,</span> <span class="dt">&quot;nodeId&quot;</span><span class="fu">:</span> <span class="dv">3</span><span class="fu">,</span> <span class="dt">&quot;role&quot;</span><span class="fu">:</span> <span class="st">&quot;Voter&quot;</span> <span class="fu">}</span></span>
+<span id="cb281-8"><a href="#cb281-8" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="cb281-9"><a href="#cb281-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb281-10"><a href="#cb281-10" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;activeNodes&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb281-11"><a href="#cb281-11" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;https://node-b:8001&quot;</span><span class="ot">,</span></span>
+<span id="cb281-12"><a href="#cb281-12" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;https://node-c:8001&quot;</span></span>
+<span id="cb281-13"><a href="#cb281-13" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb281-14"><a href="#cb281-14" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;partitions&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb281-15"><a href="#cb281-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb281-16"><a href="#cb281-16" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;partitionId&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span></span>
+<span id="cb281-17"><a href="#cb281-17" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;commitIndex&quot;</span><span class="fu">:</span> <span class="dv">15230</span><span class="fu">,</span></span>
+<span id="cb281-18"><a href="#cb281-18" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;opsPerSecond&quot;</span><span class="fu">:</span> <span class="fl">450.2</span><span class="fu">,</span></span>
+<span id="cb281-19"><a href="#cb281-19" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;walQueueDepth&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span></span>
+<span id="cb281-20"><a href="#cb281-20" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;commitWaitMs&quot;</span><span class="fu">:</span> <span class="fl">1.2</span><span class="fu">,</span></span>
+<span id="cb281-21"><a href="#cb281-21" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;staleProposedSkipped&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span></span>
+<span id="cb281-22"><a href="#cb281-22" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;snapshotTransfers&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="cb281-23"><a href="#cb281-23" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;backfillRefusals&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="cb281-24"><a href="#cb281-24" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb281-25"><a href="#cb281-25" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb281-26"><a href="#cb281-26" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;partitionId&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb281-27"><a href="#cb281-27" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;commitIndex&quot;</span><span class="fu">:</span> <span class="dv">12810</span><span class="fu">,</span></span>
+<span id="cb281-28"><a href="#cb281-28" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;opsPerSecond&quot;</span><span class="fu">:</span> <span class="fl">380.7</span><span class="fu">,</span></span>
+<span id="cb281-29"><a href="#cb281-29" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;walQueueDepth&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span></span>
+<span id="cb281-30"><a href="#cb281-30" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;commitWaitMs&quot;</span><span class="fu">:</span> <span class="fl">1.5</span><span class="fu">,</span></span>
+<span id="cb281-31"><a href="#cb281-31" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;staleProposedSkipped&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">,</span></span>
+<span id="cb281-32"><a href="#cb281-32" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;snapshotTransfers&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="cb281-33"><a href="#cb281-33" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;backfillRefusals&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="cb281-34"><a href="#cb281-34" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb281-35"><a href="#cb281-35" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span></span>
+<span id="cb281-36"><a href="#cb281-36" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>Signs of trouble:</p>
+<ul>
+<li><code>walQueueDepth &gt; 0</code> on a sustained basis means the WAL
+cannot keep up with the write rate.</li>
+<li><code>commitWaitMs</code> rising means fsync latency is increasing.
+Check disk I/O.</li>
+<li><code>snapshotTransfers</code> not empty means followers need
+snapshot catch-up. Check <code>failedAttempts</code> and
+<code>lastError</code>.</li>
+<li><code>backfillRefusals</code> not empty means followers fell behind
+past the compaction horizon.</li>
+<li><code>activeNodes</code> missing a peer means that node has not
+communicated within the window. Check network connectivity.</li>
+<li>A member with role <code>Leaving</code> means a decommission is in
+progress. Wait for it to complete.</li>
+</ul>
+<h2 data-number="17.11" id="metric-alerting-guidelines"><span class="header-section-number">17.11</span> Metric Alerting
+Guidelines</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Condition</th>
+<th>Suggested action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>raft.executor.rejections_total</code></td>
+<td>Increasing</td>
+<td>The partition queue is full. Reduce write rate or increase queue
+capacity.</td>
+</tr>
+<tr>
+<td><code>raft.executor.client_queue_depth</code></td>
+<td>Sustained &gt; 100</td>
+<td>Backpressure is building. Check commit latency.</td>
+</tr>
+<tr>
+<td><code>raft.wal.queue_depth</code></td>
+<td>Sustained &gt; 0</td>
+<td>WAL writes are queuing. Check disk throughput.</td>
+</tr>
+<tr>
+<td><code>raft.snapshot.transfer_failures_total</code></td>
+<td>Increasing</td>
+<td>Snapshot transfers are failing. Check network and
+<code>IRaftPartitionStateTransfer</code> implementation.</td>
+</tr>
+<tr>
+<td><code>raft.elections_started_total</code></td>
+<td>Burst of elections</td>
+<td>Frequent elections indicate heartbeat timeouts. Check network
+latency and <code>HeartbeatTimeout</code>.</td>
+</tr>
+<tr>
+<td><code>raft.heartbeat_delay_ms</code></td>
+<td>P99 &gt; heartbeat interval</td>
+<td>The leader is slow to send heartbeats. Check CPU saturation.</td>
+</tr>
+<tr>
+<td><code>raft.balancer.moves_total</code> (timed_out)</td>
+<td>Increasing</td>
+<td>Leadership transfers are timing out. Check follower readiness.</td>
+</tr>
+<tr>
+<td><code>raft.balancer.skipped_passes_total</code></td>
+<td>Increasing</td>
+<td>The balancer cannot get a complete global view. Check gossip
+connectivity.</td>
+</tr>
+<tr>
+<td><code>raft.balancer.count_imbalance</code></td>
+<td>Sustained &gt; 2</td>
+<td>Leadership is unevenly distributed. Check balancer
+configuration.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="17.12" id="diagnostic-queries-in-context"><span class="header-section-number">17.12</span> Diagnostic Queries in
+Context</h2>
+<p>The following table maps common operational questions to the API call
+that answers them:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Question</th>
+<th>API call</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>How many ops/sec is this partition processing?</td>
+<td><code>GetPartitionLogOpsPerSecond(partitionId)</code></td>
+</tr>
+<tr>
+<td>Is the WAL backed up?</td>
+<td><code>GetPartitionWalQueueDepth(partitionId)</code></td>
+</tr>
+<tr>
+<td>How long does a commit take?</td>
+<td><code>GetPartitionCommitWaitMs(partitionId)</code></td>
+</tr>
+<tr>
+<td>How far has this partition committed?</td>
+<td><code>GetCommitIndex(partitionId)</code></td>
+</tr>
+<tr>
+<td>Are any followers receiving snapshots?</td>
+<td><code>GetSnapshotStatuses(partitionId)</code></td>
+</tr>
+<tr>
+<td>Did any followers fall behind compaction?</td>
+<td><code>GetBackfillStatuses(partitionId)</code></td>
+</tr>
+<tr>
+<td>Are duplicate proposals being rejected?</td>
+<td><code>GetStaleProposedSkippedCount(partitionId)</code></td>
+</tr>
+<tr>
+<td>Which nodes are alive?</td>
+<td><code>GetActiveNodes(TimeSpan)</code></td>
+</tr>
+<tr>
+<td>When was this node last seen?</td>
+<td><code>GetLastNodeActivity(endpoint)</code></td>
+</tr>
+<tr>
+<td>Who is in the cluster?</td>
+<td><code>GetMembership()</code></td>
+</tr>
+<tr>
+<td>What is the partition layout?</td>
+<td><code>GetPartitionMap()</code></td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="17.13" id="summary-15"><span class="header-section-number">17.13</span> Summary</h2>
+<ul>
+<li><code>GetPartitionLogOpsPerSecond</code>,
+<code>GetPartitionWalQueueDepth</code>, and
+<code>GetPartitionCommitWaitMs</code> are the three primary
+per-partition health signals. They use EWMA accumulators for smooth,
+recent-biased values.</li>
+<li><code>GetCommitIndex</code> shows the committed frontier. Compare it
+across nodes to measure replication lag.</li>
+<li><code>GetSnapshotStatuses</code> and
+<code>GetBackfillStatuses</code> reveal stuck followers and catch-up
+problems.</li>
+<li><code>GetStaleProposedSkippedCount</code> tracks duplicate proposal
+rejections.</li>
+<li><code>GetActiveNodes</code> and <code>GetLastNodeActivity</code>
+provide node-level liveness data through the
+<code>NodeActivityTracker</code>.</li>
+<li><code>KommanderMetrics</code> emits counters, histograms, and
+observable gauges through a
+<code>System.Diagnostics.Metrics.Meter</code> named
+<code>&quot;Kommander&quot;</code>. Connect it to OpenTelemetry for export.</li>
+<li>Structured logging uses <code>[LoggerMessage]</code> source
+generators for zero-allocation log messages. Watch Warning and Error
+levels in production.</li>
+<li>Build a health endpoint that combines membership, partition status,
+and diagnostic queries into a single JSON response.</li>
+<li>The next chapter covers the repository architecture and component
+map for contributors.</li>
 </ul>
 </body>
 </html>
