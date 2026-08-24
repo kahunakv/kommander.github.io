@@ -600,6 +600,48 @@ Guidelines</a></li>
 Context</a></li>
 <li><a href="#summary-15" id="toc-summary-15"><span class="toc-section-number">17.13</span> Summary</a></li>
 </ul></li>
+<li><a href="#anatomy-of-a-raft-partition" id="toc-anatomy-of-a-raft-partition"><span class="toc-section-number">18</span> Anatomy of a Raft Partition</a>
+<ul>
+<li><a href="#the-two-shells" id="toc-the-two-shells"><span class="toc-section-number">18.1</span> The Two Shells</a></li>
+<li><a href="#raftpartitioncorestate" id="toc-raftpartitioncorestate"><span class="toc-section-number">18.2</span> RaftPartitionCoreState</a></li>
+<li><a href="#the-election-coordinator" id="toc-the-election-coordinator"><span class="toc-section-number">18.3</span> The Election Coordinator</a></li>
+<li><a href="#the-replication-tracker" id="toc-the-replication-tracker"><span class="toc-section-number">18.4</span> The Replication Tracker</a></li>
+<li><a href="#the-proposal-registry" id="toc-the-proposal-registry"><span class="toc-section-number">18.5</span> The Proposal Registry</a></li>
+<li><a href="#the-heartbeat-driver" id="toc-the-heartbeat-driver"><span class="toc-section-number">18.6</span> The Heartbeat Driver</a></li>
+<li><a href="#the-log-applicator" id="toc-the-log-applicator"><span class="toc-section-number">18.7</span> The Log Applicator</a></li>
+<li><a href="#the-partition-lifecycle" id="toc-the-partition-lifecycle"><span class="toc-section-number">18.8</span> The Partition Lifecycle</a></li>
+<li><a href="#quiescence" id="toc-quiescence"><span class="toc-section-number">18.9</span> Quiescence</a></li>
+<li><a href="#lets-break-it-term-confusion" id="toc-lets-break-it-term-confusion"><span class="toc-section-number">18.10</span> Let’s Break It: Term
+Confusion</a></li>
+<li><a href="#summary-16" id="toc-summary-16"><span class="toc-section-number">18.11</span> Summary</a></li>
+</ul></li>
+<li><a href="#chapter-27-hybrid-logical-clocks" id="toc-chapter-27-hybrid-logical-clocks"><span class="toc-section-number">19</span> Chapter 27: Hybrid Logical
+Clocks</a>
+<ul>
+<li><a href="#why-kommander-needs-an-hlc" id="toc-why-kommander-needs-an-hlc"><span class="toc-section-number">19.1</span> Why Kommander Needs an
+HLC</a></li>
+<li><a href="#physical-time-plus-logical-counter" id="toc-physical-time-plus-logical-counter"><span class="toc-section-number">19.2</span> Physical Time Plus Logical
+Counter</a></li>
+<li><a href="#bit-packing-one-long-zero-allocations" id="toc-bit-packing-one-long-zero-allocations"><span class="toc-section-number">19.3</span> Bit Packing: One Long, Zero
+Allocations</a></li>
+<li><a href="#sendorlocalevent-minting-a-timestamp" id="toc-sendorlocalevent-minting-a-timestamp"><span class="toc-section-number">19.4</span> SendOrLocalEvent: Minting a
+Timestamp</a></li>
+<li><a href="#receiveevent-merging-a-remote-timestamp" id="toc-receiveevent-merging-a-remote-timestamp"><span class="toc-section-number">19.5</span> ReceiveEvent: Merging a Remote
+Timestamp</a></li>
+<li><a href="#counter-overflow-and-self-correction" id="toc-counter-overflow-and-self-correction"><span class="toc-section-number">19.6</span> Counter Overflow and
+Self-Correction</a></li>
+<li><a href="#the-hlctimestamp-structure" id="toc-the-hlctimestamp-structure"><span class="toc-section-number">19.7</span> The HLCTimestamp
+Structure</a></li>
+<li><a href="#the-wire-format-hlclockmessage" id="toc-the-wire-format-hlclockmessage"><span class="toc-section-number">19.8</span> The Wire Format:
+HLClockMessage</a></li>
+<li><a href="#where-the-clock-fires" id="toc-where-the-clock-fires"><span class="toc-section-number">19.9</span> Where the Clock Fires</a></li>
+<li><a href="#causality-in-action" id="toc-causality-in-action"><span class="toc-section-number">19.10</span> Causality in Action</a></li>
+<li><a href="#the-distinction-terms-vs.-hlc-timestamps" id="toc-the-distinction-terms-vs.-hlc-timestamps"><span class="toc-section-number">19.11</span> The Distinction: Terms vs. HLC
+Timestamps</a></li>
+<li><a href="#the-lc-class-a-simpler-clock" id="toc-the-lc-class-a-simpler-clock"><span class="toc-section-number">19.12</span> The LC Class: A Simpler
+Clock</a></li>
+<li><a href="#takeaways" id="toc-takeaways"><span class="toc-section-number">19.13</span> Takeaways</a></li>
+</ul></li>
 </ul>
 </nav>
 <h1 data-number="1" id="preface"><span class="header-section-number">1</span> Preface</h1>
@@ -10017,5 +10059,1369 @@ and diagnostic queries into a single JSON response.</li>
 <li>The next chapter covers the repository architecture and component
 map for contributors.</li>
 </ul>
+<h1 data-number="18" id="anatomy-of-a-raft-partition"><span class="header-section-number">18</span> Anatomy of a Raft Partition</h1>
+<p>Each partition is a miniature Raft instance. It has its own term,
+voted-for, log, commit index, leader, and follower progress. When you
+debug a stuck election, trace a replication stall, or contribute to the
+consensus engine, you need to understand the state inside one
+partition.</p>
+<p>This chapter opens the partition and examines every piece of state it
+holds.</p>
+<h2 data-number="18.1" id="the-two-shells"><span class="header-section-number">18.1</span> The Two Shells</h2>
+<p>Two classes wrap a partition:</p>
+<p><strong>RaftPartition</strong> is the outer shell. It owns the
+executor, the state machine, and the WAL handler. It provides
+<code>Post</code> (fire-and-forget) and <code>Ask</code>
+(reply-awaiting) dispatch to the executor. It holds a volatile
+<code>Leader</code> reference that any thread can read without going
+through the executor.</p>
+<p><strong>RaftPartitionStateMachine</strong> is the inner shell. It
+holds all the consensus collaborators and dispatches typed
+<code>RaftRequest</code> messages to the correct one. All consensus
+logic flows through this class, but it contains almost none of that
+logic itself. It delegates to 14 collaborators.</p>
+<pre><code>  RaftPartition (outer shell)
+  │
+  ├── executor          RaftPartitionExecutor
+  │                     Serial, single-owner concurrency
+  │
+  ├── stateMachine      RaftPartitionStateMachine (inner shell)
+  │   │
+  │   ├── coreState         RaftPartitionCoreState
+  │   ├── election          ElectionCoordinator
+  │   ├── replicator        LogReplicator
+  │   ├── ackProcessor      ReplicationAckProcessor
+  │   ├── heartbeat         HeartbeatDriver
+  │   ├── backfillSender    BackfillSender
+  │   ├── followerHandler   FollowerAppendHandler
+  │   ├── applicator        LogApplicator
+  │   ├── readIndex         ReadIndexCoordinator
+  │   ├── completionRouter  WalCompletionRouter
+  │   ├── proposals         ProposalRegistry
+  │   ├── tracker           ReplicationTracker
+  │   ├── snapshotSender    SnapshotSender
+  │   ├── snapshotInstaller SnapshotInstaller
+  │   └── backfillTracker   NonContiguousBackfillTracker
+  │
+  └── walHandler        RaftWriteAhead</code></pre>
+<p>The executor guarantees that only one operation runs at a time for a
+given partition. This means the collaborators do not need locks. They
+read and write shared state freely because only the executor thread
+accesses them.</p>
+<h2 data-number="18.2" id="raftpartitioncorestate"><span class="header-section-number">18.2</span> RaftPartitionCoreState</h2>
+<p><code>RaftPartitionCoreState</code> is the consensus nucleus. Every
+collaborator reads from it. It holds the fields that define the
+partition’s position in the Raft protocol.</p>
+<h3 data-number="18.2.1" id="node-state"><span class="header-section-number">18.2.1</span> Node State</h3>
+<div class="sourceCode" id="cb283"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb283-1"><a href="#cb283-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">enum</span> RaftNodeState</span>
+<span id="cb283-2"><a href="#cb283-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb283-3"><a href="#cb283-3" aria-hidden="true" tabindex="-1"></a>    Follower <span class="op">=</span> <span class="dv">0</span><span class="op">,</span></span>
+<span id="cb283-4"><a href="#cb283-4" aria-hidden="true" tabindex="-1"></a>    Candidate <span class="op">=</span> <span class="dv">1</span><span class="op">,</span></span>
+<span id="cb283-5"><a href="#cb283-5" aria-hidden="true" tabindex="-1"></a>    Leader <span class="op">=</span> <span class="dv">2</span></span>
+<span id="cb283-6"><a href="#cb283-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The <code>NodeState</code> property is the only volatile field in the
+core state. It can be read from any thread. All other fields are
+accessed only from the executor thread.</p>
+<pre><code>  State transitions:
+
+  Follower ──► Candidate ──► Leader
+     ▲             │            │
+     │             │            │
+     └─────────────┘            │
+     └──────────────────────────┘
+
+  Follower → Candidate:  election timeout expired, pre-vote succeeded
+  Candidate → Leader:    quorum of votes received
+  Candidate → Follower:  election timed out, or higher term discovered
+  Leader → Follower:     higher term discovered, or check-quorum failed</code></pre>
+<p>The setter for <code>NodeState</code> invalidates the
+<code>LeadershipLease</code> on any non-Leader assignment. This ensures
+that a deposed leader’s lease is immediately revoked.</p>
+<h3 data-number="18.2.2" id="term-and-voting"><span class="header-section-number">18.2.2</span> Term and Voting</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CurrentTerm</code></td>
+<td><code>long</code></td>
+<td>The current Raft term. The setter invalidates the
+<code>LeadershipLease</code> on any change.</td>
+</tr>
+<tr>
+<td><code>LastVotation</code></td>
+<td><code>HLCTimestamp</code></td>
+<td>HLC timestamp of the last vote this node granted.</td>
+</tr>
+<tr>
+<td><code>LastVotationTicks</code></td>
+<td><code>long</code></td>
+<td>Monotonic shadow of <code>LastVotation</code>. Drives the
+recent-vote cooldown that prevents immediate re-election.</td>
+</tr>
+<tr>
+<td><code>VotingStartedAt</code></td>
+<td><code>HLCTimestamp</code></td>
+<td>HLC timestamp when this node became a candidate.</td>
+</tr>
+<tr>
+<td><code>VotingStartedTicks</code></td>
+<td><code>long</code></td>
+<td>Monotonic shadow. Bounds how long a candidacy may stall.</td>
+</tr>
+<tr>
+<td><code>ElectionTimeout</code></td>
+<td><code>TimeSpan</code></td>
+<td>Current randomized election timeout. Re-drawn each election
+round.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="18.2.3" id="commit-and-apply-frontiers"><span class="header-section-number">18.2.3</span> Commit and Apply
+Frontiers</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LocalCommittedIndex</code></td>
+<td><code>long</code></td>
+<td>The highest log index committed on this node. Volatile-backed for
+off-thread reads. Reset to -1 on leader-to-follower transitions.</td>
+</tr>
+<tr>
+<td><code>LiveCommitFloor</code></td>
+<td><code>long</code></td>
+<td>The commit frontier at the moment this node became leader.
+Re-anchored at every promotion.</td>
+</tr>
+<tr>
+<td><code>LastAppliedIndex</code></td>
+<td><code>long</code></td>
+<td>The highest log index delivered to the application consumer.
+Volatile-backed.</td>
+</tr>
+</tbody>
+</table>
+<p>The gap between <code>LocalCommittedIndex</code> and
+<code>LastAppliedIndex</code> represents entries that are committed but
+not yet applied. In steady state, this gap is zero or near zero.</p>
+<h3 data-number="18.2.4" id="leadership-lease"><span class="header-section-number">18.2.4</span> Leadership Lease</h3>
+<div class="sourceCode" id="cb285"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb285-1"><a href="#cb285-1" aria-hidden="true" tabindex="-1"></a><span class="kw">internal</span> <span class="kw">sealed</span> record <span class="fu">LeadershipLease</span><span class="op">(</span><span class="dt">long</span> Term<span class="op">,</span> <span class="dt">long</span> ConfirmedTicks<span class="op">);</span></span></code></pre></div>
+<p>The <code>LeadershipLease</code> is an immutable snapshot of a
+completed leadership confirmation. It is published through a volatile
+reference so that off-thread readers (the fast-path leadership check)
+can use it without going through the executor.</p>
+<ul>
+<li><code>Term</code>: the term in which the confirmation
+completed.</li>
+<li><code>ConfirmedTicks</code>: the monotonic timestamp of the quorum
+confirmation.</li>
+</ul>
+<p>A lease is fresh when
+<code>elapsed(ConfirmedTicks, now) &lt; HeartbeatInterval</code>. The
+fast-path check uses this to confirm leadership without an executor
+round-trip.</p>
+<p>The lease is invalidated (set to <code>null</code>) in three
+places:</p>
+<ol type="1">
+<li>The <code>NodeState</code> setter, on any non-Leader
+assignment.</li>
+<li>The <code>CurrentTerm</code> setter, on any change.</li>
+<li>The <code>ReadIndexCoordinator</code>, when it fails all
+waiters.</li>
+</ol>
+<h3 data-number="18.2.5" id="heartbeat-and-quiescence"><span class="header-section-number">18.2.5</span> Heartbeat and
+Quiescence</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LastHeartbeat</code></td>
+<td><code>HLCTimestamp</code></td>
+<td>HLC timestamp of the last accepted heartbeat from a leader.</td>
+</tr>
+<tr>
+<td><code>LastHeartbeatTicks</code></td>
+<td><code>long</code></td>
+<td>Monotonic shadow. Drives the “time since last leader contact”
+check.</td>
+</tr>
+<tr>
+<td><code>Quiesced</code></td>
+<td><code>bool</code></td>
+<td>Whether this partition is quiesced (idle, not heartbeating).</td>
+</tr>
+<tr>
+<td><code>LastProposalAt</code></td>
+<td><code>HLCTimestamp</code></td>
+<td>HLC timestamp of the last real proposal.</td>
+</tr>
+<tr>
+<td><code>LastProposalAtTicks</code></td>
+<td><code>long</code></td>
+<td>Monotonic shadow. Drives the quiesce-after gate.</td>
+</tr>
+<tr>
+<td><code>Restored</code></td>
+<td><code>bool</code></td>
+<td>Set once WAL restore is complete.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="18.2.6" id="promotion-barrier"><span class="header-section-number">18.2.6</span> Promotion Barrier</h3>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LeadershipBarrierTicket</code></td>
+<td><code>HLCTimestamp</code></td>
+<td>Ticket of the in-flight promotion-barrier no-op.</td>
+</tr>
+<tr>
+<td><code>LeadershipBarrierTerm</code></td>
+<td><code>long</code></td>
+<td>Term in which the barrier was proposed.</td>
+</tr>
+<tr>
+<td><code>LeadershipBarrierArmedTicks</code></td>
+<td><code>long</code></td>
+<td>Monotonic timestamp when the barrier was armed. Drives the timeout
+revert.</td>
+</tr>
+</tbody>
+</table>
+<p>When a node wins an election, it proposes a no-op entry (the
+promotion barrier). Until this entry commits, the node reports itself as
+<code>Candidate</code> to external callers, even though internally it is
+<code>Leader</code>. This prevents the node from serving reads before
+its commit index is confirmed by a quorum.</p>
+<h2 data-number="18.3" id="the-election-coordinator"><span class="header-section-number">18.3</span> The Election Coordinator</h2>
+<p>The <code>ElectionCoordinator</code> handles everything about
+becoming or refusing to become leader: pre-vote probes, real elections,
+and vote granting.</p>
+<h3 data-number="18.3.1" id="election-phase"><span class="header-section-number">18.3.1</span> Election Phase</h3>
+<div class="sourceCode" id="cb286"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb286-1"><a href="#cb286-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">enum</span> RaftElectionPhase</span>
+<span id="cb286-2"><a href="#cb286-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb286-3"><a href="#cb286-3" aria-hidden="true" tabindex="-1"></a>    None<span class="op">,</span>       <span class="co">// no election activity</span></span>
+<span id="cb286-4"><a href="#cb286-4" aria-hidden="true" tabindex="-1"></a>    PreVote<span class="op">,</span>    <span class="co">// side-effect-free pre-vote round for CurrentTerm + 1</span></span>
+<span id="cb286-5"><a href="#cb286-5" aria-hidden="true" tabindex="-1"></a>    Election    <span class="co">// real election in progress (term bumped, self-vote cast)</span></span>
+<span id="cb286-6"><a href="#cb286-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h3 data-number="18.3.2" id="pre-vote-raft-section-9.6"><span class="header-section-number">18.3.2</span> Pre-Vote (Raft Section
+9.6)</h3>
+<p>Before starting a real election, the node runs a pre-vote round.
+Pre-votes do not change any persistent state. They ask peers: “Would you
+vote for me if I started an election?”</p>
+<pre><code>  Pre-vote sequence:
+
+  1. Node A&#39;s election timeout expires.
+  2. Node A sends PreVoteRequest to all peers.
+     (Hypothetical term = CurrentTerm + 1)
+  3. Each peer checks:
+     - Is the candidate&#39;s log at least as fresh as mine?
+     - Am I satisfied that the current leader is not alive?
+     A quiesced follower denies pre-votes if the expected leader
+     is SWIM-Alive.
+  4. If a quorum grants pre-votes:
+     Node A starts a real election.
+  5. If not:
+     Node A stays as follower. No term was bumped.
+     No state was changed on any node.</code></pre>
+<p>Pre-votes prevent a partitioned node from bumping its term. Without
+pre-votes, a node isolated from the leader would increment its term
+repeatedly. When it rejoins, its high term would force the leader to
+step down, even though the leader was healthy.</p>
+<h3 data-number="18.3.3" id="real-election"><span class="header-section-number">18.3.3</span> Real Election</h3>
+<pre><code>  Real election sequence:
+
+  1. Node A transitions to Candidate.
+  2. Node A increments CurrentTerm.
+  3. Node A persists hard state (term + vote-for-self).
+  4. Node A sends RequestVote to all peers.
+  5. Each peer checks:
+     - Is the candidate&#39;s term &gt;= my term?
+     - Have I already voted in this term?
+     - Is the candidate&#39;s log at least as fresh as mine?
+     If all checks pass: grant vote, persist hard state.
+  6. If Node A receives a quorum of votes:
+     Node A calls BecomeLeaderAsync.
+     Node A sends an immediate heartbeat.
+  7. If Node A&#39;s election times out:
+     Node A reverts to Follower.
+     Node A randomizes its election timeout.</code></pre>
+<p>For a single-node cluster, the pre-vote round promotes directly to a
+real election, and the real election promotes directly to leader (no
+network round-trips needed).</p>
+<h3 data-number="18.3.4" id="log-freshness-check"><span class="header-section-number">18.3.4</span> Log Freshness Check</h3>
+<p>The vote-granting side checks that the candidate’s log is at least as
+fresh as the local log. The comparison is lexicographic on (last log
+term, max log index):</p>
+<ol type="1">
+<li>If the candidate’s last log term is greater, the candidate is
+fresher.</li>
+<li>If the terms are equal, the candidate with the higher max log index
+is fresher.</li>
+<li>If both are equal, the candidate is as fresh as the local node.</li>
+</ol>
+<p>A node with a stale log cannot become leader. This prevents a node
+that missed entries from overwriting committed data.</p>
+<h3 data-number="18.3.5" id="vote-record"><span class="header-section-number">18.3.5</span> Vote Record</h3>
+<p>The <code>ElectionCoordinator</code> tracks two data structures:</p>
+<ul>
+<li><code>votes</code>: a dictionary from term to set of voting
+endpoints. Used to count real election tallies.</li>
+<li><code>expectedLeaders</code>: a dictionary from term to endpoint.
+Records who this node voted for in each term.</li>
+</ul>
+<p>Both are cleared on leader transitions.</p>
+<h3 data-number="18.3.6" id="election-timeout-randomization"><span class="header-section-number">18.3.6</span> Election Timeout
+Randomization</h3>
+<p>Each election round draws a new timeout from the range
+<code>[StartElectionTimeout, EndElectionTimeout)</code>. The
+randomization prevents synchronized elections where all nodes time out
+at the same moment. When <code>ElectionTimeoutSeed</code> is configured,
+the random generator is seeded with a deterministic hash of the seed,
+partition ID, and node ID. This makes elections reproducible in
+simulation tests.</p>
+<h2 data-number="18.4" id="the-replication-tracker"><span class="header-section-number">18.4</span> The Replication Tracker</h2>
+<p>The <code>ReplicationTracker</code> maintains per-follower
+replication bookkeeping. It is owned by the leader and accessed only
+from the executor thread.</p>
+<h3 data-number="18.4.1" id="six-maps"><span class="header-section-number">18.4.1</span> Six Maps</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Map</th>
+<th>Key</th>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lastCommitIndexes</code></td>
+<td>endpoint</td>
+<td>log index</td>
+<td>The peer’s committed frontier as reported in its acknowledgment.
+Last-writer-wins.</td>
+</tr>
+<tr>
+<td><code>startCommitIndexes</code></td>
+<td>endpoint</td>
+<td>log index</td>
+<td>Where the peer’s log started, from handshakes or vote replies.</td>
+</tr>
+<tr>
+<td><code>nextIndex</code></td>
+<td>endpoint</td>
+<td>log index</td>
+<td>The next entry to send to this follower. Seeded to
+<code>leaderMaxLog + 1</code> (optimistic).</td>
+</tr>
+<tr>
+<td><code>matchIndex</code></td>
+<td>endpoint</td>
+<td>log index</td>
+<td>The highest log index confirmed replicated on this follower. Starts
+at 0.</td>
+</tr>
+<tr>
+<td><code>backfillPausedUntilTicks</code></td>
+<td>endpoint</td>
+<td>ticks</td>
+<td>Saturation cooldown deadline. Not cleared on leader
+transitions.</td>
+</tr>
+<tr>
+<td><code>regressedFrontiers</code></td>
+<td>endpoint</td>
+<td>log index</td>
+<td>Crash-restart regression notes (take-once, consumed by
+heartbeat).</td>
+</tr>
+</tbody>
+</table>
+<p>An additional map, <code>mismatchAnchors</code>, records per-peer
+log-mismatch anchored-repair notes (also take-once).</p>
+<h3 data-number="18.4.2" id="replication-cursor-flow"><span class="header-section-number">18.4.2</span> Replication Cursor Flow</h3>
+<pre><code>  Leader wins election with maxLog = 100.
+
+  For each follower:
+    nextIndex[follower] = 101   (optimistic)
+    matchIndex[follower] = 0    (nothing confirmed)
+
+  Leader sends AppendEntries(prevLogIndex=100) to follower.
+
+  Case 1: Follower has entry 100.
+    Follower accepts. Leader updates:
+    matchIndex[follower] = 101
+
+  Case 2: Follower does NOT have entry 100.
+    Follower rejects. Leader decrements:
+    nextIndex[follower] = 100
+    Leader retries with prevLogIndex=99.
+
+  This continues until the follower accepts.
+  Then the leader sends all entries from nextIndex forward.</code></pre>
+<h3 data-number="18.4.3" id="bulk-resets"><span class="header-section-number">18.4.3</span> Bulk Resets</h3>
+<p>All six maps (except <code>backfillPausedUntilTicks</code>) reset
+together when the node loses leadership. The saturation cooldown
+survives leadership transitions because it reflects storage pressure on
+the follower, not leadership state.</p>
+<ul>
+<li><code>ClearAll()</code>: clears everything except
+<code>backfillPausedUntilTicks</code>.</li>
+<li><code>ClearProgressKeepingCommitFrontiers()</code>: clears
+<code>nextIndex</code>, <code>matchIndex</code>, and notes, but keeps
+<code>lastCommitIndexes</code>.</li>
+<li><code>RemovePeer(endpoint)</code>: removes all progress for one
+peer.</li>
+</ul>
+<h2 data-number="18.5" id="the-proposal-registry"><span class="header-section-number">18.5</span> The Proposal Registry</h2>
+<p>The <code>ProposalRegistry</code> is the leader’s in-flight proposal
+ledger. It tracks active proposals from submission to quorum
+completion.</p>
+<h3 data-number="18.5.1" id="two-data-structures"><span class="header-section-number">18.5.1</span> Two Data Structures</h3>
+<p><strong>Active proposals.</strong> A dictionary from
+<code>HLCTimestamp</code> (the proposal ticket) to
+<code>RaftProposalQuorum</code>. Each entry represents one proposal
+waiting for a quorum of acknowledgments.</p>
+<p><strong>Pending WAL operations.</strong> A dictionary from WAL
+operation ID to <code>RaftPendingWalOperation</code>. Each entry
+represents one WAL write in flight. When the WAL reports completion, the
+registry matches the operation ID to the pending entry and routes the
+completion to the state machine.</p>
+<h3 data-number="18.5.2" id="key-operations"><span class="header-section-number">18.5.2</span> Key Operations</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TryAdd</code></td>
+<td>Registers a new proposal.</td>
+</tr>
+<tr>
+<td><code>TryGet</code></td>
+<td>Retrieves a proposal by ticket.</td>
+</tr>
+<tr>
+<td><code>FailAllWaitersAndClear</code></td>
+<td>Completes all active proposal waiters with failure, then clears.
+Called on step-down.</td>
+</tr>
+<tr>
+<td><code>TryReleaseTicketOnQuorumDurable</code></td>
+<td>Single-fsync fast path: when <code>WalSingleFsyncCommit</code> is
+on, advances <code>LocalCommittedIndex</code> and marks committed as
+soon as the propose quorum is durable.</td>
+</tr>
+<tr>
+<td><code>RetryUnresolved</code></td>
+<td>Re-sends entries to voters that have not acknowledged. Processes at
+most 8 proposals per round.</td>
+</tr>
+<tr>
+<td><code>PruneSettled</code></td>
+<td>Releases settled proposals older than 30 seconds.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="18.5.3" id="pending-wal-operation-pool"><span class="header-section-number">18.5.3</span> Pending WAL Operation
+Pool</h3>
+<p>The registry maintains a bounded pool of
+<code>RaftPendingWalOperation</code> objects (maximum 256). It rents
+from the pool when starting a WAL write and returns the object when the
+write completes. This avoids allocations on the hot path.</p>
+<h2 data-number="18.6" id="the-heartbeat-driver"><span class="header-section-number">18.6</span> The Heartbeat Driver</h2>
+<p>The <code>HeartbeatDriver</code> sends periodic heartbeats from the
+leader to all followers. It is also the catch-up path when writes go
+quiet.</p>
+<h3 data-number="18.6.1" id="what-a-heartbeat-does"><span class="header-section-number">18.6.1</span> What a Heartbeat Does</h3>
+<p>Each heartbeat tick runs the following logic per follower:</p>
+<ol type="1">
+<li>Compute the follower gap:
+<code>LocalCommittedIndex - effectiveFloor</code>.</li>
+<li>Decide whether to backfill. Three triggers cause backfill:
+<ul>
+<li>The gap exceeds <code>BackfillThreshold</code>.</li>
+<li>An idle-tail gap exists: live replication is quiet, but a committed
+entry sits above <code>LiveCommitFloor</code>.</li>
+<li>A crash-restart regression or log-mismatch note exists (take-once,
+paced).</li>
+</ul></li>
+<li>If backfilling: send entries through
+<code>BackfillSender.TrySendBackfillBatchAsync</code>.</li>
+<li>If not backfilling: send an empty heartbeat.</li>
+</ol>
+<p>The heartbeat also retries unresolved proposals through
+<code>ProposalRegistry.RetryUnresolved</code>.</p>
+<h3 data-number="18.6.2" id="heartbeat-and-quiescence-1"><span class="header-section-number">18.6.2</span> Heartbeat and
+Quiescence</h3>
+<p>When a partition is quiesced, the <code>SendHeartbeat</code> method
+returns immediately (unless forced). The leader stops sending heartbeats
+to save network and CPU resources. The SWIM failure detector takes over
+liveness detection.</p>
+<h3 data-number="18.6.3" id="handshake"><span class="header-section-number">18.6.3</span> Handshake</h3>
+<p>The <code>ReceiveHandshake</code> method handles a peer’s initial
+contact. It checks membership, detects NodeId collisions (fatal error),
+and records the peer’s starting commit index.</p>
+<h2 data-number="18.7" id="the-log-applicator"><span class="header-section-number">18.7</span> The Log Applicator</h2>
+<p>The <code>LogApplicator</code> delivers committed log entries to the
+application consumer. It guarantees two properties:</p>
+<ol type="1">
+<li><strong>Exactly-once delivery.</strong> Each committed entry is
+delivered exactly once.</li>
+<li><strong>Gap-free delivery.</strong> Entries are delivered in
+log-index order with no gaps.</li>
+</ol>
+<h3 data-number="18.7.1" id="how-it-works"><span class="header-section-number">18.7.1</span> How It Works</h3>
+<pre><code>  WAL state:
+
+  [101:Committed] [102:Committed] [103:Committed] [104:Proposed]
+
+  LastAppliedIndex = 100
+
+  DrainCommittedAppliesAsync(upToIndex: 103):
+    Read entries 101, 102, 103 from WAL
+    Apply 101 → LastAppliedIndex = 101
+    Apply 102 → LastAppliedIndex = 102
+    Apply 103 → LastAppliedIndex = 103
+    Stop at 104 (Proposed, not committed)
+    Return true</code></pre>
+<p>The applicator reads entries in 512-entry batches. It processes all
+entry types (including rolled-back entries) so the cursor advances past
+them. It stops when it encounters a gap above the snapshot floor, an
+unresolved <code>Proposed</code> entry, or a missing tail.</p>
+<h3 data-number="18.7.2" id="deferred-leader-applies"><span class="header-section-number">18.7.2</span> Deferred Leader Applies</h3>
+<p>When leader-side quorum completions arrive out of order, the
+applicator parks them in a sorted dictionary keyed by the lowest log
+index. The <code>FlushDeferredLeaderAppliesAsync</code> method delivers
+deferred batches that are contiguous with the applied cursor, in ID
+order. On a term change, all deferred entries are cleared.</p>
+<h3 data-number="18.7.3" id="inherited-applies"><span class="header-section-number">18.7.3</span> Inherited Applies</h3>
+<p>When a new leader takes office, it may inherit <code>Proposed</code>
+entries from the previous term. The
+<code>DrainInheritedAppliesAsync</code> method applies these entries. It
+only delivers entries from strictly older terms. It normalizes
+<code>Proposed</code> entries to <code>Committed</code> copies for the
+consumer. The method returns one of three statuses:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Covered</code></td>
+<td>The cursor covers the requested range.</td>
+</tr>
+<tr>
+<td><code>Hole</code></td>
+<td>An entry is missing above the snapshot floor.</td>
+</tr>
+<tr>
+<td><code>BlockedByInFlight</code></td>
+<td>A current-term <code>Proposed</code> entry is still in flight.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="18.8" id="the-partition-lifecycle"><span class="header-section-number">18.8</span> The Partition Lifecycle</h2>
+<h3 data-number="18.8.1" id="initialization"><span class="header-section-number">18.8.1</span> Initialization</h3>
+<p>When <code>RaftPartition</code> is constructed:</p>
+<ol type="1">
+<li>It creates the <code>RaftWriteAhead</code> handler for WAL
+operations.</li>
+<li>It creates host and facade adapters (to break circular
+dependencies).</li>
+<li>It creates the <code>RaftPartitionStateMachine</code> with all
+collaborators.</li>
+<li>It creates the <code>RaftPartitionExecutor</code> and starts
+it.</li>
+<li>It wires the quiescence callback.</li>
+</ol>
+<p>The partition starts as a <code>Follower</code> with
+<code>CurrentTerm = 0</code> and no votes.</p>
+<h3 data-number="18.8.2" id="wal-restore"><span class="header-section-number">18.8.2</span> WAL Restore</h3>
+<p>On first tick, the state machine replays entries from the WAL. The
+<code>Restored</code> flag is set to <code>true</code> when replay is
+complete. Until restore finishes, the partition rejects most
+operations.</p>
+<h3 data-number="18.8.3" id="election"><span class="header-section-number">18.8.3</span> Election</h3>
+<p>After restore, the partition waits for heartbeats from a leader. If
+no heartbeat arrives within the election timeout, the partition starts a
+pre-vote. If the pre-vote succeeds, it starts a real election. If it
+wins, it becomes leader.</p>
+<h3 data-number="18.8.4" id="steady-state"><span class="header-section-number">18.8.4</span> Steady State</h3>
+<p>In steady state, the partition is either a leader or a follower.</p>
+<p><strong>Leader steady state:</strong></p>
+<ul>
+<li>The periodic tick calls
+<code>CheckPartitionLeadershipAsync</code>.</li>
+<li>The tick checks: promotion barrier timeout, check-quorum step-down,
+quiescence re-arm, heartbeat cadence.</li>
+<li>Proposals arrive through <code>ReplicateLogs</code>, flow through
+the executor, and reach the <code>LogReplicator</code>.</li>
+<li>Acknowledgments arrive through <code>CompleteAppendLogs</code> and
+reach the <code>ReplicationAckProcessor</code>.</li>
+<li>WAL completions arrive through <code>CompleteWalOperation</code> and
+reach the <code>WalCompletionRouter</code>.</li>
+<li>Committed entries flow through the <code>LogApplicator</code> to the
+application consumer.</li>
+</ul>
+<p><strong>Follower steady state:</strong></p>
+<ul>
+<li>The periodic tick checks: is the heartbeat recent? If yes, do
+nothing. If timed out, start pre-vote.</li>
+<li>Appended entries arrive through <code>AppendLogs</code> and reach
+the <code>FollowerAppendHandler</code>.</li>
+<li>The follower validates the leader’s term, performs the Log Matching
+check, and writes to the WAL.</li>
+</ul>
+<h3 data-number="18.8.5" id="step-down"><span class="header-section-number">18.8.5</span> Step-Down</h3>
+<p>When a leader discovers a higher term (from a vote request, an append
+response, or any RPC), it steps down:</p>
+<ol type="1">
+<li><code>NodeState</code> changes to <code>Follower</code>.</li>
+<li><code>LeadershipLease</code> is invalidated.</li>
+<li>All active proposal waiters are failed.</li>
+<li>The replication tracker is cleared.</li>
+<li>Pre-vote state is reset.</li>
+<li>Quiescence is cleared.</li>
+</ol>
+<p>The node then waits for heartbeats from the new leader.</p>
+<h2 data-number="18.9" id="quiescence"><span class="header-section-number">18.9</span> Quiescence</h2>
+<p>Quiescence stops heartbeating for idle partitions. When a partition
+has no active proposals and no recent writes, the leader stops sending
+heartbeats. This reduces network traffic and CPU usage for partitions
+that are not actively used.</p>
+<h3 data-number="18.9.1" id="configuration-1"><span class="header-section-number">18.9.1</span> Configuration</h3>
+<div class="sourceCode" id="cb291"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb291-1"><a href="#cb291-1" aria-hidden="true" tabindex="-1"></a>EnableQuiescence <span class="op">=</span> <span class="kw">true</span>                                    <span class="co">// default: on</span></span>
+<span id="cb291-2"><a href="#cb291-2" aria-hidden="true" tabindex="-1"></a>QuiesceAfter <span class="op">=</span> TimeSpan<span class="op">.</span><span class="fu">FromMilliseconds</span><span class="op">(</span><span class="dv">1500</span><span class="op">)</span>             <span class="co">// default: ~3x HeartbeatInterval</span></span></code></pre></div>
+<p>Quiescence requires SWIM to be active
+(<code>PingInterval &gt; 0</code> and
+<code>PingInterval &lt; StartElectionTimeout</code>). The SWIM failure
+detector takes over liveness detection when heartbeats stop.</p>
+<h3 data-number="18.9.2" id="entering-quiescence"><span class="header-section-number">18.9.2</span> Entering Quiescence</h3>
+<p>The leader enters quiescence when all of these conditions are
+true:</p>
+<ol type="1">
+<li><code>EnableQuiescence</code> is <code>true</code>.</li>
+<li>The partition is not already quiesced.</li>
+<li>No active proposals exist (<code>ActiveCount == 0</code>).</li>
+<li>At least one proposal happened before
+(<code>LastProposalAtTicks != 0</code>).</li>
+<li>No follower is lagging (<code>HasLaggingPeer()</code> returns
+<code>false</code>).</li>
+<li>The time since the last proposal exceeds
+<code>QuiesceAfter</code>.</li>
+</ol>
+<p>When all conditions are met, the leader:</p>
+<ol type="1">
+<li>Sets <code>Quiesced = true</code>.</li>
+<li>Sends a quiesce marker (an empty <code>AppendLogs</code> with a
+quiesce flag) to all followers.</li>
+<li>Stops sending heartbeats.</li>
+</ol>
+<h3 data-number="18.9.3" id="follower-behavior-during-quiescence"><span class="header-section-number">18.9.3</span> Follower Behavior During
+Quiescence</h3>
+<p>A quiesced follower does not start elections when the heartbeat
+timeout expires. Instead, it checks the SWIM liveness state of the
+expected leader:</p>
+<ul>
+<li><strong>Alive:</strong> Stay calm. The leader is healthy but not
+heartbeating.</li>
+<li><strong>Suspect or Dead:</strong> Un-quiesce and start a pre-vote.
+The leader may have failed.</li>
+</ul>
+<p>A quiesced follower also denies pre-votes from challengers if the
+expected leader is SWIM-Alive. This prevents unnecessary elections.</p>
+<h3 data-number="18.9.4" id="exiting-quiescence"><span class="header-section-number">18.9.4</span> Exiting Quiescence</h3>
+<p>The leader exits quiescence when:</p>
+<ul>
+<li>A follower falls behind (<code>HasLaggingPeer()</code> returns
+<code>true</code> on the periodic tick).</li>
+<li>A new proposal arrives.</li>
+<li>The node loses leadership.</li>
+</ul>
+<p>Every demotion or state transition clears the <code>Quiesced</code>
+flag.</p>
+<h2 data-number="18.10" id="lets-break-it-term-confusion"><span class="header-section-number">18.10</span> Let’s Break It: Term
+Confusion</h2>
+<p>Two candidates start elections at the same time. Both increment their
+terms. One wins.</p>
+<pre><code>  Initial state:
+    node-a: term=5, Follower
+    node-b: term=5, Follower
+    node-c: term=5, Follower (was leader, stepped down)
+
+  1. node-a and node-b both time out simultaneously.
+
+  2. node-a: pre-vote succeeds → starts real election.
+     node-a: term=6, Candidate, votes for self.
+
+  3. node-b: pre-vote succeeds → starts real election.
+     node-b: term=6, Candidate, votes for self.
+
+  4. node-c receives RequestVote(term=6) from node-a first.
+     node-c: grants vote to node-a. Persists: votedFor=node-a, term=6.
+
+  5. node-c receives RequestVote(term=6) from node-b.
+     node-c: already voted in term 6. Denies node-b.
+
+  6. node-a: receives vote from node-c. Quorum = {node-a, node-c}.
+     node-a becomes Leader for term 6.
+
+  7. node-a sends heartbeat(term=6) to node-b.
+     node-b sees term 6 &gt;= its own term 6.
+     node-b steps down to Follower. Adopts node-a as leader.
+
+  Result: node-a is leader. No data was lost. No split-brain.</code></pre>
+<p>The key safety property: a node votes for at most one candidate per
+term. The vote is persisted to the WAL before the response is sent. Even
+if the node crashes and restarts, it remembers its vote and will not
+grant a second vote in the same term.</p>
+<h2 data-number="18.11" id="summary-16"><span class="header-section-number">18.11</span> Summary</h2>
+<ul>
+<li>Each partition is a miniature Raft instance with its own term,
+voted-for, commit index, applied index, and leader.</li>
+<li><code>RaftPartitionCoreState</code> holds the consensus nucleus. All
+collaborators read from it. Only the executor thread writes to it.</li>
+<li><code>NodeState</code> (Follower, Candidate, Leader) is volatile for
+off-thread reads. All other core state is executor-thread-only.</li>
+<li><code>LeadershipLease</code> provides a fast-path leadership check
+without an executor round-trip.</li>
+<li><code>ElectionCoordinator</code> implements pre-votes (Raft section
+9.6) before real elections. Pre-votes prevent term inflation from
+partitioned nodes.</li>
+<li><code>ReplicationTracker</code> maintains six per-follower maps:
+commit frontiers, start positions, <code>nextIndex</code>,
+<code>matchIndex</code>, saturation backoff, and regression notes.</li>
+<li><code>ProposalRegistry</code> tracks in-flight proposals from
+submission to quorum completion. It pools
+<code>RaftPendingWalOperation</code> objects to avoid allocations.</li>
+<li><code>HeartbeatDriver</code> sends periodic heartbeats and triggers
+backfill for lagging followers.</li>
+<li><code>LogApplicator</code> delivers committed entries in gap-free,
+exactly-once order. It parks out-of-order completions and flushes them
+contiguously.</li>
+<li>Quiescence stops heartbeating for idle partitions. SWIM takes over
+liveness detection. Followers gate elections on SWIM state of the
+expected leader.</li>
+<li>The promotion barrier (a no-op entry) prevents a new leader from
+serving reads until a quorum confirms its commit index.</li>
+<li>The next chapter traces a complete <code>ReplicateLogs</code> call
+through every layer of the system.</li>
+</ul>
+<h1 data-number="19" id="chapter-27-hybrid-logical-clocks"><span class="header-section-number">19</span> Chapter 27: Hybrid Logical
+Clocks</h1>
+<p>Raft does not require a hybrid logical clock (HLC). The Raft
+algorithm uses terms and log indexes alone to order entries and to
+detect stale messages. Kommander, however, needs a second kind of
+timestamp: a unique proposal ticket ID. Every time a leader proposes a
+log batch, it must assign an identifier that is monotonically
+increasing, causality-preserving, and cheap to produce under high
+concurrency. The HLC fills that role.</p>
+<p>This chapter explains why the HLC exists, how it packs two values
+into a single <code>long</code> for lock-free operation, and how the
+<code>SendOrLocalEvent</code> and <code>ReceiveEvent</code> algorithms
+work. The distinction between Raft terms and HLC timestamps is
+important. Terms are the correctness mechanism. HLC timestamps are an
+implementation choice for ticket identity.</p>
+<h2 data-number="19.1" id="why-kommander-needs-an-hlc"><span class="header-section-number">19.1</span> Why Kommander Needs an
+HLC</h2>
+<p>A proposal ticket ID must satisfy three constraints:</p>
+<ol type="1">
+<li><strong>Monotonicity.</strong> Each new ticket must be strictly
+greater than the previous one on the same node. If two proposals
+received the same ticket, a client that polls by ticket ID could not
+tell them apart.</li>
+<li><strong>Causality preservation.</strong> If node A sends a message
+to node B, the timestamp that B mints after it receives the message must
+be greater than the timestamp that A assigned when it sent the message.
+Without this property, events that are causally related could appear to
+occur in the wrong order.</li>
+<li><strong>Zero allocation under contention.</strong> The clock is a
+single instance shared by every partition on a node. It fires once per
+propose, once per replication acknowledgment, once per heartbeat, and
+once per follower append. Under load, thousands of events per second
+pass through the same clock. Each event must produce a timestamp without
+allocating heap memory.</li>
+</ol>
+<p>A simple atomic counter satisfies constraints 1 and 3 but not
+constraint 2. A wall-clock timestamp satisfies constraint 2 but not
+constraint 1 (clocks can jump backward after NTP adjustments). An HLC
+satisfies all three.</p>
+<h2 data-number="19.2" id="physical-time-plus-logical-counter"><span class="header-section-number">19.2</span> Physical Time Plus Logical
+Counter</h2>
+<p>An HLC timestamp has two components:</p>
+<ul>
+<li><strong>L</strong> (logical-physical time): the maximum of the
+node’s physical wall clock and the highest L the node has observed from
+itself or from any message. L never decreases.</li>
+<li><strong>C</strong> (counter): a tie-breaker that increments when
+multiple events occur within the same millisecond. C resets to zero
+whenever L advances.</li>
+</ul>
+<p>The pair <code>(L, C)</code> is a single scalar clock. Two timestamps
+compare first by L, then by C. If both L and C are equal, the timestamps
+are from the same event (or, across nodes, from different nodes at the
+same logical instant, disambiguated by the node ID).</p>
+<p>The original HLC paper (Kulkarni et al., 2014) defines these two
+rules:</p>
+<ul>
+<li><strong>Send or local event:</strong> set L to
+<code>max(currentL, physicalTime)</code>. If L did not change, increment
+C. Otherwise reset C to zero.</li>
+<li><strong>Receive event:</strong> set L to
+<code>max(currentL, messageL, physicalTime)</code>. Set C based on which
+component(s) determined the new L.</li>
+</ul>
+<p>Kommander implements both rules in
+<code>HybridLogicalClock.cs</code>.</p>
+<h2 data-number="19.3" id="bit-packing-one-long-zero-allocations"><span class="header-section-number">19.3</span> Bit Packing: One Long, Zero
+Allocations</h2>
+<p>The previous Kommander implementation stored <code>(L, C)</code> in
+an immutable <code>ClockState</code> object and swapped it with
+compare-and-swap (CAS). Every event, including every CAS retry,
+allocated a generation-0 object on the heap. Because the clock fires on
+every replication round-trip, it was the largest steady-state allocation
+source in the replication path.</p>
+<p>The current implementation eliminates all allocation. It packs both L
+and C into a single 64-bit <code>long</code>:</p>
+<pre><code> 63                              22  21                 0
+ ├────────── L (42 bits) ─────────┤  ├──── C (22 bits) ─┤</code></pre>
+<ul>
+<li><strong>42 bits for L:</strong> <code>2^42</code> milliseconds from
+the Unix epoch. This range reaches approximately year 2109. The value is
+sufficient for any practical deployment lifetime.</li>
+<li><strong>22 bits for C:</strong> up to 4,194,303 events within a
+single physical millisecond before the counter overflows. On overflow,
+the <code>Normalize</code> function increments L by one and resets C to
+zero. The result <code>(L+1, 0)</code> is strictly greater than
+<code>(L, anything)</code> in HLC order.</li>
+</ul>
+<p>Three helper methods perform the packing:</p>
+<div class="sourceCode" id="cb294"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb294-1"><a href="#cb294-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="kw">static</span> <span class="dt">long</span> <span class="fu">Pack</span><span class="op">(</span><span class="dt">long</span> l<span class="op">,</span> <span class="dt">long</span> c<span class="op">)</span></span>
+<span id="cb294-2"><a href="#cb294-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb294-3"><a href="#cb294-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>l <span class="kw">is</span> <span class="op">&lt;=</span> <span class="dv">0</span> or <span class="op">&gt;=</span> MaxL<span class="op">)</span></span>
+<span id="cb294-4"><a href="#cb294-4" aria-hidden="true" tabindex="-1"></a>        <span class="kw">throw</span> <span class="kw">new</span> <span class="fu">RaftException</span><span class="op">(</span><span class="st">&quot;Corrupted HLC clock&quot;</span><span class="op">);</span></span>
+<span id="cb294-5"><a href="#cb294-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> <span class="op">(</span>l <span class="op">&lt;&lt;</span> CounterBits<span class="op">)</span> <span class="op">|</span> c<span class="op">;</span></span>
+<span id="cb294-6"><a href="#cb294-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb294-7"><a href="#cb294-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb294-8"><a href="#cb294-8" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="kw">static</span> <span class="dt">long</span> <span class="fu">UnpackL</span><span class="op">(</span><span class="dt">long</span> state<span class="op">)</span> <span class="op">=&gt;</span> state <span class="op">&gt;&gt;&gt;</span> CounterBits<span class="op">;</span></span>
+<span id="cb294-9"><a href="#cb294-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb294-10"><a href="#cb294-10" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="kw">static</span> <span class="dt">uint</span> <span class="fu">UnpackC</span><span class="op">(</span><span class="dt">long</span> state<span class="op">)</span> <span class="op">=&gt;</span> <span class="op">(</span><span class="dt">uint</span><span class="op">)(</span>state <span class="op">&amp;</span> CounterMask<span class="op">);</span></span></code></pre></div>
+<p><code>Pack</code> validates that L is positive and below
+<code>MaxL</code> (<code>1L &lt;&lt; 42</code>). <code>UnpackL</code>
+uses the unsigned right shift operator (<code>&gt;&gt;&gt;</code>) to
+avoid sign extension. <code>UnpackC</code> masks the low 22 bits and
+casts to <code>uint</code>.</p>
+<p>The clock stores the packed value in a single mutable field:</p>
+<div class="sourceCode" id="cb295"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb295-1"><a href="#cb295-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="dt">long</span> _state<span class="op">;</span></span></code></pre></div>
+<p>All reads use <code>Volatile.Read</code> for acquire-fence semantics.
+All writes use <code>Interlocked.CompareExchange</code> for atomic swap.
+No lock, no allocation, no object header.</p>
+<h2 data-number="19.4" id="sendorlocalevent-minting-a-timestamp"><span class="header-section-number">19.4</span> SendOrLocalEvent: Minting a
+Timestamp</h2>
+<p><code>SendOrLocalEvent</code> produces a new timestamp for a local
+event or for an outbound message. It takes a node ID and returns an
+<code>HLCTimestamp</code>.</p>
+<div class="sourceCode" id="cb296"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb296-1"><a href="#cb296-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> HLCTimestamp <span class="fu">SendOrLocalEvent</span><span class="op">(</span><span class="dt">int</span> nodeId<span class="op">)</span></span>
+<span id="cb296-2"><a href="#cb296-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb296-3"><a href="#cb296-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">while</span> <span class="op">(</span><span class="kw">true</span><span class="op">)</span></span>
+<span id="cb296-4"><a href="#cb296-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb296-5"><a href="#cb296-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> current <span class="op">=</span> Volatile<span class="op">.</span><span class="fu">Read</span><span class="op">(</span><span class="kw">ref</span> _state<span class="op">);</span></span>
+<span id="cb296-6"><a href="#cb296-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> currentL <span class="op">=</span> <span class="fu">UnpackL</span><span class="op">(</span>current<span class="op">);</span></span>
+<span id="cb296-7"><a href="#cb296-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> physicalTime <span class="op">=</span> <span class="fu">GetPhysicalTime</span><span class="op">();</span></span>
+<span id="cb296-8"><a href="#cb296-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> newL <span class="op">=</span> Math<span class="op">.</span><span class="fu">Max</span><span class="op">(</span>currentL<span class="op">,</span> physicalTime<span class="op">);</span></span>
+<span id="cb296-9"><a href="#cb296-9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> newC <span class="op">=</span> <span class="op">(</span>newL <span class="op">==</span> currentL<span class="op">)</span> <span class="op">?</span> <span class="op">(</span><span class="dt">long</span><span class="op">)</span><span class="fu">UnpackC</span><span class="op">(</span>current<span class="op">)</span> <span class="op">+</span> <span class="dv">1</span> <span class="op">:</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb296-10"><a href="#cb296-10" aria-hidden="true" tabindex="-1"></a>        <span class="fu">Normalize</span><span class="op">(</span><span class="kw">ref</span> newL<span class="op">,</span> <span class="kw">ref</span> newC<span class="op">);</span></span>
+<span id="cb296-11"><a href="#cb296-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb296-12"><a href="#cb296-12" aria-hidden="true" tabindex="-1"></a>        <span class="kw">if</span> <span class="op">(</span>Interlocked<span class="op">.</span><span class="fu">CompareExchange</span><span class="op">(</span><span class="kw">ref</span> _state<span class="op">,</span> <span class="fu">Pack</span><span class="op">(</span>newL<span class="op">,</span> newC<span class="op">),</span> current<span class="op">)</span> <span class="op">==</span> current<span class="op">)</span></span>
+<span id="cb296-13"><a href="#cb296-13" aria-hidden="true" tabindex="-1"></a>            <span class="kw">return</span> <span class="kw">new</span><span class="op">(</span>nodeId<span class="op">,</span> newL<span class="op">,</span> <span class="op">(</span><span class="dt">uint</span><span class="op">)</span>newC<span class="op">);</span></span>
+<span id="cb296-14"><a href="#cb296-14" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb296-15"><a href="#cb296-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The algorithm proceeds step by step:</p>
+<ol type="1">
+<li>Read the current packed state with <code>Volatile.Read</code>.</li>
+<li>Unpack <code>currentL</code> from the high 42 bits.</li>
+<li>Read the physical wall clock
+(<code>DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()</code>).</li>
+<li>Set <code>newL</code> to the maximum of <code>currentL</code> and
+<code>physicalTime</code>. This guarantees L never decreases.</li>
+<li>If L did not change, increment C. If L advanced, reset C to
+zero.</li>
+<li>Call <code>Normalize</code>. If C overflowed the 22-bit range,
+increment L and reset C.</li>
+<li>Attempt CAS. If another thread modified <code>_state</code> between
+the read and the swap, the CAS fails and the loop retries from step
+1.</li>
+<li>On success, return a new <code>HLCTimestamp</code> with the node ID,
+L, and C.</li>
+</ol>
+<p>Every returned timestamp is installed in <code>_state</code>. An
+earlier implementation (<code>TrySendOrLocalEvent</code>) attempted one
+CAS and on failure returned a computed-but-not-installed timestamp. This
+was unsound. Two threads that both failed the CAS could return the same
+<code>(L, C+1)</code> value. Consumers that order mutations by timestamp
+(for example, a lock-coherence guard that compares with
+<code>&gt;=</code>) would drop the later mutation. The fix was to make
+every path retry until the CAS succeeds.</p>
+<h2 data-number="19.5" id="receiveevent-merging-a-remote-timestamp"><span class="header-section-number">19.5</span> ReceiveEvent: Merging a Remote
+Timestamp</h2>
+<p><code>ReceiveEvent</code> merges a timestamp from an inbound message
+with the local clock. It takes a node ID and the remote message’s
+<code>(L, C)</code> pair.</p>
+<div class="sourceCode" id="cb297"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb297-1"><a href="#cb297-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> HLCTimestamp <span class="fu">ReceiveEventInternal</span><span class="op">(</span><span class="dt">int</span> nodeId<span class="op">,</span> <span class="dt">long</span> messageL<span class="op">,</span> <span class="dt">uint</span> messageC<span class="op">)</span></span>
+<span id="cb297-2"><a href="#cb297-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb297-3"><a href="#cb297-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">while</span> <span class="op">(</span><span class="kw">true</span><span class="op">)</span></span>
+<span id="cb297-4"><a href="#cb297-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb297-5"><a href="#cb297-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> current <span class="op">=</span> Volatile<span class="op">.</span><span class="fu">Read</span><span class="op">(</span><span class="kw">ref</span> _state<span class="op">);</span></span>
+<span id="cb297-6"><a href="#cb297-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> currentL <span class="op">=</span> <span class="fu">UnpackL</span><span class="op">(</span>current<span class="op">);</span></span>
+<span id="cb297-7"><a href="#cb297-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">uint</span> currentC <span class="op">=</span> <span class="fu">UnpackC</span><span class="op">(</span>current<span class="op">);</span></span>
+<span id="cb297-8"><a href="#cb297-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> physicalTime <span class="op">=</span> <span class="fu">GetPhysicalTime</span><span class="op">();</span></span>
+<span id="cb297-9"><a href="#cb297-9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> newL <span class="op">=</span> Math<span class="op">.</span><span class="fu">Max</span><span class="op">(</span>currentL<span class="op">,</span> Math<span class="op">.</span><span class="fu">Max</span><span class="op">(</span>messageL<span class="op">,</span> physicalTime<span class="op">));</span></span>
+<span id="cb297-10"><a href="#cb297-10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">long</span> newC<span class="op">;</span></span>
+<span id="cb297-11"><a href="#cb297-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb297-12"><a href="#cb297-12" aria-hidden="true" tabindex="-1"></a>        <span class="kw">if</span> <span class="op">(</span>newL <span class="op">==</span> currentL <span class="op">&amp;&amp;</span> newL <span class="op">==</span> messageL<span class="op">)</span></span>
+<span id="cb297-13"><a href="#cb297-13" aria-hidden="true" tabindex="-1"></a>            newC <span class="op">=</span> <span class="op">(</span><span class="dt">long</span><span class="op">)</span>Math<span class="op">.</span><span class="fu">Max</span><span class="op">(</span>currentC<span class="op">,</span> messageC<span class="op">)</span> <span class="op">+</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb297-14"><a href="#cb297-14" aria-hidden="true" tabindex="-1"></a>        <span class="kw">else</span> <span class="kw">if</span> <span class="op">(</span>newL <span class="op">==</span> currentL<span class="op">)</span></span>
+<span id="cb297-15"><a href="#cb297-15" aria-hidden="true" tabindex="-1"></a>            newC <span class="op">=</span> <span class="op">(</span><span class="dt">long</span><span class="op">)</span>currentC <span class="op">+</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb297-16"><a href="#cb297-16" aria-hidden="true" tabindex="-1"></a>        <span class="kw">else</span> <span class="kw">if</span> <span class="op">(</span>newL <span class="op">==</span> messageL<span class="op">)</span></span>
+<span id="cb297-17"><a href="#cb297-17" aria-hidden="true" tabindex="-1"></a>            newC <span class="op">=</span> <span class="op">(</span><span class="dt">long</span><span class="op">)</span>messageC <span class="op">+</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb297-18"><a href="#cb297-18" aria-hidden="true" tabindex="-1"></a>        <span class="kw">else</span></span>
+<span id="cb297-19"><a href="#cb297-19" aria-hidden="true" tabindex="-1"></a>            newC <span class="op">=</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb297-20"><a href="#cb297-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb297-21"><a href="#cb297-21" aria-hidden="true" tabindex="-1"></a>        <span class="fu">Normalize</span><span class="op">(</span><span class="kw">ref</span> newL<span class="op">,</span> <span class="kw">ref</span> newC<span class="op">);</span></span>
+<span id="cb297-22"><a href="#cb297-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb297-23"><a href="#cb297-23" aria-hidden="true" tabindex="-1"></a>        <span class="kw">if</span> <span class="op">(</span>Interlocked<span class="op">.</span><span class="fu">CompareExchange</span><span class="op">(</span><span class="kw">ref</span> _state<span class="op">,</span> <span class="fu">Pack</span><span class="op">(</span>newL<span class="op">,</span> newC<span class="op">),</span> current<span class="op">)</span> <span class="op">==</span> current<span class="op">)</span></span>
+<span id="cb297-24"><a href="#cb297-24" aria-hidden="true" tabindex="-1"></a>            <span class="kw">return</span> <span class="kw">new</span><span class="op">(</span>nodeId<span class="op">,</span> newL<span class="op">,</span> <span class="op">(</span><span class="dt">uint</span><span class="op">)</span>newC<span class="op">);</span></span>
+<span id="cb297-25"><a href="#cb297-25" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb297-26"><a href="#cb297-26" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The three-way max of <code>currentL</code>, <code>messageL</code>,
+and <code>physicalTime</code> determines <code>newL</code>. The counter
+logic has four cases:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Condition</th>
+<th>newC</th>
+<th>Reasoning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>newL == currentL &amp;&amp; newL == messageL</code></td>
+<td><code>max(currentC, messageC) + 1</code></td>
+<td>Both local and remote are at the same L. The counter must exceed
+both.</td>
+</tr>
+<tr>
+<td><code>newL == currentL</code> (only)</td>
+<td><code>currentC + 1</code></td>
+<td>Local L is the highest. Continue its counter sequence.</td>
+</tr>
+<tr>
+<td><code>newL == messageL</code> (only)</td>
+<td><code>messageC + 1</code></td>
+<td>Remote L is the highest. Continue its counter sequence.</td>
+</tr>
+<tr>
+<td>Physical time dominated</td>
+<td><code>0</code></td>
+<td>L advanced past both local and remote. Reset the counter.</td>
+</tr>
+</tbody>
+</table>
+<p>After the counter logic, <code>Normalize</code> handles overflow. The
+CAS loop guarantees atomic installation, the same as
+<code>SendOrLocalEvent</code>.</p>
+<p>Two public overloads accept either an <code>HLClockMessage</code>
+(which carries only L and C) or an <code>HLCTimestamp</code> (which also
+carries a node ID). Both validate that <code>L != 0</code> and delegate
+to <code>ReceiveEventInternal</code>.</p>
+<h2 data-number="19.6" id="counter-overflow-and-self-correction"><span class="header-section-number">19.6</span> Counter Overflow and
+Self-Correction</h2>
+<p>When C exceeds the 22-bit maximum (4,194,303), <code>Normalize</code>
+increments L by one and resets C to zero:</p>
+<div class="sourceCode" id="cb298"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb298-1"><a href="#cb298-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="kw">static</span> <span class="dt">void</span> <span class="fu">Normalize</span><span class="op">(</span><span class="kw">ref</span> <span class="dt">long</span> l<span class="op">,</span> <span class="kw">ref</span> <span class="dt">long</span> c<span class="op">)</span></span>
+<span id="cb298-2"><a href="#cb298-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb298-3"><a href="#cb298-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">if</span> <span class="op">(</span>c <span class="op">&gt;</span> CounterMask<span class="op">)</span></span>
+<span id="cb298-4"><a href="#cb298-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb298-5"><a href="#cb298-5" aria-hidden="true" tabindex="-1"></a>        l <span class="op">+=</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb298-6"><a href="#cb298-6" aria-hidden="true" tabindex="-1"></a>        c <span class="op">=</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb298-7"><a href="#cb298-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb298-8"><a href="#cb298-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The result <code>(L+1, 0)</code> is strictly greater than any
+<code>(L, C)</code> in HLC comparison order. This preserves
+monotonicity.</p>
+<p>After an overflow, L runs ahead of the physical wall clock. This is
+normal HLC behavior. When the wall clock eventually catches up to L, the
+counter resets to zero naturally (because
+<code>physicalTime &gt; currentL</code> causes <code>newC = 0</code>).
+No special recovery is necessary.</p>
+<p>In practice, overflow is rare. A single millisecond would need over
+four million events on the same node. Even at peak throughput with
+thousands of partitions, the counter stays well within the 22-bit
+range.</p>
+<h2 data-number="19.7" id="the-hlctimestamp-structure"><span class="header-section-number">19.7</span> The HLCTimestamp
+Structure</h2>
+<p><code>HLCTimestamp</code> is the value that crosses API boundaries.
+It is a <code>readonly record struct</code>:</p>
+<div class="sourceCode" id="cb299"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb299-1"><a href="#cb299-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">readonly</span> record <span class="kw">struct</span> HLCTimestamp <span class="op">:</span> IComparable<span class="op">&lt;</span>HLCTimestamp<span class="op">&gt;</span></span>
+<span id="cb299-2"><a href="#cb299-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb299-3"><a href="#cb299-3" aria-hidden="true" tabindex="-1"></a>    <span class="op">[</span><span class="fu">JsonPropertyName</span><span class="op">(</span><span class="st">&quot;n&quot;</span><span class="op">)]</span> <span class="kw">public</span> <span class="dt">int</span> N <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb299-4"><a href="#cb299-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">[</span><span class="fu">JsonPropertyName</span><span class="op">(</span><span class="st">&quot;l&quot;</span><span class="op">)]</span> <span class="kw">public</span> <span class="dt">long</span> L <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb299-5"><a href="#cb299-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">[</span><span class="fu">JsonPropertyName</span><span class="op">(</span><span class="st">&quot;c&quot;</span><span class="op">)]</span> <span class="kw">public</span> <span class="dt">uint</span> C <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb299-6"><a href="#cb299-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>N</code></td>
+<td><code>int</code></td>
+<td>Node ID. Prevents timestamp collisions across nodes.</td>
+</tr>
+<tr>
+<td><code>L</code></td>
+<td><code>long</code></td>
+<td>Physical-logical time in Unix-epoch milliseconds.</td>
+</tr>
+<tr>
+<td><code>C</code></td>
+<td><code>uint</code></td>
+<td>Counter within the same millisecond.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="19.7.1" id="comparison-order"><span class="header-section-number">19.7.1</span> Comparison Order</h3>
+<p><code>CompareTo</code> imposes a total order: <strong>(L, C,
+N)</strong>. It compares L first, then C, then the node ID as a final
+tie-breaker. Two timestamps from different nodes with the same
+<code>(L, C)</code> are distinct and order consistently. The
+<code>Zero</code> constant (<code>new(0, 0, 0)</code>) represents an
+uninitialized timestamp.</p>
+<h3 data-number="19.7.2" id="arithmetic-operators"><span class="header-section-number">19.7.2</span> Arithmetic Operators</h3>
+<p><code>HLCTimestamp</code> supports addition and subtraction with
+<code>int</code> and <code>TimeSpan</code> operands. These operate on
+the L component only. Subtracting two timestamps returns a
+<code>TimeSpan</code> of the L difference. These operators are useful
+for computing time intervals between events.</p>
+<h3 data-number="19.7.3" id="packed-long-vs.-struct"><span class="header-section-number">19.7.3</span> Packed Long vs. Struct</h3>
+<p>The packed <code>long</code> representation exists only inside
+<code>HybridLogicalClock._state</code>. It is the internal storage
+format for lock-free CAS. The <code>HLCTimestamp</code> struct is the
+external representation that carries all three components (N, L, C)
+separately. No public API converts between the two forms.</p>
+<h2 data-number="19.8" id="the-wire-format-hlclockmessage"><span class="header-section-number">19.8</span> The Wire Format:
+HLClockMessage</h2>
+<p><code>HLClockMessage</code> is a lightweight record struct with only
+two fields:</p>
+<div class="sourceCode" id="cb300"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb300-1"><a href="#cb300-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> record <span class="kw">struct</span> HLClockMessage</span>
+<span id="cb300-2"><a href="#cb300-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb300-3"><a href="#cb300-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> L <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb300-4"><a href="#cb300-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">uint</span> C <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb300-5"><a href="#cb300-5" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>It carries the <code>(L, C)</code> pair without the node ID. The
+receiving node supplies its own node ID when it calls
+<code>ReceiveEvent</code>. This keeps the wire format compact: the
+sender’s node ID is already known from the transport layer.</p>
+<h2 data-number="19.9" id="where-the-clock-fires"><span class="header-section-number">19.9</span> Where the Clock Fires</h2>
+<p>A single <code>HybridLogicalClock</code> instance lives on
+<code>RaftManager</code>. Every partition on the node shares the same
+clock. The <code>IRaftPartitionHost</code> interface exposes the clock
+to each consensus collaborator.</p>
+<p>The following table lists the components that call the clock and
+their purpose:</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Component</th>
+<th>Method</th>
+<th>HLC Call</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LogReplicator</code></td>
+<td><code>ReplicateLogs</code></td>
+<td><code>SendOrLocalEvent</code></td>
+<td>Mint proposal ticket ID</td>
+</tr>
+<tr>
+<td><code>LogReplicator</code></td>
+<td><code>ReplicateCheckpoint</code></td>
+<td><code>SendOrLocalEvent</code></td>
+<td>Mint checkpoint ticket ID</td>
+</tr>
+<tr>
+<td><code>ReplicationAckProcessor</code></td>
+<td>(ack handler)</td>
+<td><code>ReceiveEvent</code></td>
+<td>Advance clock from follower ack</td>
+</tr>
+<tr>
+<td><code>ReplicationAckProcessor</code></td>
+<td>(backfill)</td>
+<td><code>TrySendOrLocalEvent</code></td>
+<td>Timestamp backfill batches</td>
+</tr>
+<tr>
+<td><code>FollowerAppendHandler</code></td>
+<td>(append handler)</td>
+<td><code>ReceiveEvent</code></td>
+<td>Advance clock from leader append</td>
+</tr>
+<tr>
+<td><code>ElectionCoordinator</code></td>
+<td>(vote response)</td>
+<td><code>ReceiveEvent</code></td>
+<td>Advance clock from vote response</td>
+</tr>
+<tr>
+<td><code>ElectionCoordinator</code></td>
+<td>(election event)</td>
+<td><code>TrySendOrLocalEvent</code></td>
+<td>Timestamp election events</td>
+</tr>
+<tr>
+<td><code>HeartbeatDriver</code></td>
+<td>(heartbeat)</td>
+<td><code>TrySendOrLocalEvent</code></td>
+<td>Timestamp heartbeats</td>
+</tr>
+<tr>
+<td><code>WalCompletionRouter</code></td>
+<td>(WAL completion)</td>
+<td><code>TrySendOrLocalEvent</code></td>
+<td>Timestamp completion events</td>
+</tr>
+</tbody>
+</table>
+<p>The most important site is <code>LogReplicator.ReplicateLogs</code>.
+This is where the proposal ticket is born:</p>
+<div class="sourceCode" id="cb301"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb301-1"><a href="#cb301-1" aria-hidden="true" tabindex="-1"></a>HLCTimestamp currentTime <span class="op">=</span> host<span class="op">.</span><span class="fu">HybridLogicalClock</span><span class="op">.</span><span class="fu">SendOrLocalEvent</span><span class="op">(</span>host<span class="op">.</span><span class="fu">LocalNodeId</span><span class="op">);</span></span>
+<span id="cb301-2"><a href="#cb301-2" aria-hidden="true" tabindex="-1"></a>coreState<span class="op">.</span><span class="fu">LastProposalAt</span> <span class="op">=</span> currentTime<span class="op">;</span></span>
+<span id="cb301-3"><a href="#cb301-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb301-4"><a href="#cb301-4" aria-hidden="true" tabindex="-1"></a><span class="kw">for</span> <span class="op">(</span><span class="dt">int</span> i <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> i <span class="op">&lt;</span> logs<span class="op">.</span><span class="fu">Length</span><span class="op">;</span> i<span class="op">++)</span></span>
+<span id="cb301-5"><a href="#cb301-5" aria-hidden="true" tabindex="-1"></a>    logs<span class="op">[</span>i<span class="op">].</span><span class="fu">Time</span> <span class="op">=</span> currentTime<span class="op">;</span></span>
+<span id="cb301-6"><a href="#cb301-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb301-7"><a href="#cb301-7" aria-hidden="true" tabindex="-1"></a>wal<span class="op">.</span><span class="fu">EnqueuePropose</span><span class="op">(</span>coreState<span class="op">.</span><span class="fu">CurrentTerm</span><span class="op">,</span> logs<span class="op">,</span> currentTime<span class="op">,</span> autoCommit<span class="op">);</span></span>
+<span id="cb301-8"><a href="#cb301-8" aria-hidden="true" tabindex="-1"></a>pendingPropose<span class="op">.</span><span class="fu">TicketId</span> <span class="op">=</span> currentTime<span class="op">;</span></span>
+<span id="cb301-9"><a href="#cb301-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb301-10"><a href="#cb301-10" aria-hidden="true" tabindex="-1"></a><span class="kw">return</span> <span class="op">(</span>RaftOperationStatus<span class="op">.</span><span class="fu">Pending</span><span class="op">,</span> currentTime<span class="op">);</span></span></code></pre></div>
+<p>The returned <code>currentTime</code> becomes the ticket that a
+client uses to poll for commit status. It is also stamped onto every log
+entry in the batch and passed to the WAL as the operation
+identifier.</p>
+<h2 data-number="19.10" id="causality-in-action"><span class="header-section-number">19.10</span> Causality in Action</h2>
+<p>Consider two nodes, A and B, in a three-node cluster. Node A is the
+leader.</p>
+<ol type="1">
+<li>Node A proposes a batch. It calls <code>SendOrLocalEvent</code>. The
+clock reads <code>physicalTime = 1000</code>,
+<code>currentL = 999</code>. It sets <code>newL = 1000</code>,
+<code>newC = 0</code>. The ticket is <code>(A, 1000, 0)</code>.</li>
+<li>Node A sends the log entries to node B. The message carries
+<code>L = 1000</code>, <code>C = 0</code>.</li>
+<li>Node B receives the message. Its local clock is at
+<code>(998, 3)</code>. It calls <code>ReceiveEvent</code> with
+<code>messageL = 1000</code>, <code>messageC = 0</code>. Its
+<code>physicalTime</code> is <code>999</code>. The three-way max gives
+<code>newL = 1000</code>. Only <code>messageL</code> matches
+<code>newL</code>, so <code>newC = messageC + 1 = 1</code>. Node B’s
+clock advances to <code>(1000, 1)</code>.</li>
+<li>Node B sends an acknowledgment. The ack carries
+<code>L = 1000</code>, <code>C = 1</code>.</li>
+<li>Node A receives the ack and calls <code>ReceiveEvent</code>. Its
+clock was at <code>(1000, 0)</code>, <code>physicalTime = 1000</code>.
+The three-way max gives <code>newL = 1000</code>. Both
+<code>currentL</code> and <code>messageL</code> match, so
+<code>newC = max(0, 1) + 1 = 2</code>. Node A’s clock advances to
+<code>(1000, 2)</code>.</li>
+</ol>
+<p>Every step produces a timestamp strictly greater than the previous
+one. The causal chain is preserved:
+<code>(A, 1000, 0) &lt; (B, 1000, 1) &lt; (A, 1000, 2)</code>.</p>
+<h2 data-number="19.11" id="the-distinction-terms-vs.-hlc-timestamps"><span class="header-section-number">19.11</span> The Distinction: Terms
+vs. HLC Timestamps</h2>
+<p>Raft terms and HLC timestamps serve different purposes. Do not
+conflate them.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Property</th>
+<th>Raft Term</th>
+<th>HLC Timestamp</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Purpose</strong></td>
+<td>Election epoch and log consistency</td>
+<td>Unique proposal ticket identity</td>
+</tr>
+<tr>
+<td><strong>Scope</strong></td>
+<td>Cluster-wide consensus mechanism</td>
+<td>Per-node clock with causality</td>
+</tr>
+<tr>
+<td><strong>Increments</strong></td>
+<td>Once per election</td>
+<td>Once per event (propose, ack, heartbeat)</td>
+</tr>
+<tr>
+<td><strong>Required by Raft</strong></td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Stored in</strong></td>
+<td><code>RaftPartitionCoreState.CurrentTerm</code></td>
+<td><code>HybridLogicalClock._state</code></td>
+</tr>
+<tr>
+<td><strong>Comparison</strong></td>
+<td>Simple integer comparison</td>
+<td>Three-component <code>(L, C, N)</code> order</td>
+</tr>
+</tbody>
+</table>
+<p>A term change means a new leader election occurred. An HLC advance
+means an event occurred. A proposal carries both: the term for Raft
+correctness, and the HLC timestamp for ticket identity. If the term is
+wrong, Raft rejects the proposal. If the HLC timestamp were duplicated,
+the ticket system would malfunction. Both are necessary, but for
+different reasons.</p>
+<h2 data-number="19.12" id="the-lc-class-a-simpler-clock"><span class="header-section-number">19.12</span> The LC Class: A Simpler
+Clock</h2>
+<p>The <code>Kommander.Time</code> namespace also contains a simple
+<code>LC</code> class:</p>
+<div class="sourceCode" id="cb302"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb302-1"><a href="#cb302-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> <span class="kw">class</span> LC</span>
+<span id="cb302-2"><a href="#cb302-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb302-3"><a href="#cb302-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">private</span> <span class="dt">ulong</span> ticks<span class="op">;</span></span>
+<span id="cb302-4"><a href="#cb302-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb302-5"><a href="#cb302-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">ulong</span> <span class="fu">Increment</span><span class="op">(</span><span class="dt">int</span> count<span class="op">)</span> <span class="op">{</span> ticks <span class="op">+=</span> <span class="op">(</span><span class="dt">ulong</span><span class="op">)</span>count<span class="op">;</span> <span class="kw">return</span> ticks<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb302-6"><a href="#cb302-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">ulong</span> <span class="fu">Increment</span><span class="op">()</span> <span class="op">{</span> ticks<span class="op">++;</span> <span class="kw">return</span> ticks<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb302-7"><a href="#cb302-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">ulong</span> <span class="fu">GetTicks</span><span class="op">()</span> <span class="op">=&gt;</span> ticks<span class="op">;</span></span>
+<span id="cb302-8"><a href="#cb302-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>This is a plain monotonic counter with no physical-time component. It
+is not part of the HLC system. The <code>LC</code> class exists for use
+cases that need only a logical sequence number, not a
+causality-preserving timestamp.</p>
+<h2 data-number="19.13" id="takeaways"><span class="header-section-number">19.13</span> Takeaways</h2>
+<ol type="1">
+<li>Kommander uses HLC timestamps as unique proposal ticket IDs. The HLC
+is an implementation choice, not a Raft requirement.</li>
+<li>An HLC timestamp combines physical wall-clock time (L) with a
+logical counter (C). L never decreases. C resets to zero when L
+advances.</li>
+<li>The implementation packs <code>(L, C)</code> into a single 64-bit
+<code>long</code>. The high 42 bits hold L (milliseconds, sufficient
+until year 2109). The low 22 bits hold C (up to 4,194,303 events per
+millisecond).</li>
+<li>All updates use a lock-free CAS loop on the packed
+<code>long</code>. Zero objects are allocated per clock event.</li>
+<li><code>SendOrLocalEvent</code> mints a new timestamp for outbound
+messages and local events. <code>ReceiveEvent</code> merges a remote
+timestamp with the local clock.</li>
+<li>Counter overflow rolls <code>(L, C_max)</code> to
+<code>(L+1, 0)</code>. This preserves monotonicity. The clock
+self-corrects when the wall clock catches up.</li>
+<li><code>HLCTimestamp</code> is a <code>readonly record struct</code>
+with fields N (node ID), L (time), and C (counter). It implements a
+total order: <code>(L, C, N)</code>.</li>
+<li>A single clock instance on <code>RaftManager</code> serves all
+partitions. Every consensus collaborator accesses it through
+<code>IRaftPartitionHost</code>.</li>
+<li>Do not conflate HLC timestamps with Raft terms. Terms are the
+correctness mechanism. HLC timestamps are the identity mechanism.</li>
+</ol>
 </body>
 </html>
