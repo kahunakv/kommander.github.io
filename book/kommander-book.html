@@ -642,6 +642,35 @@ Timestamps</a></li>
 Clock</a></li>
 <li><a href="#takeaways" id="toc-takeaways"><span class="toc-section-number">19.13</span> Takeaways</a></li>
 </ul></li>
+<li><a href="#chapter-28-deterministic-simulation" id="toc-chapter-28-deterministic-simulation"><span class="toc-section-number">20</span> Chapter 28: Deterministic
+Simulation</a>
+<ul>
+<li><a href="#the-core-idea" id="toc-the-core-idea"><span class="toc-section-number">20.1</span> The Core Idea</a></li>
+<li><a href="#architecture-overview" id="toc-architecture-overview"><span class="toc-section-number">20.2</span> Architecture Overview</a></li>
+<li><a href="#simulationschedulingmode" id="toc-simulationschedulingmode"><span class="toc-section-number">20.3</span> SimulationSchedulingMode</a></li>
+<li><a href="#simulationeventtype" id="toc-simulationeventtype"><span class="toc-section-number">20.4</span> SimulationEventType</a></li>
+<li><a href="#simulationevent" id="toc-simulationevent"><span class="toc-section-number">20.5</span> SimulationEvent</a></li>
+<li><a href="#simulationscenario" id="toc-simulationscenario"><span class="toc-section-number">20.6</span> SimulationScenario</a></li>
+<li><a href="#simulationruntime" id="toc-simulationruntime"><span class="toc-section-number">20.7</span> SimulationRuntime</a></li>
+<li><a href="#deterministicscheduler" id="toc-deterministicscheduler"><span class="toc-section-number">20.8</span> DeterministicScheduler</a></li>
+<li><a href="#simulationrandom-and-splitmix64" id="toc-simulationrandom-and-splitmix64"><span class="toc-section-number">20.9</span> SimulationRandom and
+SplitMix64</a></li>
+<li><a href="#virtual-time" id="toc-virtual-time"><span class="toc-section-number">20.10</span> Virtual Time</a></li>
+<li><a href="#the-replay-system" id="toc-the-replay-system"><span class="toc-section-number">20.11</span> The Replay System</a></li>
+<li><a href="#simulationsnapshot" id="toc-simulationsnapshot"><span class="toc-section-number">20.12</span> SimulationSnapshot</a></li>
+<li><a href="#simulationresult" id="toc-simulationresult"><span class="toc-section-number">20.13</span> SimulationResult</a></li>
+<li><a href="#inmemorycommunication" id="toc-inmemorycommunication"><span class="toc-section-number">20.14</span> InMemoryCommunication</a></li>
+<li><a href="#inmemorywal" id="toc-inmemorywal"><span class="toc-section-number">20.15</span> InMemoryWAL</a></li>
+<li><a href="#deterministic-election-timeouts-1" id="toc-deterministic-election-timeouts-1"><span class="toc-section-number">20.16</span> Deterministic Election
+Timeouts</a></li>
+<li><a href="#writing-a-simulation-scenario" id="toc-writing-a-simulation-scenario"><span class="toc-section-number">20.17</span> Writing a Simulation
+Scenario</a></li>
+<li><a href="#replaying-a-recorded-run" id="toc-replaying-a-recorded-run"><span class="toc-section-number">20.18</span> Replaying a Recorded
+Run</a></li>
+<li><a href="#the-simulation-discovery-workflow" id="toc-the-simulation-discovery-workflow"><span class="toc-section-number">20.19</span> The Simulation Discovery
+Workflow</a></li>
+<li><a href="#takeaways-1" id="toc-takeaways-1"><span class="toc-section-number">20.20</span> Takeaways</a></li>
+</ul></li>
 </ul>
 </nav>
 <h1 data-number="1" id="preface"><span class="header-section-number">1</span> Preface</h1>
@@ -11422,6 +11451,911 @@ partitions. Every consensus collaborator accesses it through
 <code>IRaftPartitionHost</code>.</li>
 <li>Do not conflate HLC timestamps with Raft terms. Terms are the
 correctness mechanism. HLC timestamps are the identity mechanism.</li>
+</ol>
+<h1 data-number="20" id="chapter-28-deterministic-simulation"><span class="header-section-number">20</span> Chapter 28: Deterministic
+Simulation</h1>
+<p>Distributed systems fail in ways that depend on timing. A message
+arrives one millisecond late, a leader election overlaps with a network
+partition, or two nodes propose in the same tick. These failures are
+rare in production and almost impossible to reproduce. A developer who
+observes the symptom cannot replay the exact sequence of events that
+caused it.</p>
+<p>Deterministic simulation solves this problem. It replaces real time
+with virtual time and real networking with in-process routing. A seeded
+pseudorandom number generator (PRNG) controls every nondeterministic
+choice. The same seed produces the same execution. A replay log records
+every choice and every state hash, so that a later run can verify it
+follows the identical path or detect the exact point where a code change
+caused divergence.</p>
+<p>Kommander ships a complete simulation harness in the test
+infrastructure. This chapter describes every component: the runtime, the
+scheduler, the virtual clock, the PRNG, the replay system, and the
+snapshot mechanism. It also explains how
+<code>InMemoryCommunication</code> and <code>InMemoryWAL</code> support
+in-process cluster testing, and how <code>ElectionTimeoutSeed</code>
+makes leader election deterministic.</p>
+<h2 data-number="20.1" id="the-core-idea"><span class="header-section-number">20.1</span> The Core Idea</h2>
+<p>In a real Raft cluster, three sources of nondeterminism control the
+outcome of every run:</p>
+<ol type="1">
+<li><strong>Wall-clock time.</strong> Election timeouts, heartbeat
+intervals, and retry delays all depend on the system clock. Small
+variations in scheduling change which node wins an election.</li>
+<li><strong>Network ordering.</strong> Messages between nodes arrive in
+an order that depends on OS scheduling, TCP buffering, and network
+latency. Reordering a single message can change the outcome.</li>
+<li><strong>Concurrent execution.</strong> Multiple threads execute
+partition operations in parallel. The order in which they complete is
+unpredictable.</li>
+</ol>
+<p>Deterministic simulation replaces all three. Virtual time advances
+only when the scheduler selects a timer event. Network messages are
+explicit events that the scheduler delivers in a controlled order. A
+seeded PRNG makes every random choice reproducible. The result is a
+system where every execution with the same seed follows the same
+path.</p>
+<h2 data-number="20.2" id="architecture-overview"><span class="header-section-number">20.2</span> Architecture Overview</h2>
+<p>The simulation harness has six layers. Each layer depends only on the
+layer below it.</p>
+<ol type="1">
+<li><strong>SimulationScenario</strong> declares the test setup: node
+count, partition count, seed, scheduling mode, and maximum steps.</li>
+<li><strong>SimulationRuntime</strong> orchestrates the run. It owns the
+scheduler, the clock, the PRNG, the event history, and the invariant
+checks.</li>
+<li><strong>DeterministicScheduler</strong> selects the next event from
+the enabled set. In random mode, it uses the PRNG. In replay mode, it
+consumes entries from a recorded log and validates every field.</li>
+<li><strong>VirtualTime</strong> and <strong>VirtualTimerQueue</strong>
+model all Raft timers as explicit events. Timers do not fire
+automatically. They become enabled events that the scheduler must
+select.</li>
+<li><strong>SimulationRandom</strong> wraps a SplitMix64 PRNG. Every
+call to <code>NextInt</code> is recorded as a
+<code>SimulationRandomChoice</code>.</li>
+<li><strong>ReplayLogWriter</strong> and
+<strong>ReplayLogReader</strong> persist and restore the full sequence
+of random choices and event selections as JSONL records.</li>
+</ol>
+<p>A <code>SimulationSnapshot</code> captures the full state after every
+step. Its SHA-256 content hash becomes the ground truth for replay
+validation.</p>
+<h2 data-number="20.3" id="simulationschedulingmode"><span class="header-section-number">20.3</span> SimulationSchedulingMode</h2>
+<p>The scheduler supports four modes:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Value</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Scripted</code></td>
+<td>0</td>
+<td>Execute a fixed sequence of events declared by the scenario.</td>
+</tr>
+<tr>
+<td><code>Exhaustive</code></td>
+<td>1</td>
+<td>Enumerate all enabled event choices up to a configured bound.</td>
+</tr>
+<tr>
+<td><code>Random</code></td>
+<td>2</td>
+<td>Choose an enabled event using the seeded PRNG.</td>
+</tr>
+<tr>
+<td><code>Replay</code></td>
+<td>3</td>
+<td>Consume event choices from a recorded replay log.</td>
+</tr>
+</tbody>
+</table>
+<p><code>Scripted</code> mode is the simplest. The scenario returns a
+list of events, and the runtime applies them in order. This mode is
+useful for unit tests that need a specific sequence.</p>
+<p><code>Random</code> mode is the primary exploration mode. The
+scheduler draws a random index into the enabled-event set at each step.
+The seed controls the draw. Two runs with the same seed produce the same
+sequence.</p>
+<p><code>Replay</code> mode reads a previously recorded log. At every
+step, it validates that the enabled-event set, the selected event, and
+the snapshot hash match the log. Any mismatch throws a
+<code>ReplayDivergenceException</code>.</p>
+<h2 data-number="20.4" id="simulationeventtype"><span class="header-section-number">20.4</span> SimulationEventType</h2>
+<p>The scheduler selects from 14 event categories:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Event</th>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TimerTick</code></td>
+<td>0</td>
+<td>A virtual timer fires.</td>
+</tr>
+<tr>
+<td><code>NetworkMessageDelivery</code></td>
+<td>1</td>
+<td>A pending network message is delivered.</td>
+</tr>
+<tr>
+<td><code>NetworkMessageDrop</code></td>
+<td>2</td>
+<td>A pending network message is dropped.</td>
+</tr>
+<tr>
+<td><code>WalReadCompletion</code></td>
+<td>3</td>
+<td>A pending WAL read completes.</td>
+</tr>
+<tr>
+<td><code>WalWriteCompletion</code></td>
+<td>4</td>
+<td>A pending WAL write completes.</td>
+</tr>
+<tr>
+<td><code>WalWriteFailure</code></td>
+<td>5</td>
+<td>A pending WAL write fails.</td>
+</tr>
+<tr>
+<td><code>ClientProposalStart</code></td>
+<td>6</td>
+<td>A client submits a proposal.</td>
+</tr>
+<tr>
+<td><code>ClientProposalCancellation</code></td>
+<td>7</td>
+<td>A client cancels a proposal.</td>
+</tr>
+<tr>
+<td><code>NodeStart</code></td>
+<td>8</td>
+<td>A node starts.</td>
+</tr>
+<tr>
+<td><code>NodeStop</code></td>
+<td>9</td>
+<td>A node stops gracefully.</td>
+</tr>
+<tr>
+<td><code>NodeCrash</code></td>
+<td>10</td>
+<td>A node crashes (no graceful shutdown).</td>
+</tr>
+<tr>
+<td><code>NodeRestart</code></td>
+<td>11</td>
+<td>A crashed or stopped node restarts.</td>
+</tr>
+<tr>
+<td><code>PartitionConfigurationUpdate</code></td>
+<td>12</td>
+<td>A partition’s configuration changes.</td>
+</tr>
+<tr>
+<td><code>CompactionStep</code></td>
+<td>13</td>
+<td>A WAL compaction step runs.</td>
+</tr>
+</tbody>
+</table>
+<p>Each event category covers a different source of nondeterminism.
+Together, the 14 categories model the full space of things that can
+happen in a Raft cluster.</p>
+<h2 data-number="20.5" id="simulationevent"><span class="header-section-number">20.5</span> SimulationEvent</h2>
+<p>A <code>SimulationEvent</code> is a sealed record that represents one
+selectable unit of work:</p>
+<div class="sourceCode" id="cb303"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb303-1"><a href="#cb303-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> record SimulationEvent</span>
+<span id="cb303-2"><a href="#cb303-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb303-3"><a href="#cb303-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> Id <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb303-4"><a href="#cb303-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> SimulationEventType Type <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb303-5"><a href="#cb303-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">string</span> Summary <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb303-6"><a href="#cb303-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span><span class="op">?</span> NodeId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb303-7"><a href="#cb303-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span><span class="op">?</span> PartitionId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb303-8"><a href="#cb303-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> LogicalTime <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb303-9"><a href="#cb303-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span><span class="op">?</span> TimerId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb303-10"><a href="#cb303-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The <code>Id</code> is a stable identifier unique within a simulation
+run. The <code>Summary</code> is a human-readable description used in
+failure reports and replay validation. The optional <code>NodeId</code>
+and <code>PartitionId</code> fields identify the target when the event
+applies to a specific node or partition.</p>
+<h2 data-number="20.6" id="simulationscenario"><span class="header-section-number">20.6</span> SimulationScenario</h2>
+<p>A scenario is an abstract class that declares the simulation
+configuration. The developer subclasses it to define each test:</p>
+<div class="sourceCode" id="cb304"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb304-1"><a href="#cb304-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">abstract</span> <span class="kw">class</span> SimulationScenario</span>
+<span id="cb304-2"><a href="#cb304-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb304-3"><a href="#cb304-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">abstract</span> <span class="dt">string</span> Name <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb304-4"><a href="#cb304-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">ulong</span> Seed <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span> <span class="op">=</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb304-5"><a href="#cb304-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> NodeCount <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span> <span class="op">=</span> <span class="dv">3</span><span class="op">;</span></span>
+<span id="cb304-6"><a href="#cb304-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> PartitionCount <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span> <span class="op">=</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb304-7"><a href="#cb304-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> MaxSteps <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span> <span class="op">=</span> <span class="dv">100</span><span class="op">;</span></span>
+<span id="cb304-8"><a href="#cb304-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> MaxLogicalTime <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span> <span class="op">=</span> <span class="dv">60</span>_000<span class="op">;</span></span>
+<span id="cb304-9"><a href="#cb304-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> SimulationSchedulingMode SchedulingMode <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb304-10"><a href="#cb304-10" aria-hidden="true" tabindex="-1"></a>        <span class="op">=</span> SimulationSchedulingMode<span class="op">.</span><span class="fu">Scripted</span><span class="op">;</span></span>
+<span id="cb304-11"><a href="#cb304-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb304-12"><a href="#cb304-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">abstract</span> <span class="dt">void</span> <span class="fu">Configure</span><span class="op">(</span>SimulationRuntime runtime<span class="op">);</span></span>
+<span id="cb304-13"><a href="#cb304-13" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">virtual</span> IReadOnlyList<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;</span> <span class="fu">ScriptedEvents</span><span class="op">();</span></span>
+<span id="cb304-14"><a href="#cb304-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">virtual</span> IReadOnlyList<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;</span> <span class="fu">GetEnabledEvents</span><span class="op">(</span></span>
+<span id="cb304-15"><a href="#cb304-15" aria-hidden="true" tabindex="-1"></a>        SimulationRuntime runtime<span class="op">);</span></span>
+<span id="cb304-16"><a href="#cb304-16" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p><code>Configure</code> sets up the initial simulation state. It must
+not start threads, timers, or real I/O. <code>ScriptedEvents</code>
+returns the fixed event sequence for <code>Scripted</code> mode.
+<code>GetEnabledEvents</code> returns the currently enabled events for
+<code>Random</code>, <code>Exhaustive</code>, and <code>Replay</code>
+modes.</p>
+<p>The <code>Parameters</code> property serializes the scenario’s
+configuration (node count, partition count, max steps, scheduling mode)
+into a dictionary. The replay log records these parameters so that a
+replayed run can validate it uses the same scenario.</p>
+<h2 data-number="20.7" id="simulationruntime"><span class="header-section-number">20.7</span> SimulationRuntime</h2>
+<p><code>SimulationRuntime</code> is the central orchestrator. It is a
+sealed class that implements <code>IDisposable</code>.</p>
+<h3 data-number="20.7.1" id="construction"><span class="header-section-number">20.7.1</span> Construction</h3>
+<p>The constructor takes a <code>SimulationScenario</code> and an
+optional <code>SimulationRuntimeOptions</code>:</p>
+<div class="sourceCode" id="cb305"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb305-1"><a href="#cb305-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="fu">SimulationRuntime</span><span class="op">(</span></span>
+<span id="cb305-2"><a href="#cb305-2" aria-hidden="true" tabindex="-1"></a>    SimulationScenario scenario<span class="op">,</span></span>
+<span id="cb305-3"><a href="#cb305-3" aria-hidden="true" tabindex="-1"></a>    SimulationRuntimeOptions<span class="op">?</span> options <span class="op">=</span> <span class="kw">null</span><span class="op">)</span></span></code></pre></div>
+<p>The constructor follows this sequence:</p>
+<ol type="1">
+<li>Copy the seed and scheduling mode from the scenario.</li>
+<li>If the mode is <code>Replay</code>, create a
+<code>ReplayLogReader</code> from the log path and validate that the
+recorded seed and scenario name match.</li>
+<li>Create a <code>SimulationRandom</code> with the seed (and the replay
+reader, if present).</li>
+<li>Create a <code>DeterministicScheduler</code> with the PRNG and the
+replay reader.</li>
+<li>Create a <code>VirtualTime</code> with the configured timer
+intervals.</li>
+<li>Initialize one <code>SimulationNodeSnapshot</code> per node, all in
+<code>Stopped</code> status.</li>
+<li>Call <code>scenario.Configure(this)</code> so the scenario can set
+up its initial state.</li>
+<li>Load scripted events from
+<code>scenario.ScriptedEvents()</code>.</li>
+<li>Capture the initial snapshot.</li>
+</ol>
+<h3 data-number="20.7.2" id="the-run-loop"><span class="header-section-number">20.7.2</span> The Run Loop</h3>
+<p>The <code>Run</code> method drives the simulation:</p>
+<div class="sourceCode" id="cb306"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb306-1"><a href="#cb306-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> SimulationResult <span class="fu">Run</span><span class="op">()</span></span></code></pre></div>
+<p>For <code>Scripted</code> mode, <code>Run</code> calls
+<code>RunScripted</code>, which applies each scripted event in order
+until <code>MaxSteps</code> is reached.</p>
+<p>For <code>Random</code> and <code>Replay</code> modes,
+<code>Run</code> calls <code>RunScheduled</code>. The loop proceeds as
+follows:</p>
+<ol type="1">
+<li>Call <code>CollectEnabledEvents</code>. This gathers events from the
+scenario’s <code>GetEnabledEvents</code> and from the virtual timer
+queue’s <code>GetEnabledTimerEvents</code>.</li>
+<li>If no events are enabled, the simulation has reached a quiescent
+state. Stop.</li>
+<li>Call <code>_scheduler.SelectNext</code> with the enabled events. The
+scheduler picks one event (randomly or from the replay log).</li>
+<li>Call <code>ApplyEvent</code> with the selected event.</li>
+<li>Repeat until <code>MaxSteps</code> or <code>MaxLogicalTime</code> is
+reached.</li>
+</ol>
+<p>After the loop, <code>Run</code> captures the final snapshot, runs
+all invariant checks, and returns a <code>SimulationResult</code>. The
+result indicates success or failure, and carries the last valid
+snapshot, the failing snapshot (if any), and the replay log path.</p>
+<h3 data-number="20.7.3" id="applyevent"><span class="header-section-number">20.7.3</span> ApplyEvent</h3>
+<p><code>ApplyEvent</code> is the core step function:</p>
+<ol type="1">
+<li>Capture a snapshot before the event. Compute its SHA-256 content
+hash.</li>
+<li>If the event is a <code>TimerTick</code>, validate that the timer’s
+scheduled fire time matches the current logical time. Fire the timer
+through <code>VirtualTime.FireTimer</code>.</li>
+<li>Advance <code>LogicalTick</code> if the event’s logical time exceeds
+the current tick.</li>
+<li>Append the event to <code>_eventHistory</code>. Increment
+<code>StepNumber</code>.</li>
+<li>Capture a snapshot after the event. Compute its hash.</li>
+<li>If in <code>Replay</code> mode, call
+<code>_scheduler.ValidateAppliedEvent</code> with the post-apply hash.
+The scheduler compares it to the recorded hash.</li>
+<li>If the replay writer is active, write the random choices and event
+selection entry.</li>
+<li>Run all registered invariant checks on the post-apply snapshot.</li>
+</ol>
+<h3 data-number="20.7.4" id="invariant-registration"><span class="header-section-number">20.7.4</span> Invariant Registration</h3>
+<div class="sourceCode" id="cb307"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb307-1"><a href="#cb307-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">RegisterInvariant</span><span class="op">(</span></span>
+<span id="cb307-2"><a href="#cb307-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span> name<span class="op">,</span></span>
+<span id="cb307-3"><a href="#cb307-3" aria-hidden="true" tabindex="-1"></a>    Action<span class="op">&lt;</span>SimulationSnapshot<span class="op">&gt;</span> check<span class="op">)</span></span></code></pre></div>
+<p>The invariant check runs after every applied event. If the check
+throws, the runtime wraps the exception in an
+<code>InvariantViolationException</code> that carries the invariant
+name, the step number, the triggering event, and the before and after
+snapshots.</p>
+<h3 data-number="20.7.5" id="state-management-methods"><span class="header-section-number">20.7.5</span> State Management
+Methods</h3>
+<p>The runtime provides methods to update the simulated state:</p>
+<ul>
+<li><code>SetNodeLifecycleStatus(int nodeId, SimulationNodeLifecycleStatus status)</code>
+updates a node’s lifecycle.</li>
+<li><code>SetNodeRaftState(int nodeId, long currentTerm, ...)</code>
+records the node’s term, votedFor, and known leader.</li>
+<li><code>SetNodeWalLogs(int nodeId, ...)</code> records WAL log
+summaries.</li>
+<li><code>SetPartitionLeader(int partitionId, int leaderNodeId, long term)</code>
+records the current leader.</li>
+<li><code>EnqueuePendingNetworkMessage(...)</code> and
+<code>EnqueuePendingWalOperation(...)</code> add pending operations
+visible in snapshots.</li>
+<li><code>ScheduleTimer(...)</code> schedules a virtual timer through
+<code>VirtualTime</code>.</li>
+<li><code>TrackClientProposal(...)</code> tracks a client proposal.</li>
+</ul>
+<p>These methods do not execute Raft logic. They update the simulation’s
+model of the cluster state so that invariant checks and snapshots
+reflect the current situation.</p>
+<h2 data-number="20.8" id="deterministicscheduler"><span class="header-section-number">20.8</span> DeterministicScheduler</h2>
+<p>The scheduler selects the next event from the enabled set. It is a
+sealed class with two selection strategies.</p>
+<h3 data-number="20.8.1" id="random-selection"><span class="header-section-number">20.8.1</span> Random Selection</h3>
+<div class="sourceCode" id="cb308"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb308-1"><a href="#cb308-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> SimulationEvent <span class="fu">SelectRandom</span><span class="op">(</span></span>
+<span id="cb308-2"><a href="#cb308-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> stepNumber<span class="op">,</span></span>
+<span id="cb308-3"><a href="#cb308-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">long</span> logicalTime<span class="op">,</span></span>
+<span id="cb308-4"><a href="#cb308-4" aria-hidden="true" tabindex="-1"></a>    IReadOnlyList<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;</span> enabledEvents<span class="op">)</span></span>
+<span id="cb308-5"><a href="#cb308-5" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb308-6"><a href="#cb308-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> index <span class="op">=</span> _random<span class="op">.</span><span class="fu">NextInt</span><span class="op">(</span></span>
+<span id="cb308-7"><a href="#cb308-7" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;select-event-index&quot;</span><span class="op">,</span> <span class="dv">0</span><span class="op">,</span> enabledEvents<span class="op">.</span><span class="fu">Count</span><span class="op">);</span></span>
+<span id="cb308-8"><a href="#cb308-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> enabledEvents<span class="op">[</span>index<span class="op">];</span></span>
+<span id="cb308-9"><a href="#cb308-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The PRNG draws a uniform index over the enabled set. The choice name
+<code>&quot;select-event-index&quot;</code> is recorded for replay validation.</p>
+<h3 data-number="20.8.2" id="replay-selection"><span class="header-section-number">20.8.2</span> Replay Selection</h3>
+<p>Replay selection runs a validation gauntlet at every step:</p>
+<ol type="1">
+<li>Peek the next event entry from the replay log.</li>
+<li>Validate the step number matches.</li>
+<li>Validate the enabled-event count matches.</li>
+<li>Call <code>_random.NextInt</code> to advance the PRNG state (keeps
+the PRNG synchronized even though the value is not used for
+selection).</li>
+<li>Consume the event selection entry from the replay log.</li>
+<li>Find the event with the recorded <code>selectedEventId</code> in the
+enabled set.</li>
+<li>Validate the event type matches the recorded type.</li>
+<li>Validate the event summary matches the recorded summary.</li>
+<li>Validate the snapshot hash before the event matches the recorded
+hash.</li>
+<li>Store the entry for post-apply validation of the snapshot hash
+after.</li>
+</ol>
+<p>Any mismatch at any step throws a
+<code>ReplayDivergenceException</code>. The exception message identifies
+which field diverged.</p>
+<h3 data-number="20.8.3" id="post-apply-validation"><span class="header-section-number">20.8.3</span> Post-Apply Validation</h3>
+<p>After <code>ApplyEvent</code> runs, the runtime calls:</p>
+<div class="sourceCode" id="cb309"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb309-1"><a href="#cb309-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">ValidateAppliedEvent</span><span class="op">(</span></span>
+<span id="cb309-2"><a href="#cb309-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> stepNumber<span class="op">,</span></span>
+<span id="cb309-3"><a href="#cb309-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">string</span> snapshotHashAfter<span class="op">)</span></span></code></pre></div>
+<p>This compares the actual post-apply snapshot hash to the recorded
+hash. If they differ, the code change caused a state divergence. The
+developer knows exactly which step diverged.</p>
+<h2 data-number="20.9" id="simulationrandom-and-splitmix64"><span class="header-section-number">20.9</span> SimulationRandom and
+SplitMix64</h2>
+<p><code>SimulationRandom</code> wraps a SplitMix64 PRNG. SplitMix64 is
+a fast, high-quality generator with a single 64-bit state word. Its
+output is stable across platforms for a given seed.</p>
+<p>The core algorithm:</p>
+<div class="sourceCode" id="cb310"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb310-1"><a href="#cb310-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="dt">ulong</span> <span class="fu">NextUInt64</span><span class="op">()</span></span>
+<span id="cb310-2"><a href="#cb310-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb310-3"><a href="#cb310-3" aria-hidden="true" tabindex="-1"></a>    _state <span class="op">+=</span> <span class="bn">0x9E3779B97F4A7C15</span>UL<span class="op">;</span></span>
+<span id="cb310-4"><a href="#cb310-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">ulong</span> z <span class="op">=</span> _state<span class="op">;</span></span>
+<span id="cb310-5"><a href="#cb310-5" aria-hidden="true" tabindex="-1"></a>    z <span class="op">=</span> <span class="op">(</span>z <span class="op">^</span> <span class="op">(</span>z <span class="op">&gt;&gt;</span> <span class="dv">30</span><span class="op">))</span> <span class="op">*</span> <span class="bn">0xBF58476D1CE4E5B9</span>UL<span class="op">;</span></span>
+<span id="cb310-6"><a href="#cb310-6" aria-hidden="true" tabindex="-1"></a>    z <span class="op">=</span> <span class="op">(</span>z <span class="op">^</span> <span class="op">(</span>z <span class="op">&gt;&gt;</span> <span class="dv">27</span><span class="op">))</span> <span class="op">*</span> <span class="bn">0x94D049BB133111EB</span>UL<span class="op">;</span></span>
+<span id="cb310-7"><a href="#cb310-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> z <span class="op">^</span> <span class="op">(</span>z <span class="op">&gt;&gt;</span> <span class="dv">31</span><span class="op">);</span></span>
+<span id="cb310-8"><a href="#cb310-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The constant <code>0x9E3779B97F4A7C15</code> is derived from the
+golden ratio. The three mix steps ensure good distribution.</p>
+<p>Every call to <code>NextInt</code> records a
+<code>SimulationRandomChoice</code>:</p>
+<div class="sourceCode" id="cb311"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb311-1"><a href="#cb311-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> record SimulationRandomChoice</span>
+<span id="cb311-2"><a href="#cb311-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb311-3"><a href="#cb311-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> Step <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb311-4"><a href="#cb311-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> LogicalTime <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb311-5"><a href="#cb311-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">string</span> ChoiceName <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb311-6"><a href="#cb311-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> MinInclusive <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb311-7"><a href="#cb311-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> MaxExclusive <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb311-8"><a href="#cb311-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> Value <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb311-9"><a href="#cb311-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>In replay mode, <code>NextInt</code> does not generate a value. It
+consumes the next “random” entry from the replay log and validates that
+the choice name, minimum, and maximum match the recorded values. It then
+returns the recorded value. This keeps the PRNG state synchronized
+between the original run and the replay.</p>
+<h2 data-number="20.10" id="virtual-time"><span class="header-section-number">20.10</span> Virtual Time</h2>
+<p><code>VirtualTime</code> is a sealed class that models a
+deterministic logical clock with a queue of virtual timers.</p>
+<h3 data-number="20.10.1" id="virtualtimerqueue"><span class="header-section-number">20.10.1</span> VirtualTimerQueue</h3>
+<p>The queue holds <code>VirtualTimer</code> instances ordered by their
+<code>FiresAtLogicalTime</code>. Each timer has:</p>
+<div class="sourceCode" id="cb312"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb312-1"><a href="#cb312-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> <span class="kw">class</span> VirtualTimer</span>
+<span id="cb312-2"><a href="#cb312-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb312-3"><a href="#cb312-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> TimerId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb312-4"><a href="#cb312-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> NodeId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb312-5"><a href="#cb312-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> SimulationTimerKind Kind <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb312-6"><a href="#cb312-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> FiresAtLogicalTime <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb312-7"><a href="#cb312-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span><span class="op">?</span> PartitionId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb312-8"><a href="#cb312-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> IntervalMs <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> init<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb312-9"><a href="#cb312-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> Action<span class="op">&lt;</span>SimulationRuntime<span class="op">,</span> VirtualTimer<span class="op">&gt;?</span> OnFire <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb312-10"><a href="#cb312-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span><span class="op">?</span> ScheduledEventId <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb312-11"><a href="#cb312-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">bool</span> IsPeriodic <span class="op">=&gt;</span> IntervalMs <span class="op">&gt;</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb312-12"><a href="#cb312-12" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>A timer with <code>IntervalMs &gt; 0</code> is periodic. After it
+fires, <code>VirtualTime</code> reschedules it by adding
+<code>IntervalMs</code> to its fire time. A timer with
+<code>IntervalMs == 0</code> is one-shot and is removed after it
+fires.</p>
+<h3 data-number="20.10.2" id="timer-kinds"><span class="header-section-number">20.10.2</span> Timer Kinds</h3>
+<p>Six timer kinds model the standard Raft timer set:</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CheckLeader</code></td>
+<td>Periodic check for leader liveness.</td>
+</tr>
+<tr>
+<td><code>Heartbeat</code></td>
+<td>Periodic heartbeat from the leader.</td>
+</tr>
+<tr>
+<td><code>ElectionTimeout</code></td>
+<td>One-shot election timeout (randomized).</td>
+</tr>
+<tr>
+<td><code>UpdateNodes</code></td>
+<td>Periodic cluster membership refresh.</td>
+</tr>
+<tr>
+<td><code>Retry</code></td>
+<td>One-shot retry after a failed operation.</td>
+</tr>
+<tr>
+<td><code>ProposalPoll</code></td>
+<td>One-shot poll for proposal completion.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-number="20.10.3" id="scheduling-standard-timers"><span class="header-section-number">20.10.3</span> Scheduling Standard
+Timers</h3>
+<p><code>NodeVirtualTimerService.ScheduleStandardTimers</code> sets up
+the three periodic timers that every Raft node needs:</p>
+<ol type="1">
+<li><code>CheckLeader</code> at <code>CheckLeaderIntervalMs</code>
+(default 250 ms).</li>
+<li><code>Heartbeat</code> at <code>HeartbeatIntervalMs</code> (default
+500 ms).</li>
+<li><code>UpdateNodes</code> at <code>UpdateNodesIntervalMs</code>
+(default 5000 ms).</li>
+</ol>
+<p>All three start after an initial delay of
+<code>TimerInitialDelayMs</code> (default 2500 ms). These defaults align
+with the production Raft configuration.</p>
+<h3 data-number="20.10.4" id="deterministic-election-timeouts"><span class="header-section-number">20.10.4</span> Deterministic Election
+Timeouts</h3>
+<p><code>VirtualTime.ScheduleElectionTimeout</code> draws a random
+timeout from a configured range:</p>
+<div class="sourceCode" id="cb313"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb313-1"><a href="#cb313-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> VirtualTimer <span class="fu">ScheduleElectionTimeout</span><span class="op">(</span></span>
+<span id="cb313-2"><a href="#cb313-2" aria-hidden="true" tabindex="-1"></a>    SimulationRuntime runtime<span class="op">,</span></span>
+<span id="cb313-3"><a href="#cb313-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> nodeId<span class="op">,</span></span>
+<span id="cb313-4"><a href="#cb313-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> partitionId<span class="op">,</span></span>
+<span id="cb313-5"><a href="#cb313-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">long</span> fromLogicalTime<span class="op">)</span></span>
+<span id="cb313-6"><a href="#cb313-6" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb313-7"><a href="#cb313-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> timeout <span class="op">=</span> runtime<span class="op">.</span><span class="fu">Random</span><span class="op">.</span><span class="fu">NextInt</span><span class="op">(</span></span>
+<span id="cb313-8"><a href="#cb313-8" aria-hidden="true" tabindex="-1"></a>        $<span class="st">&quot;election-timeout-{nodeId}-{partitionId}&quot;</span><span class="op">,</span></span>
+<span id="cb313-9"><a href="#cb313-9" aria-hidden="true" tabindex="-1"></a>        Configuration<span class="op">.</span><span class="fu">StartElectionTimeoutMs</span><span class="op">,</span></span>
+<span id="cb313-10"><a href="#cb313-10" aria-hidden="true" tabindex="-1"></a>        Configuration<span class="op">.</span><span class="fu">EndElectionTimeoutMs</span><span class="op">);</span></span>
+<span id="cb313-11"><a href="#cb313-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">return</span> <span class="fu">ScheduleOneShot</span><span class="op">(</span></span>
+<span id="cb313-12"><a href="#cb313-12" aria-hidden="true" tabindex="-1"></a>        nodeId<span class="op">,</span></span>
+<span id="cb313-13"><a href="#cb313-13" aria-hidden="true" tabindex="-1"></a>        SimulationTimerKind<span class="op">.</span><span class="fu">ElectionTimeout</span><span class="op">,</span></span>
+<span id="cb313-14"><a href="#cb313-14" aria-hidden="true" tabindex="-1"></a>        fromLogicalTime <span class="op">+</span> timeout<span class="op">,</span></span>
+<span id="cb313-15"><a href="#cb313-15" aria-hidden="true" tabindex="-1"></a>        partitionId<span class="op">,</span></span>
+<span id="cb313-16"><a href="#cb313-16" aria-hidden="true" tabindex="-1"></a>        onFire<span class="op">:</span> <span class="kw">null</span><span class="op">);</span></span>
+<span id="cb313-17"><a href="#cb313-17" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The choice name includes the node ID and partition ID. This makes
+each node’s election timeout independent but reproducible for a given
+seed.</p>
+<h3 data-number="20.10.5" id="timers-as-events"><span class="header-section-number">20.10.5</span> Timers as Events</h3>
+<p>Timers do not fire automatically. <code>GetEnabledTimerEvents</code>
+returns the timers that are ready to fire (those at the earliest pending
+fire time) as <code>SimulationEvent</code> instances with type
+<code>TimerTick</code>. The scheduler must select one of these events
+for the timer to fire.</p>
+<p>This design is critical. In a real system, timers fire based on
+wall-clock time, which introduces nondeterminism. In the simulation, the
+scheduler controls which timer fires and when. Two timers scheduled for
+the same logical time become two distinct enabled events. The PRNG (or
+the replay log) determines which one the scheduler picks first.</p>
+<h2 data-number="20.11" id="the-replay-system"><span class="header-section-number">20.11</span> The Replay System</h2>
+<p>The replay system records a simulation run and replays it with full
+validation.</p>
+<h3 data-number="20.11.1" id="replaylogentry"><span class="header-section-number">20.11.1</span> ReplayLogEntry</h3>
+<p>Each JSONL record is a <code>ReplayLogEntry</code>. It carries
+metadata common to all entries and type-specific fields:</p>
+<p><strong>Common fields:</strong> - <code>Version</code> (always 1) -
+<code>EntryType</code> (“random” or “event”) - <code>Seed</code> -
+<code>Scenario</code> - <code>Parameters</code> - <code>Step</code> -
+<code>LogicalTime</code></p>
+<p><strong>Random-entry fields:</strong> - <code>ChoiceName</code>,
+<code>ChoiceMinInclusive</code>, <code>ChoiceMaxExclusive</code>,
+<code>ChoiceValue</code></p>
+<p><strong>Event-entry fields:</strong> -
+<code>EnabledEventCount</code>, <code>SelectedEventId</code>,
+<code>SelectedEventType</code>, <code>SelectedEventSummary</code>,
+<code>SnapshotHashBefore</code>, <code>SnapshotHashAfter</code></p>
+<h3 data-number="20.11.2" id="replaylogwriter"><span class="header-section-number">20.11.2</span> ReplayLogWriter</h3>
+<p><code>ReplayLogWriter</code> appends entries as JSONL (one JSON
+object per line). It uses camelCase property naming and omits null
+fields. Two methods produce entries:</p>
+<ul>
+<li><code>WriteRandomChoice(SimulationRandomChoice choice)</code> writes
+each PRNG draw.</li>
+<li><code>WriteEventSelection(...)</code> writes each scheduler
+selection with the enabled-event count, the selected event’s ID, type,
+and summary, and the snapshot hashes before and after the event.</li>
+</ul>
+<p>The interleaved random and event entries form a complete record of
+the run.</p>
+<h3 data-number="20.11.3" id="replaylogreader"><span class="header-section-number">20.11.3</span> ReplayLogReader</h3>
+<p><code>ReplayLogReader</code> reads the JSONL file and provides
+sequential consumption:</p>
+<ul>
+<li><code>PeekNextEventEntry()</code> returns the next event entry
+without consuming it.</li>
+<li><code>TryTakeNextEventSelection(out ReplayLogEntry entry)</code>
+consumes the next event entry.</li>
+<li><code>ConsumeRandomChoice(string choiceName, int min, int max, int step)</code>
+consumes the next random entry and validates that the choice name and
+range match.</li>
+<li><code>ValidateFullyConsumed()</code> throws if any entries remain
+after the simulation ends.</li>
+</ul>
+<p>The reader maintains a cursor (<code>_nextEntryIndex</code>) that
+advances with each consumption. The <code>Header</code> property is
+always the first entry and carries the seed and scenario name for
+validation at startup.</p>
+<h3 data-number="20.11.4" id="replaydivergenceexception"><span class="header-section-number">20.11.4</span>
+ReplayDivergenceException</h3>
+<p>When any validation fails during replay, the system throws a
+<code>ReplayDivergenceException</code>. The exception message identifies
+the specific divergence:</p>
+<ul>
+<li>“Enabled event set diverged” (different number of enabled
+events)</li>
+<li>“Selected event summary diverged” (the event’s description
+changed)</li>
+<li>“Selected event type diverged” (the event’s category changed)</li>
+<li>“Snapshot hash before diverged” (the state before the event
+changed)</li>
+<li>“Snapshot hash after diverged” (the state after the event
+changed)</li>
+</ul>
+<p>The developer can read the exception message and locate the exact
+step where the code change affected behavior.</p>
+<h2 data-number="20.12" id="simulationsnapshot"><span class="header-section-number">20.12</span> SimulationSnapshot</h2>
+<p><code>SimulationSnapshot</code> captures the full simulation state as
+an immutable record:</p>
+<div class="sourceCode" id="cb314"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb314-1"><a href="#cb314-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> record SimulationSnapshot</span>
+<span id="cb314-2"><a href="#cb314-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb314-3"><a href="#cb314-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> LogicalTick <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-4"><a href="#cb314-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> StepNumber <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-5"><a href="#cb314-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyList<span class="op">&lt;</span>SimulationNodeSnapshot<span class="op">&gt;</span> Nodes <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-6"><a href="#cb314-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyDictionary<span class="op">&lt;</span><span class="dt">int</span><span class="op">,</span> SimulationPartitionLeaderSnapshot<span class="op">&gt;</span></span>
+<span id="cb314-7"><a href="#cb314-7" aria-hidden="true" tabindex="-1"></a>        PartitionLeaders <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-8"><a href="#cb314-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyList<span class="op">&lt;</span>SimulationPendingMessageSnapshot<span class="op">&gt;</span></span>
+<span id="cb314-9"><a href="#cb314-9" aria-hidden="true" tabindex="-1"></a>        PendingNetworkMessages <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-10"><a href="#cb314-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyList<span class="op">&lt;</span>SimulationPendingWalOperationSnapshot<span class="op">&gt;</span></span>
+<span id="cb314-11"><a href="#cb314-11" aria-hidden="true" tabindex="-1"></a>        PendingWalOperations <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-12"><a href="#cb314-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyList<span class="op">&lt;</span>SimulationPendingTimerSnapshot<span class="op">&gt;</span></span>
+<span id="cb314-13"><a href="#cb314-13" aria-hidden="true" tabindex="-1"></a>        PendingTimers <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-14"><a href="#cb314-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyDictionary<span class="op">&lt;</span><span class="dt">string</span><span class="op">,</span> <span class="dt">int</span><span class="op">&gt;</span></span>
+<span id="cb314-15"><a href="#cb314-15" aria-hidden="true" tabindex="-1"></a>        SchedulerQueueDepths <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-16"><a href="#cb314-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyList<span class="op">&lt;</span>SimulationClientProposalSnapshot<span class="op">&gt;</span></span>
+<span id="cb314-17"><a href="#cb314-17" aria-hidden="true" tabindex="-1"></a>        ClientProposals <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb314-18"><a href="#cb314-18" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Each node snapshot records the node’s lifecycle status
+(<code>Stopped</code>, <code>Running</code>, <code>Paused</code>, or
+<code>Crashed</code>), its current term, its <code>votedFor</code>, its
+known leader, and summaries of its committed, proposed, and rolled-back
+WAL logs.</p>
+<p>The <code>ComputeContentHash</code> method serializes the snapshot to
+JSON and computes a SHA-256 hash. This hash is the ground truth for
+replay validation. If the hash after step N differs between the original
+run and the replay, the code change affected the state at step N.</p>
+<h2 data-number="20.13" id="simulationresult"><span class="header-section-number">20.13</span> SimulationResult</h2>
+<p><code>Run</code> returns a <code>SimulationResult</code>:</p>
+<div class="sourceCode" id="cb315"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb315-1"><a href="#cb315-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">sealed</span> record SimulationResult</span>
+<span id="cb315-2"><a href="#cb315-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb315-3"><a href="#cb315-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">bool</span> Passed <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-4"><a href="#cb315-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">string</span> ScenarioName <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-5"><a href="#cb315-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">ulong</span> Seed <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-6"><a href="#cb315-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> IReadOnlyDictionary<span class="op">&lt;</span><span class="dt">string</span><span class="op">,</span> <span class="dt">string</span><span class="op">&gt;</span> Parameters <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-7"><a href="#cb315-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">int</span> StepCount <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-8"><a href="#cb315-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">long</span> FinalLogicalTime <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-9"><a href="#cb315-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">string</span><span class="op">?</span> ReplayLogPath <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-10"><a href="#cb315-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> SimulationSnapshot<span class="op">?</span> LastValidSnapshot <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-11"><a href="#cb315-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> SimulationSnapshot<span class="op">?</span> FailingSnapshot <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-12"><a href="#cb315-12" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> InvariantViolationException<span class="op">?</span> Violation <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="op">}</span></span>
+<span id="cb315-13"><a href="#cb315-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>On success, <code>Passed</code> is true. On failure,
+<code>Passed</code> is false, and <code>Violation</code> carries the
+<code>InvariantViolationException</code> with the invariant name, step
+number, triggering event, and both the last valid and the failing
+snapshots.</p>
+<h2 data-number="20.14" id="inmemorycommunication"><span class="header-section-number">20.14</span> InMemoryCommunication</h2>
+<p><code>InMemoryCommunication</code> implements
+<code>ICommunication</code> without a network. It routes RPCs directly
+between in-process <code>IRaft</code> instances through a
+dictionary:</p>
+<div class="sourceCode" id="cb316"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb316-1"><a href="#cb316-1" aria-hidden="true" tabindex="-1"></a>volatile Dictionary<span class="op">&lt;</span><span class="dt">string</span><span class="op">,</span> IRaft<span class="op">&gt;</span> nodes<span class="op">;</span></span></code></pre></div>
+<p>Each RPC method (Handshake, RequestVotes, Vote, AppendLogs, and 12
+others) looks up the target node in the dictionary and calls its handler
+directly.</p>
+<h3 data-number="20.14.1" id="network-partition-simulation"><span class="header-section-number">20.14.1</span> Network Partition
+Simulation</h3>
+<p><code>InMemoryCommunication</code> supports simulated network
+partitions:</p>
+<div class="sourceCode" id="cb317"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb317-1"><a href="#cb317-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">PartitionNode</span><span class="op">(</span><span class="dt">string</span> endpoint<span class="op">)</span></span>
+<span id="cb317-2"><a href="#cb317-2" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">HealPartition</span><span class="op">(</span><span class="dt">string</span> endpoint<span class="op">)</span></span></code></pre></div>
+<p><code>PartitionNode</code> adds an endpoint to a
+<code>HashSet&lt;string&gt;</code> of partitioned endpoints. Every RPC
+method checks <code>IsPartitioned(source, target)</code> before routing.
+If either the source or the target is partitioned, the RPC returns an
+empty or failure response without reaching the target node.</p>
+<p><code>HealPartition</code> removes the endpoint from the set. Traffic
+resumes immediately.</p>
+<p>This mechanism lets tests create asymmetric partitions, split-brain
+scenarios, and rolling failures without real network manipulation.</p>
+<h2 data-number="20.15" id="inmemorywal"><span class="header-section-number">20.15</span> InMemoryWAL</h2>
+<p><code>InMemoryWAL</code> implements <code>IWAL</code> using a
+<code>SortedList&lt;long, RaftLog&gt;</code> per partition. The
+<code>SortedList</code> provides O(1) amortized appends at the tail,
+O(log n) binary-search reads, and indexable keys for O(1) max-ID
+lookups.</p>
+<p>Thread safety uses a <code>ReaderWriterLockSlim</code> with
+<code>NoRecursion</code> policy. The <code>maxLogIds</code> and
+<code>lastCheckpoints</code> dictionaries are maintained incrementally
+on every mutation, so reads never need to scan the full log.</p>
+<p>Key operations:</p>
+<ul>
+<li><code>ReadLogsRange</code> uses binary search
+(<code>LowerBound</code>) to find the start position and then scans
+forward.</li>
+<li><code>Write</code> upserts entries and updates the
+<code>maxLogIds</code> and <code>lastCheckpoints</code> caches.</li>
+<li><code>TruncateLogsAfter</code> removes entries with IDs above a
+threshold and adjusts the caches.</li>
+<li><code>CompactLogsOlderThan</code> performs head compaction, which
+removes entries below a checkpoint up to a configured cap.</li>
+</ul>
+<p><code>InMemoryWAL</code> is used in integration tests and simulated
+cluster tests. It provides the same interface as <code>RocksDbWAL</code>
+and <code>SqliteWAL</code> without disk I/O.</p>
+<h2 data-number="20.16" id="deterministic-election-timeouts-1"><span class="header-section-number">20.16</span> Deterministic Election
+Timeouts</h2>
+<p>In production, <code>ElectionCoordinator</code> draws election
+timeouts from <code>Random.Shared</code>. This is nondeterministic. For
+simulation and testing, <code>RaftConfiguration</code> provides:</p>
+<div class="sourceCode" id="cb318"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb318-1"><a href="#cb318-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">int</span><span class="op">?</span> ElectionTimeoutSeed <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span></code></pre></div>
+<p>When this property is set, the election coordinator derives a
+per-node seed:</p>
+<div class="sourceCode" id="cb319"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb319-1"><a href="#cb319-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="kw">static</span> <span class="dt">int</span> <span class="fu">DeriveElectionSeed</span><span class="op">(</span></span>
+<span id="cb319-2"><a href="#cb319-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> configuredSeed<span class="op">,</span> <span class="dt">int</span> partitionId<span class="op">,</span> <span class="dt">int</span> localNodeId<span class="op">)</span></span>
+<span id="cb319-3"><a href="#cb319-3" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb319-4"><a href="#cb319-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">unchecked</span></span>
+<span id="cb319-5"><a href="#cb319-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb319-6"><a href="#cb319-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">int</span> mixed <span class="op">=</span> configuredSeed<span class="op">;</span></span>
+<span id="cb319-7"><a href="#cb319-7" aria-hidden="true" tabindex="-1"></a>        mixed <span class="op">=</span> mixed <span class="op">*</span> <span class="dv">397</span> <span class="op">^</span> partitionId<span class="op">;</span></span>
+<span id="cb319-8"><a href="#cb319-8" aria-hidden="true" tabindex="-1"></a>        mixed <span class="op">=</span> mixed <span class="op">*</span> <span class="dv">397</span> <span class="op">^</span> localNodeId<span class="op">;</span></span>
+<span id="cb319-9"><a href="#cb319-9" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> mixed<span class="op">;</span></span>
+<span id="cb319-10"><a href="#cb319-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb319-11"><a href="#cb319-11" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>The multiplication by 397 and XOR with the partition and node IDs
+produces a distinct seed per node. Without this mixing, all nodes in a
+partition would receive identical timeout sequences. Identical timeouts
+cause permanent split votes because every node starts its election at
+the same time.</p>
+<p>The derivation uses <code>* 397 ^ x</code> (a fixed integer hash
+combine) instead of <code>HashCode.Combine</code>. The reason is that
+<code>HashCode</code> seeds itself per process. A per-process seed would
+break cross-restart reproducibility: a node that restarts would draw a
+different timeout sequence even with the same configured seed.</p>
+<h2 data-number="20.17" id="writing-a-simulation-scenario"><span class="header-section-number">20.17</span> Writing a Simulation
+Scenario</h2>
+<p>The following example shows how to set up a simulated three-node
+cluster. The scenario starts all three nodes, schedules their standard
+timers, and registers an invariant that verifies no two nodes claim to
+be leader of the same partition in the same term.</p>
+<div class="sourceCode" id="cb320"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb320-1"><a href="#cb320-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> ThreeNodeElectionScenario <span class="op">:</span> SimulationScenario</span>
+<span id="cb320-2"><a href="#cb320-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb320-3"><a href="#cb320-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> <span class="dt">string</span> Name <span class="op">=&gt;</span> <span class="st">&quot;three-node-election&quot;</span><span class="op">;</span></span>
+<span id="cb320-4"><a href="#cb320-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb320-5"><a href="#cb320-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="fu">ThreeNodeElectionScenario</span><span class="op">()</span></span>
+<span id="cb320-6"><a href="#cb320-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb320-7"><a href="#cb320-7" aria-hidden="true" tabindex="-1"></a>        Seed <span class="op">=</span> <span class="dv">42</span><span class="op">;</span></span>
+<span id="cb320-8"><a href="#cb320-8" aria-hidden="true" tabindex="-1"></a>        NodeCount <span class="op">=</span> <span class="dv">3</span><span class="op">;</span></span>
+<span id="cb320-9"><a href="#cb320-9" aria-hidden="true" tabindex="-1"></a>        PartitionCount <span class="op">=</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb320-10"><a href="#cb320-10" aria-hidden="true" tabindex="-1"></a>        MaxSteps <span class="op">=</span> <span class="dv">200</span><span class="op">;</span></span>
+<span id="cb320-11"><a href="#cb320-11" aria-hidden="true" tabindex="-1"></a>        MaxLogicalTime <span class="op">=</span> <span class="dv">30</span>_000<span class="op">;</span></span>
+<span id="cb320-12"><a href="#cb320-12" aria-hidden="true" tabindex="-1"></a>        SchedulingMode <span class="op">=</span> SimulationSchedulingMode<span class="op">.</span><span class="fu">Random</span><span class="op">;</span></span>
+<span id="cb320-13"><a href="#cb320-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb320-14"><a href="#cb320-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb320-15"><a href="#cb320-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> <span class="dt">void</span> <span class="fu">Configure</span><span class="op">(</span>SimulationRuntime runtime<span class="op">)</span></span>
+<span id="cb320-16"><a href="#cb320-16" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb320-17"><a href="#cb320-17" aria-hidden="true" tabindex="-1"></a>        <span class="kw">for</span> <span class="op">(</span><span class="dt">int</span> i <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> i <span class="op">&lt;</span> NodeCount<span class="op">;</span> i<span class="op">++)</span></span>
+<span id="cb320-18"><a href="#cb320-18" aria-hidden="true" tabindex="-1"></a>        <span class="op">{</span></span>
+<span id="cb320-19"><a href="#cb320-19" aria-hidden="true" tabindex="-1"></a>            runtime<span class="op">.</span><span class="fu">SetNodeLifecycleStatus</span><span class="op">(</span></span>
+<span id="cb320-20"><a href="#cb320-20" aria-hidden="true" tabindex="-1"></a>                i<span class="op">,</span> SimulationNodeLifecycleStatus<span class="op">.</span><span class="fu">Running</span><span class="op">);</span></span>
+<span id="cb320-21"><a href="#cb320-21" aria-hidden="true" tabindex="-1"></a>            NodeVirtualTimerService<span class="op">.</span><span class="fu">ScheduleStandardTimers</span><span class="op">(</span></span>
+<span id="cb320-22"><a href="#cb320-22" aria-hidden="true" tabindex="-1"></a>                runtime<span class="op">,</span> i<span class="op">);</span></span>
+<span id="cb320-23"><a href="#cb320-23" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb320-24"><a href="#cb320-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb320-25"><a href="#cb320-25" aria-hidden="true" tabindex="-1"></a>        runtime<span class="op">.</span><span class="fu">RegisterInvariant</span><span class="op">(</span></span>
+<span id="cb320-26"><a href="#cb320-26" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;single-leader-per-term&quot;</span><span class="op">,</span></span>
+<span id="cb320-27"><a href="#cb320-27" aria-hidden="true" tabindex="-1"></a>            snapshot <span class="op">=&gt;</span></span>
+<span id="cb320-28"><a href="#cb320-28" aria-hidden="true" tabindex="-1"></a>            <span class="op">{</span></span>
+<span id="cb320-29"><a href="#cb320-29" aria-hidden="true" tabindex="-1"></a>                <span class="co">// Verify at most one leader per partition per term</span></span>
+<span id="cb320-30"><a href="#cb320-30" aria-hidden="true" tabindex="-1"></a>                <span class="dt">var</span> leaders <span class="op">=</span> snapshot<span class="op">.</span><span class="fu">Nodes</span></span>
+<span id="cb320-31"><a href="#cb320-31" aria-hidden="true" tabindex="-1"></a>                    <span class="op">.</span><span class="fu">Where</span><span class="op">(</span>n <span class="op">=&gt;</span> n<span class="op">.</span><span class="fu">KnownLeader</span> <span class="op">!=</span> <span class="kw">null</span><span class="op">)</span></span>
+<span id="cb320-32"><a href="#cb320-32" aria-hidden="true" tabindex="-1"></a>                    <span class="op">.</span><span class="fu">GroupBy</span><span class="op">(</span>n <span class="op">=&gt;</span> <span class="op">(</span>n<span class="op">.</span><span class="fu">CurrentTerm</span><span class="op">,</span> n<span class="op">.</span><span class="fu">KnownLeader</span><span class="op">));</span></span>
+<span id="cb320-33"><a href="#cb320-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb320-34"><a href="#cb320-34" aria-hidden="true" tabindex="-1"></a>                <span class="kw">foreach</span> <span class="op">(</span><span class="dt">var</span> group <span class="kw">in</span> leaders<span class="op">)</span></span>
+<span id="cb320-35"><a href="#cb320-35" aria-hidden="true" tabindex="-1"></a>                <span class="op">{</span></span>
+<span id="cb320-36"><a href="#cb320-36" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">if</span> <span class="op">(</span>group<span class="op">.</span><span class="fu">Count</span><span class="op">()</span> <span class="op">&gt;</span> <span class="dv">1</span><span class="op">)</span></span>
+<span id="cb320-37"><a href="#cb320-37" aria-hidden="true" tabindex="-1"></a>                    <span class="op">{</span></span>
+<span id="cb320-38"><a href="#cb320-38" aria-hidden="true" tabindex="-1"></a>                        <span class="dt">var</span> nodeIds <span class="op">=</span> <span class="dt">string</span><span class="op">.</span><span class="fu">Join</span><span class="op">(</span><span class="st">&quot;, &quot;</span><span class="op">,</span></span>
+<span id="cb320-39"><a href="#cb320-39" aria-hidden="true" tabindex="-1"></a>                            group<span class="op">.</span><span class="fu">Select</span><span class="op">(</span>n <span class="op">=&gt;</span> n<span class="op">.</span><span class="fu">NodeId</span><span class="op">));</span></span>
+<span id="cb320-40"><a href="#cb320-40" aria-hidden="true" tabindex="-1"></a>                        <span class="kw">throw</span> <span class="kw">new</span> <span class="fu">InvariantViolationException</span><span class="op">(</span></span>
+<span id="cb320-41"><a href="#cb320-41" aria-hidden="true" tabindex="-1"></a>                            <span class="st">&quot;single-leader-per-term&quot;</span><span class="op">,</span></span>
+<span id="cb320-42"><a href="#cb320-42" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;Multiple leaders in term &quot;</span> <span class="op">+</span></span>
+<span id="cb320-43"><a href="#cb320-43" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;{group.Key.CurrentTerm}: &quot;</span> <span class="op">+</span></span>
+<span id="cb320-44"><a href="#cb320-44" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;nodes {nodeIds}&quot;</span><span class="op">,</span></span>
+<span id="cb320-45"><a href="#cb320-45" aria-hidden="true" tabindex="-1"></a>                            snapshot<span class="op">.</span><span class="fu">StepNumber</span><span class="op">,</span></span>
+<span id="cb320-46"><a href="#cb320-46" aria-hidden="true" tabindex="-1"></a>                            <span class="kw">null</span><span class="op">,</span> <span class="kw">null</span><span class="op">,</span> snapshot<span class="op">);</span></span>
+<span id="cb320-47"><a href="#cb320-47" aria-hidden="true" tabindex="-1"></a>                    <span class="op">}</span></span>
+<span id="cb320-48"><a href="#cb320-48" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb320-49"><a href="#cb320-49" aria-hidden="true" tabindex="-1"></a>            <span class="op">});</span></span>
+<span id="cb320-50"><a href="#cb320-50" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb320-51"><a href="#cb320-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb320-52"><a href="#cb320-52" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> IReadOnlyList<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;</span></span>
+<span id="cb320-53"><a href="#cb320-53" aria-hidden="true" tabindex="-1"></a>        <span class="fu">GetEnabledEvents</span><span class="op">(</span>SimulationRuntime runtime<span class="op">)</span></span>
+<span id="cb320-54"><a href="#cb320-54" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb320-55"><a href="#cb320-55" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Return node lifecycle events plus any</span></span>
+<span id="cb320-56"><a href="#cb320-56" aria-hidden="true" tabindex="-1"></a>        <span class="co">// scenario-specific events</span></span>
+<span id="cb320-57"><a href="#cb320-57" aria-hidden="true" tabindex="-1"></a>        <span class="dt">var</span> events <span class="op">=</span> <span class="kw">new</span> List<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;();</span></span>
+<span id="cb320-58"><a href="#cb320-58" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Timer events are added automatically</span></span>
+<span id="cb320-59"><a href="#cb320-59" aria-hidden="true" tabindex="-1"></a>        <span class="co">// by the runtime from VirtualTime</span></span>
+<span id="cb320-60"><a href="#cb320-60" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> events<span class="op">;</span></span>
+<span id="cb320-61"><a href="#cb320-61" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb320-62"><a href="#cb320-62" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>To run the scenario:</p>
+<div class="sourceCode" id="cb321"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb321-1"><a href="#cb321-1" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> scenario <span class="op">=</span> <span class="kw">new</span> <span class="fu">ThreeNodeElectionScenario</span><span class="op">();</span></span>
+<span id="cb321-2"><a href="#cb321-2" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> options <span class="op">=</span> <span class="kw">new</span> SimulationRuntimeOptions</span>
+<span id="cb321-3"><a href="#cb321-3" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb321-4"><a href="#cb321-4" aria-hidden="true" tabindex="-1"></a>    ReplayLogPath <span class="op">=</span> <span class="st">&quot;election-test.jsonl&quot;</span><span class="op">,</span></span>
+<span id="cb321-5"><a href="#cb321-5" aria-hidden="true" tabindex="-1"></a>    WriteReplayLog <span class="op">=</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb321-6"><a href="#cb321-6" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb321-7"><a href="#cb321-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb321-8"><a href="#cb321-8" aria-hidden="true" tabindex="-1"></a><span class="kw">using</span> <span class="dt">var</span> runtime <span class="op">=</span> <span class="kw">new</span> <span class="fu">SimulationRuntime</span><span class="op">(</span>scenario<span class="op">,</span> options<span class="op">);</span></span>
+<span id="cb321-9"><a href="#cb321-9" aria-hidden="true" tabindex="-1"></a>SimulationResult result <span class="op">=</span> runtime<span class="op">.</span><span class="fu">Run</span><span class="op">();</span></span>
+<span id="cb321-10"><a href="#cb321-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb321-11"><a href="#cb321-11" aria-hidden="true" tabindex="-1"></a>Assert<span class="op">.</span><span class="fu">True</span><span class="op">(</span>result<span class="op">.</span><span class="fu">Passed</span><span class="op">,</span></span>
+<span id="cb321-12"><a href="#cb321-12" aria-hidden="true" tabindex="-1"></a>    result<span class="op">.</span><span class="fu">Violation</span><span class="op">?.</span><span class="fu">Message</span> <span class="op">??</span> <span class="st">&quot;Unknown failure&quot;</span><span class="op">);</span></span></code></pre></div>
+<p>The same seed (42) produces the same election outcome every time. The
+replay log at <code>election-test.jsonl</code> records every random
+choice and event selection.</p>
+<h2 data-number="20.18" id="replaying-a-recorded-run"><span class="header-section-number">20.18</span> Replaying a Recorded Run</h2>
+<p>To replay the run with full validation:</p>
+<div class="sourceCode" id="cb322"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb322-1"><a href="#cb322-1" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> scenario <span class="op">=</span> <span class="kw">new</span> ThreeNodeElectionScenario</span>
+<span id="cb322-2"><a href="#cb322-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb322-3"><a href="#cb322-3" aria-hidden="true" tabindex="-1"></a>    SchedulingMode <span class="op">=</span> SimulationSchedulingMode<span class="op">.</span><span class="fu">Replay</span><span class="op">,</span></span>
+<span id="cb322-4"><a href="#cb322-4" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb322-5"><a href="#cb322-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb322-6"><a href="#cb322-6" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> options <span class="op">=</span> <span class="kw">new</span> SimulationRuntimeOptions</span>
+<span id="cb322-7"><a href="#cb322-7" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb322-8"><a href="#cb322-8" aria-hidden="true" tabindex="-1"></a>    ReplayLogPath <span class="op">=</span> <span class="st">&quot;election-test.jsonl&quot;</span><span class="op">,</span></span>
+<span id="cb322-9"><a href="#cb322-9" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb322-10"><a href="#cb322-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb322-11"><a href="#cb322-11" aria-hidden="true" tabindex="-1"></a><span class="kw">using</span> <span class="dt">var</span> runtime <span class="op">=</span> <span class="kw">new</span> <span class="fu">SimulationRuntime</span><span class="op">(</span>scenario<span class="op">,</span> options<span class="op">);</span></span>
+<span id="cb322-12"><a href="#cb322-12" aria-hidden="true" tabindex="-1"></a>SimulationResult result <span class="op">=</span> runtime<span class="op">.</span><span class="fu">Run</span><span class="op">();</span></span></code></pre></div>
+<p>The runtime reads the replay log, validates the seed and scenario
+name, and then replays every step. At each step, it verifies:</p>
+<ol type="1">
+<li>The number of enabled events matches the recorded count.</li>
+<li>The selected event’s ID, type, and summary match the recorded
+values.</li>
+<li>The snapshot hash before and after the event matches the recorded
+hashes.</li>
+</ol>
+<p>If a code change causes any of these to differ, the replay throws a
+<code>ReplayDivergenceException</code> at the exact step where behavior
+diverged.</p>
+<h2 data-number="20.19" id="the-simulation-discovery-workflow"><span class="header-section-number">20.19</span> The Simulation Discovery
+Workflow</h2>
+<p>A typical simulation workflow proceeds in four phases:</p>
+<ol type="1">
+<li><p><strong>Explore.</strong> Run the scenario in <code>Random</code>
+mode with <code>WriteReplayLog = true</code>. Try many seeds. Each seed
+explores a different interleaving of events.</p></li>
+<li><p><strong>Detect.</strong> An invariant check fails at step N with
+seed S. The <code>SimulationResult</code> carries the failing snapshot,
+the last valid snapshot, and the triggering event. The replay log is
+written to disk.</p></li>
+<li><p><strong>Reproduce.</strong> Switch to <code>Replay</code> mode
+with the same log path. The run follows the identical path and fails at
+the same step. The developer can set breakpoints and inspect the
+state.</p></li>
+<li><p><strong>Verify the fix.</strong> After the code change, replay
+the same log. If the fix is correct, the invariant no longer fails. If
+the fix changes the execution path, the replay detects the divergence at
+the exact step where behavior differs. The developer can then re-run in
+<code>Random</code> mode with the same seed to verify the fix under the
+new execution path.</p></li>
+</ol>
+<h2 data-number="20.20" id="takeaways-1"><span class="header-section-number">20.20</span> Takeaways</h2>
+<ol type="1">
+<li>Deterministic simulation replaces real time, real networking, and
+real randomness with controllable primitives. The same seed produces the
+same execution.</li>
+<li><code>SimulationScenario</code> declares the test configuration.
+<code>SimulationRuntime</code> orchestrates the run.
+<code>DeterministicScheduler</code> selects events from the enabled
+set.</li>
+<li>Virtual timers do not fire automatically. They become enabled events
+that the scheduler must select. This eliminates timing
+nondeterminism.</li>
+<li><code>SimulationRandom</code> uses SplitMix64 for platform-stable,
+reproducible random choices. Every choice is recorded for replay.</li>
+<li>The replay system records every random choice and event selection as
+JSONL. In replay mode, every field is validated. Any divergence
+identifies the exact step where a code change affected behavior.</li>
+<li><code>SimulationSnapshot</code> captures the full state after every
+step. Its SHA-256 hash is the ground truth for replay validation.</li>
+<li><code>InMemoryCommunication</code> routes RPCs between in-process
+nodes and supports simulated network partitions through
+<code>PartitionNode</code> and <code>HealPartition</code>.</li>
+<li><code>InMemoryWAL</code> provides the full <code>IWAL</code>
+interface backed by <code>SortedList</code> per partition. It is used
+for cluster tests without disk I/O.</li>
+<li><code>ElectionTimeoutSeed</code> makes leader election
+deterministic. The seed is mixed with the partition ID and node ID
+through <code>* 397 ^ x</code> to produce distinct per-node timeout
+sequences.</li>
+<li>Simulation is a tool for library developers and advanced users. It
+discovers timing-sensitive bugs that production testing cannot
+reach.</li>
 </ol>
 </body>
 </html>
