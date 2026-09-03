@@ -5,7 +5,7 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Deterministic Testing | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Deterministic Testing | Kommander"><meta data-rh="true" name="description" content="Kommander includes a non-production test toolchain for deterministic and timing-sensitive scenarios."><meta data-rh="true" property="og:description" content="Kommander includes a non-production test toolchain for deterministic and timing-sensitive scenarios."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing/" hreflang="x-default"><link data-rh="true" rel="preconnect" href="https://SPBBUBI3JT-dsn.algolia.net" crossorigin="anonymous"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Deterministic Testing","item":"https://kahunakv.github.io/kommander.github.io/docs/operations/deterministic-testing"}]}</script><link rel="search" type="application/opensearchdescription+xml" title="Kommander" href="/kommander.github.io/opensearch.xml">
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.7cd45a08.css">
-<script src="/kommander.github.io/assets/js/runtime~main.dbcc4ea4.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.a5efc5b4.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.1905d6e4.js" defer="defer"></script>
 </head>
 <body>
@@ -20,14 +20,23 @@
 <li class="">seeded randomness</li>
 <li class="">replay logs</li>
 <li class="">virtual time</li>
-<li class="">reproducible failure scenarios.</li>
+<li class="">reproducible failure scenarios</li>
+<li class="">validation corpus runs</li>
+<li class="">trace shrinking for failing schedules</li>
+<li class="">client-history checking.</li>
 </ul>
 <p>This is useful when a timing-sensitive failure is hard to reproduce in ordinary multi-process tests.</p>
+<p>The random scenario runner records enough information to replay a failing seed. The trace shrinker then reduces the event history to a smaller schedule that still reproduces the problem, which makes consensus bugs easier to diagnose.</p>
 <p>Several timing controls help reproducibility directly in the runtime:</p>
 <ul>
 <li class=""><code>ElectionTimeoutSeed</code> can make partition election timeouts deterministic</li>
+<li class=""><code>TickSource</code> lets the harness replace the process clock with virtual monotonic time</li>
+<li class=""><code>EnableInternalTimers = false</code> lets the harness trigger timer passes explicitly</li>
+<li class=""><code>EnableInternalSchedulingThreads = false</code> lets the harness drive executor, WAL, and transport progress explicitly</li>
 <li class=""><code>WaitForLeaderStableAsync</code> lets tests wait for a leader that stays stable for a minimum duration.</li>
 </ul>
+<p>Do not use those runtime-driver switches in production. With internal timers or scheduling threads disabled, Kommander expects an external simulation driver to pump the system.</p>
+<table><thead><tr><th>Configuration</th><th style="text-align:right">Default</th><th>Use</th></tr></thead><tbody><tr><td><code>TickSource</code></td><td style="text-align:right">system monotonic clock</td><td>Supplies elapsed-time ticks for elections, heartbeats, quiescence, and backoff windows.</td></tr><tr><td><code>EnableInternalTimers</code></td><td style="text-align:right"><code>true</code></td><td>Set to <code>false</code> only when a deterministic harness calls the timer trigger methods itself.</td></tr><tr><td><code>EnableInternalSchedulingThreads</code></td><td style="text-align:right"><code>true</code></td><td>Set to <code>false</code> only when a deterministic harness drives partition executors, WAL writes, and outbound transport dispatch. Requires <code>EnableSharedExecutorPool = true</code>.</td></tr><tr><td><code>InvariantChecks</code></td><td style="text-align:right">debug: throw, release: log</td><td>Controls built-in consensus invariant checks. Use <code>Throw</code> in release chaos runs when you want the first violation to fail immediately.</td></tr></tbody></table>
 <p>The election tests include targeted pre-vote coverage:</p>
 <ul>
 <li class="">state-machine tests verify that pre-vote stays side-effect free until quorum is reached</li>
@@ -38,6 +47,7 @@
 <p>The current test tree includes several useful slices:</p>
 <ul>
 <li class=""><code>Kommander.Tests.Simulation</code>: simulation and replay.</li>
+<li class=""><code>Kommander.Tests.Simulation.Scenarios.Random</code>: seeded random scenarios and failure reports.</li>
 <li class=""><code>Kommander.Tests.Chaos</code>: real in-memory clusters with nemesis transport rules, hash-chain divergence checks, continuous invariants, and detailed failure reports.</li>
 <li class=""><code>Kommander.Tests.Scheduler</code>: partition executor, fair schedulers, timer service, transport batching, and system coordinator behavior.</li>
 <li class=""><code>Kommander.Tests.RaftSafety</code>: election safety, commit monotonicity, stale completion handling, log matching, and system restore behavior.</li>
