@@ -37,6 +37,18 @@ You do not usually call `BatchRequests` directly from application code. It is pa
 
 The gRPC transport pools short-lived batch request objects and item lists used by this path. That pooling does not change wire behavior or configuration. It reduces allocation pressure when the cluster is sending many small Raft control and replication messages.
 
+## Per-Peer Outbound Budget
+
+Each peer has an outbound dispatcher queue between the Raft state machine and the transport. `MaxOutboundQueueBytesPerPeer` bounds the total log-payload bytes that can sit queued for one peer.
+
+When the budget is exceeded, Kommander drops additional entry-carrying `AppendLogs` messages for that peer instead of buffering without limit. This is safe because append traffic is retried by the heartbeat and backfill paths after the queue drains. Control traffic, votes, handshakes, step-down notices, and empty heartbeats are not dropped by this byte budget.
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `MaxOutboundQueueBytesPerPeer` | `64 MiB` | Maximum queued log-payload bytes for one outbound peer. Values at or below `0` remove the bound and are not recommended. |
+
+A rising outbound queue usually means the peer is paused, unreachable, or not draining its transport fast enough. The byte budget protects the leader's memory while preserving the normal retry path.
+
 ## gRPC Append-Log Coalescing
 
 The gRPC transport can also coalesce append-log stream writes.

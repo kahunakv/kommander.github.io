@@ -115,7 +115,7 @@ IReadOnlyList<RaftBackfillStatus> backfill =
     raft.GetBackfillStatuses(partitionId: 1);
 ```
 
-`GetSnapshotStatuses` reports followers that are stuck in snapshot transfer, including failed attempts and last error details. `GetBackfillStatuses` reports followers whose anchored backfill batch cannot be sent because the leader has no committed entry at the follower's anchor. Both are diagnostic views; empty means the partition is not hosted here, this node is not the relevant leader/sender, or no follower is currently stuck.
+`GetSnapshotStatuses` reports followers that are stuck in snapshot transfer, including failed attempts, in-flight duration, retry backoff, and last error details. It also reports `RescueNotConverging` and `ConsecutiveRescueCycles` when repeated successful installs leave the follower below the compaction floor and the leader trips the snapshot-rescue breaker. `GetBackfillStatuses` reports followers whose anchored backfill batch cannot be sent because the leader has no committed entry at the follower's anchor. Both are diagnostic views; empty means the partition is not hosted here, this node is not the relevant leader/sender, or no follower is currently stuck.
 
 `GetStaleProposedSkippedCount(partitionId)` returns how many stale proposed duplicates this node refused for that hosted partition since it last started. It returns `-1` when the partition is not hosted locally. Treat the value as a diagnostic floor, not a lifetime total.
 
@@ -315,6 +315,7 @@ See [System Partition State Snapshots](../guides/system-partition-state-snapshot
 | `FollowerWalSaturated` | A follower could not enqueue replicated entries because its WAL queue was saturated. The leader backs off and retries later. |
 | `MemberNotFound` | A membership operation named an endpoint not present in the committed roster. |
 | `DrainInProgress` | A second decommission drain was refused because another member is already `Leaving`. |
+| `ProposalOutcomeUnknown` | The node accepted the proposal, but leadership moved or the completion arrived after step-down before this node could determine the final outcome. Treat it like `ProposalTimeout`: the write may still commit, so retry only with application-level idempotency or after reading the replicated state. |
 
 ## Elastic Partition APIs
 

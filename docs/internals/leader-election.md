@@ -77,6 +77,14 @@ A candidate becomes leader when it reaches quorum. After leadership is establish
 
 The term protects against stale messages. Requests from old leaders or old terms are rejected so an outdated node cannot continue committing work.
 
+## Promotion-Gate Self-Repair
+
+A winner can inherit a log with proposed entries, marker holes, or a divergent tail. Kommander uses promotion gates before it publishes leadership to the application. The gates drain safely committed inherited entries and repair tails that cannot be used by the new leader.
+
+Some repair is destructive: it can truncate an orphaned tail or skip over a gap that no reachable quorum can fill. `SelfRepairPeerDownGrace` delays that destructive self-repair while a voter peer is not alive. This gives a briefly restarted voter time to return with the missing range before the survivors conclude the range is gone.
+
+The default is `30 s`. Set it above the normal restart time for a voter in your environment. The grace is still bounded; after it expires, Kommander can self-repair so a permanently missing peer does not leave the partition leaderless forever.
+
 ## Why PreVote Helps
 
 Pre-vote mainly improves behavior during partitions and recoveries.

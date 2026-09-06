@@ -71,13 +71,16 @@ Counters:
 
 - `raft.wal.batches_total`
 - `raft.wal.operations_total`
+- `raft.wal.engine_reopens_total`
 - `raft.wal.compaction_passes_total`
 - `raft.wal.compaction_blocked_by_durability_floor_total`
+- `raft.wal.restore_narrowed_by_soft_floor_total`
 
 Histogram:
 
 - `raft.wal.batch_size`
 - `raft.wal.durability_floor_lag`
+- `raft.wal.compaction_live_replica_hold_entries`
 
 Observable gauge:
 
@@ -107,16 +110,38 @@ Compaction metrics tell you why the WAL shrinks or does not shrink:
 - `outcome=failed` means that the pass failed.
 - `raft.wal.durability_floor_lag` records the gap between the application durability floor and the last checkpoint. It applies only with a configured `ApplicationDurabilityProvider`.
 - `raft.wal.compaction_blocked_by_durability_floor_total` increments when the application durability floor keeps entries that are otherwise removable.
+- `raft.wal.compaction_live_replica_hold_entries` records entries retained below a checkpoint for a live, acking follower that still needs ordinary backfill.
+- `raft.wal.restore_narrowed_by_soft_floor_total` counts restores that could replay from the application's durability floor instead of the older hard checkpoint.
+- `raft.wal.engine_reopens_total` counts RocksDB WAL engine reopens after a latched storage error, tagged by `outcome=success` or `outcome=failed`.
 
 Storage can continue to grow with compaction configured. These metrics then separate three causes: no checkpoint was written, the application durability floor keeps the tail on purpose, or the compaction failed.
+
+## Consensus Invariant Checks
+
+Counter:
+
+- `raft.invariant.violations_total`
+
+The tags are `partition_id` and `invariant`. Any increment is a correctness bug, not a tuning signal. The checks run in product code and are controlled by `InvariantChecks`: debug builds throw by default, while release builds log and count by default.
+
+Use `InvariantChecks = RaftInvariantPolicy.Throw` in a release chaos run when you want the first violation to crash at the transition that caused it. Use `Off` only for a narrow benchmark where even the check branch matters.
 
 ## Snapshot And Backfill Diagnostics
 
 Counter:
 
+- `raft.backfill.no_progress_pauses_total`
+- `raft.backfill.no_progress_episodes_total`
 - `raft.snapshot.transfer_failures_total`
+- `raft.snapshot.rescue_breaker_tripped_total`
 
-The tags are `partition_id` and the failure `cause`. A constant rate usually means that a follower is below the compaction floor and the snapshot install cannot complete.
+The backfill counters are tagged by `partition_id`. `raft.snapshot.transfer_failures_total` is tagged by `partition_id` and failure `cause`. A constant snapshot failure rate usually means that a follower is below the compaction floor and the snapshot install cannot complete.
+
+`raft.backfill.no_progress_pauses_total` increments when the leader skips a backfill batch because the follower has been acknowledging batches without advancing its commit frontier. This protects the WAL read path from a network-speed duplicate repair loop.
+
+`raft.backfill.no_progress_episodes_total` increments when a no-progress episode crosses the warning threshold. Pair it with the leader log line that names the peer and the frontier.
+
+`raft.snapshot.rescue_breaker_tripped_total` increments when repeated successful snapshot installs do not bring a follower above the compaction floor. Pair it with `GetSnapshotStatuses(partitionId)` and look for `RescueNotConverging`.
 
 The public API also gives point-in-time diagnostic views:
 
@@ -176,15 +201,18 @@ Kommander exports these metrics when you enable the automatic leader balancer.
 
 Counters:
 
-- `raft.balancer.moves_total`, with the tag `outcome=planned`, `succeeded`, or `timed_out`
+- `raft.balancer.moves_total`, with the tag `outcome=planned`, `drain`, `succeeded`, or `timed_out`
 - `raft.balancer.skipped_passes_total`
 
 Observable gauges:
 
 - `raft.balancer.count_imbalance`
 - `raft.balancer.load_imbalance`
+- `raft.balancer.slow_nodes`
 
 Planned moves, then successful moves, then a fall in the imbalance gauges show normal convergence. Frequent timeouts have two usual causes. Nodes reject the suggestions, or `SuggestionTimeout` is too short for the transfer and the gossip propagation. Frequent skipped passes mean that the system-partition leader has no fresh report from a minimum of one live voter.
+
+`raft.balancer.slow_nodes` is meaningful on the system-partition leader when `EnableSlowNodeAvoidance` is enabled. A nonzero value means leadership is being drained away from nodes with unusually high WAL commit wait.
 
 The imbalance gauges have a meaning on the process that hosts the system-partition leader. See [Automatic Leader Balancing](../operations/leader-balancing.md) for the full operational model.
 

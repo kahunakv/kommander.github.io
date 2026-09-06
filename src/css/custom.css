@@ -1,27 +1,77 @@
 :root {
-  --ifm-color-primary: #2563eb;
-  --ifm-color-primary-dark: #1d4ed8;
-  --ifm-color-primary-darker: #1e40af;
-  --ifm-color-primary-darkest: #1e3a8a;
-  --ifm-color-primary-light: #3b82f6;
-  --ifm-color-primary-lighter: #60a5fa;
-  --ifm-color-primary-lightest: #93c5fd;
+  --ifm-color-primary: #008f63;
+  --ifm-color-primary-dark: #007a55;
+  --ifm-color-primary-darker: #006b4a;
+  --ifm-color-primary-darkest: #00523a;
+  --ifm-color-primary-light: #00a873;
+  --ifm-color-primary-lighter: #00bf82;
+  --ifm-color-primary-lightest: #00d892;
   --ifm-code-font-size: 95%;
   --ifm-heading-letter-spacing: 0;
-  --docusaurus-highlighted-code-line-bg: rgba(37, 99, 235, 0.08);
+  --docusaurus-highlighted-code-line-bg: rgba(0, 216, 146, 0.10);
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #60a5fa;
-  --ifm-color-primary-dark: #3b82f6;
-  --ifm-color-primary-darker: #2563eb;
-  --ifm-color-primary-darkest: #1d4ed8;
-  --ifm-color-primary-light: #93c5fd;
-  --ifm-color-primary-lighter: #bfdbfe;
-  --ifm-color-primary-lightest: #dbeafe;
-  --docusaurus-highlighted-code-line-bg: rgba(96, 165, 250, 0.16);
+  --ifm-color-primary: #00d892;
+  --ifm-color-primary-dark: #00bd80;
+  --ifm-color-primary-darker: #00a873;
+  --ifm-color-primary-darkest: #008f63;
+  --ifm-color-primary-light: #32e5aa;
+  --ifm-color-primary-lighter: #65edc4;
+  --ifm-color-primary-lightest: #a5f6dc;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 216, 146, 0.16);
 }
 
 div.markdown a {
   text-decoration: underline;
+}
+
+/* Shared terminal-style footer for the documentation and homepage. */
+.footer {
+  --ifm-footer-background-color: #0b0e12;
+  border-top: 1px solid #303235;
+  background: #0b0e12;
+  color: #818284;
+  padding: 2.5rem 0 1.5rem;
+}
+
+.footer__links {
+  margin-bottom: 2rem;
+}
+
+.footer__col {
+  max-width: 15rem;
+}
+
+.footer__title {
+  margin-bottom: .85rem;
+  color: #dedede;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: .72rem;
+  font-weight: 500;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.footer__item {
+  line-height: 1.45;
+}
+
+.footer__link-item {
+  color: #a3a4a5;
+  font-size: .9rem;
+}
+
+.footer__link-item:hover {
+  color: #00d892;
+  text-decoration: none;
+}
+
+.footer__copyright {
+  padding-top: 1.25rem;
+  border-top: 1px solid #303235;
+  color: #5d5e61;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: .7rem;
+  letter-spacing: .04em;
 }

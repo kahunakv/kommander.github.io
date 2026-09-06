@@ -48,15 +48,29 @@ export default function Book() {
                   systems in production.
                 </p>
                 <div className={styles.actions}>
-                  <a className="button button--primary button--lg" href={htmlUrl}>
+                  <a className={styles.primaryAction} href={htmlUrl}>
                     Read online
                   </a>
-                  <a className="button button--secondary button--lg" href={pdfUrl}>
+                  <a className={styles.secondaryAction} href={pdfUrl}>
                     Download PDF
                   </a>
                 </div>
               </div>
               <div className={styles.heroMedia} aria-hidden="true">
+                <div className={styles.bookPanel}>
+                  <div className={styles.panelHeader}>
+                    <span>kommander / field manual</span>
+                    <span>v1.0</span>
+                  </div>
+                  <div className={styles.panelBody}>
+                    <span className={styles.panelIndex}>01—</span>
+                    <span>replicated state machines</span>
+                    <span className={styles.panelIndex}>02—</span>
+                    <span>partitioned consensus</span>
+                    <span className={styles.panelIndex}>03—</span>
+                    <span>operating under failure</span>
+                  </div>
+                </div>
                 <img className={styles.heroLogo} src={logoUrl} alt="" />
               </div>
             </div>

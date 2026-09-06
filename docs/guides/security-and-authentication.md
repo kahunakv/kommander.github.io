@@ -149,6 +149,8 @@ This gives the runtime basic protection against:
 - a request with a clock skew
 - a request that an attacker replays.
 
+For REST, `MaxPreAuthRequestBodyBytes` bounds how much request body data Kommander will read and digest before the shared-secret signature is proven. The default is `32 MiB`. Larger unauthenticated request bodies are refused before they reach the Raft handler. This matters most when the host's own request-size limit has been raised, or when REST snapshot chunks are large enough that their base64-encoded body approaches the limit.
+
 ## TLS Requirements
 
 `RequireTls` controls one rule: authenticated traffic must arrive over TLS.

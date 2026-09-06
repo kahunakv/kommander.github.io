@@ -54,6 +54,8 @@ load = LeaderBalancerOpsWeight * log operations/second
 
 The log operations per second value is an exponentially weighted moving average (EWMA). It counts the leader-side `ReplicateLogs` path. It smooths short spikes. It still adapts when a partition stays busy or becomes idle. See [Partition Load Signals](../guides/partition-load-signals.md) for the related public accessors.
 
+Each node also reports its recent WAL commit wait. The balancer can use that node-level signal to avoid a degraded storage path. This is disabled by default because it moves leadership away from a node.
+
 ## How A Balance Pass Works
 
 The system-partition leader does these steps at each `LeaderBalancerInterval`:
@@ -70,7 +72,22 @@ The controller does not block during a transfer. A later report confirms if the 
 
 ## Balance Policy
 
-The planner uses two stages.
+The planner uses three stages. The degraded-node stage is optional and runs before normal balancing.
+
+### Degraded Node Avoidance
+
+When `EnableSlowNodeAvoidance = true`, the controller compares each node's WAL commit wait with the median wait across the cluster. A node becomes a slow candidate only when it is both:
+
+- above `SlowNodeFloorMs`
+- at least `SlowNodeMultiplier` times the median.
+
+Kommander also requires enough recent samples. A quiet node, a newly restarted node, or a node with stale observations is treated as unknown. Unknown nodes are not drained and are not excluded as transfer targets.
+
+After `SlowNodeEnterPasses` consecutive bad passes, the node is classified as degraded. The balancer then stops choosing it as a target and starts transferring the partition leaderships it already holds to healthy voter replicas. After `SlowNodeExitPasses` consecutive clean passes, the node is released.
+
+This is only a leadership drain. The node keeps its replicas, its vote, and its cluster membership. It can still catch up followers and serve as a follower. The goal is to remove leader-side write pressure from a node whose disk path is much slower than its peers.
+
+The classifier refuses to drain a majority of voters. If half or more of the measured voters look slow, Kommander treats that as a cluster-wide storage or load condition instead of a single-node failure.
 
 ### Leader Count
 
@@ -89,6 +106,7 @@ A partition is eligible only in these conditions:
 - The target is a live voting member of the Raft group of that partition.
 - The partition is not in `MoveCooldown`.
 - The partition has no outstanding transfer suggestion.
+- When degraded-node avoidance is enabled, the target is not classified as degraded.
 
 `MaxMovesPerPass` limits the new plans in one pass. `MaxConcurrentTransfers` limits the transfers that are already in flight across the cluster.
 
@@ -111,10 +129,19 @@ The balancer changes leadership only. It does not change membership, partition o
 | `SuggestionTimeout` | `15 s` | The time permitted for a suggested move to appear in a fresh report. |
 | `LeaderBalancerOpsWeight` | `1.0` | The weight of the operations per second in the partition load score. |
 | `LeaderBalancerQueueWeight` | `0.5` | The weight of the pending queue depth in the partition load score. |
+| `EnableSlowNodeAvoidance` | `false` | Enables the degraded-node stage. Requires `EnableLeaderBalancer`. |
+| `SlowNodeMultiplier` | `3.0` | How many times above the cluster median WAL commit wait a node must be before it can be a slow candidate. |
+| `SlowNodeFloorMs` | `10 ms` | Absolute WAL commit-wait floor. Nodes below this latency are never slow candidates. |
+| `SlowNodeMinSamples` | `20` | Minimum WAL group-batch observations before a node is judged. |
+| `SlowNodeObservationTtl` | `30 s` | Maximum age of the last WAL commit-wait observation before the node becomes unknown. |
+| `SlowNodeEnterPasses` | `3` | Consecutive bad passes before classification. |
+| `SlowNodeExitPasses` | `6` | Consecutive clean passes before release. |
 
 Keep `SuggestionTimeout` longer than `LeaderBalancerReportInterval` plus the expected gossip propagation time and leadership transfer time. If you do not, the controller can record a successful move as timed out before the new report arrives.
 
 Increase `CountDeadband`, `LoadImbalanceThreshold`, `MoveCooldown`, or `MinLeaderStabilityMs` if leadership changes too often. Increase the move limits or decrease `LeaderBalancerInterval` only after the metrics show slow convergence.
+
+For degraded-node avoidance, keep `SlowNodeMultiplier` above `1.0`. The runtime rejects lower values because they can classify much of the cluster. Treat `SlowNodeEnterPasses` and `SlowNodeExitPasses` as pass counts, not seconds. With the default `LeaderBalancerInterval` of 30 seconds, the default enter delay is about 90 seconds and the default release delay is about 180 seconds.
 
 ## Metrics
 
@@ -122,10 +149,11 @@ Subscribe to the .NET meter with the name `Kommander`:
 
 | Metric | Type | Meaning |
 | --- | --- | --- |
-| `raft.balancer.moves_total` | Counter | Suggested moves with the tag `outcome=planned`, `succeeded`, or `timed_out`. |
+| `raft.balancer.moves_total` | Counter | Suggested moves with the tag `outcome=planned`, `drain`, `succeeded`, or `timed_out`. |
 | `raft.balancer.skipped_passes_total` | Counter | Passes that the controller skipped because a fresh report from a live voter was missing. |
 | `raft.balancer.count_imbalance` | Gauge | The distance between the highest leader count and the target count. |
 | `raft.balancer.load_imbalance` | Gauge | The fractional load skew across the nodes. |
+| `raft.balancer.slow_nodes` | Gauge | Number of nodes currently classified as degraded by the system-partition leader. |
 
 The imbalance gauges have a meaning on the process that hosts the system-partition leader. A healthy rebalance usually shows planned moves, then successful moves, while both imbalance gauges fall.
 
@@ -143,6 +171,12 @@ Check these conditions:
 - The targets are voting members of the relevant partition groups.
 
 A rise in `raft.balancer.skipped_passes_total` usually means an incomplete global view of the reports.
+
+### A Node Is Being Drained
+
+Look at `raft.balancer.moves_total{outcome=drain}` and `raft.balancer.slow_nodes`. A drain means Kommander found a node whose WAL commit wait was much worse than its peers for enough consecutive passes.
+
+Check the node's disk latency, filesystem stalls, RocksDB or SQLite pressure, and WAL queue depth before changing the threshold. If `raft.balancer.slow_nodes` flips between `0` and `1`, raise `SlowNodeMultiplier` or `SlowNodeExitPasses` so transient latency does not move leadership repeatedly.
 
 ### Suggestions Time Out
 

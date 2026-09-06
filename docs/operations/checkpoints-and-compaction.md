@@ -34,6 +34,7 @@ The relevant settings are:
 - `CompactEveryOperations`
 - `CompactNumberEntries`
 - `MaxEntriesPerCompaction`
+- `CompactionLiveReplicaLagBudget`
 
 A compaction pass does these steps:
 
@@ -42,6 +43,14 @@ A compaction pass does these steps:
 3. It repeats in batches until no eligible work remains, or until it reaches the configured limit for one pass.
 
 Because of the limit, one compaction trigger cannot hold the partition for an unbounded time.
+
+## Live Replica Lag Hold
+
+Compaction also considers live follower progress. If a follower is alive, still acknowledging the leader, and has not yet replicated entries below the checkpoint, the leader can temporarily hold the compaction floor behind that follower.
+
+`CompactionLiveReplicaLagBudget` controls the maximum number of below-checkpoint entries retained for this purpose. The default is `100000`. This makes ordinary log backfill more likely to repair a live lagging replica before compaction forces a snapshot rescue.
+
+Values at or below `0` disable this hold. Disabling it is safe for correctness, but it can make snapshot installation more common when followers are healthy but temporarily behind.
 
 ## Retain Floors
 
@@ -94,3 +103,12 @@ The WAL backend decides atomically to keep or to truncate the suffix above the b
 The snapshot import of the application must be idempotent for the same snapshot identity. The application import can succeed while the durable boundary write fails. The leader can then retry the snapshot.
 
 See [Snapshot Installation](./snapshot-installation.md) for the full install sequence.
+
+## Configuration
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `CompactEveryOperations` | `10000` | Committed operations between automatic compaction triggers. Set to `0` or lower to disable automatic compaction. |
+| `CompactNumberEntries` | `100` | Maximum entries removed per adapter delete batch. |
+| `MaxEntriesPerCompaction` | `5000` | Maximum entries removed during one triggered compaction pass before yielding. |
+| `CompactionLiveReplicaLagBudget` | `100000` | Maximum entries retained below a checkpoint for a live, acking follower that still needs ordinary backfill. |

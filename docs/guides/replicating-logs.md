@@ -45,6 +45,8 @@ Use [`ReplicateEntries`](./heterogeneous-write-coalescing.md) if one burst conta
 
 Examine `Success` and `Status` in your first integration. Use `TicketId` when you disable the auto-commit and must commit or roll back manually. Use `LogIndex` when your application tracks the committed order position.
 
+Treat `ProposalOutcomeUnknown` and `ProposalTimeout` as indeterminate outcomes. The proposal may already exist in the log and may still commit under a later leader. Do not assume the write failed. Use an idempotency key in your application command, or read the replicated state before retrying a non-idempotent operation.
+
 ## Manual Commit And Rollback
 
 `ReplicateLogs` commits automatically by default. Set `autoCommit: false` to stop after the quorum proposal completes. Then commit or roll back explicitly:

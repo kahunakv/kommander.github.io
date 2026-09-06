@@ -7,75 +7,44 @@ import Heading from '@theme/Heading';
 import styles from './index.module.css';
 
 const proofPoints = [
-  'Partitioned Raft groups',
-  'Replica placement',
-  'Jepsen-tested fault behavior',
-  'Dynamic membership',
+  'Partitioned Raft',
   'Elastic partitions',
-  'Shared-secret and mTLS node auth',
-  'MIT-licensed for commercial and internal use',
+  'Dynamic membership',
+  'RocksDB and SQLite',
+  'Jepsen tested',
+  'MIT licensed',
 ];
 
 const advantageCards = [
   {
-    title: 'Spread writes across partitions',
+    title: 'Scale writes with partitions',
     description:
-      'Different partitions can have different leaders, so one node does not have to own every write in the cluster.',
+      'Each partition can have its own leader and replica set, spreading work across the cluster.',
   },
   {
-    title: 'Choose how many replicas each range needs',
+    title: 'Keep your application design',
     description:
-      'Keep full replication for simple deployments or set a replication factor so large clusters store each user partition on a smaller voter set.',
+      'Kommander handles consensus and recovery. You keep your APIs, data model, and business logic.',
   },
   {
-    title: 'Keep control of your domain model',
+    title: 'Embed it in your .NET service',
     description:
-      'Kommander gives you consensus, WAL durability, and leader election. Your service keeps the API, schema, authorization, and business logic.',
+      'Run it inside ASP.NET Core instead of operating a separate coordination service.',
   },
   {
-    title: 'Run it where your service already runs',
+    title: 'Choose storage and transport',
     description:
-      'Use it as a library inside an ASP.NET Core host instead of standing up a separate control-plane product just to coordinate state.',
+      'Use RocksDB or SQLite for durable storage, in-memory adapters for tests, and gRPC or REST between nodes.',
   },
   {
-    title: 'Choose the durability and transport path',
+    title: 'Change the cluster while it runs',
     description:
-      'Use RocksDB or SQLite in production, in-memory adapters in tests, and gRPC or REST depending on how your cluster is hosted.',
+      'Add and remove nodes, move replicas, and split or merge partitions without restarting the cluster.',
   },
   {
-    title: 'Authenticate node-to-node traffic',
+    title: 'Built for real failures',
     description:
-      'Use shared-secret request signing or mutual TLS with per-node client certificates and thumbprint pinning for REST and gRPC clusters.',
-  },
-  {
-    title: 'Scale partitions at runtime',
-    description:
-      'Create, split, merge, and remove user partitions without restarting the cluster, with generation fencing to protect callers from stale routing.',
-  },
-  {
-    title: 'Keep many partitions cheap when idle',
-    description:
-      'A shared executor pool, hot-set leader checks, and quiescence reduce thread, timer, and heartbeat overhead for clusters with many mostly idle partitions.',
-  },
-  {
-    title: 'Change cluster membership safely',
-    description:
-      'Add nodes as learners, promote them after catch-up, and remove members through the committed system partition roster instead of trusting discovery snapshots.',
-  },
-  {
-    title: 'Back the claims with Jepsen tests',
-    description:
-      'Kommander has a Jepsen suite for linearizable CAS registers and log-append integrity under partitions, kills, pauses, and membership churn.',
-  },
-  {
-    title: 'Balance leadership automatically',
-    description:
-      'Redistribute partition leaders by count and measured load with conservative cooldowns, stability gates, and bounded Raft leadership transfers.',
-  },
-  {
-    title: 'Debug real runtime behavior',
-    description:
-      'Queue-depth metrics, operation latency, WAL batching telemetry, stale-completion counters, and deterministic simulation tooling make failures easier to explain.',
+      'Jepsen tests, metrics, structured logs, and simulation tools help you trust and understand the system under stress.',
   },
 ];
 
@@ -85,8 +54,7 @@ const fitCards = [
     items: [
       'Replicated control planes',
       'Partitioned metadata services',
-      'Leader-owned workers and schedulers',
-      'Workflow and job coordination',
+      'Distributed workers and schedulers',
       'Embedded coordination inside .NET services',
     ],
   },
@@ -95,8 +63,7 @@ const fitCards = [
     items: [
       'A finished database product',
       'A drop-in cache or queue',
-      'Eventually consistent fire-and-forget workloads',
-      'Single-node applications that do not need quorum safety',
+      'Apps that do not need quorum safety',
     ],
   },
 ];
@@ -105,12 +72,12 @@ const usedBy = [
   {
     name: 'CamusDB',
     href: 'https://camusdb.github.io/',
-    description: 'A distributed database project using Kommander for replicated coordination.',
+    description: 'A distributed database built with Kommander for replicated coordination.',
   },
   {
     name: 'Kahuna',
     href: 'https://kahunakv.github.io/',
-    description: 'A distributed key-value project using Kommander as its embedded consensus layer.',
+    description: 'A distributed key-value store using Kommander as its consensus layer.',
   },
 ];
 
@@ -135,22 +102,21 @@ function HomepageHeader() {
         <div className={styles.heroContent}>
           <p className={styles.heroEyebrow}>Open-source Raft for C# and .NET</p>
           <Heading as="h1" className={styles.heroTitle}>
-            Make your .NET services agree, and survive failure
+            Reliable consensus for .NET services
           </Heading>
           <p className={styles.heroSubtitle}>
-            Kommander is an embedded library that lets several nodes commit the same ordered
-            stream of changes, so your system keeps one source of truth even when nodes
-            restart or the network breaks. You keep your data model and APIs. It handles
-            leader election, replication, and durable recovery.
+            Kommander keeps your nodes in sync through crashes and network failures. Embed it
+            in your service and get leader election, replication, and durable recovery while
+            keeping your own APIs and data model.
           </p>
           <div className={styles.buttons}>
-            <Link className="button button--primary button--lg" to="/docs/getting-started">
+            <Link className={styles.primaryButton} to="/docs/getting-started">
               Get started
             </Link>
-            <Link className="button button--secondary button--lg" to="/book">
+            <Link className={styles.secondaryButton} to="/book">
               Read the book
             </Link>
-            <Link className="button button--secondary button--lg" to="/docs/why-kommander">
+            <Link className={styles.secondaryButton} to="/docs/why-kommander">
               Why Kommander
             </Link>
           </div>
@@ -163,6 +129,27 @@ function HomepageHeader() {
           </div>
         </div>
         <div className={styles.heroMedia} aria-hidden="true">
+          <div className={styles.systemPanel}>
+            <div className={styles.panelBar}>
+              <span>cluster / production-eu-1</span>
+              <span className={styles.panelState}>● HEALTHY</span>
+            </div>
+            <div className={styles.clusterMap}>
+              <span className={styles.linkLine} />
+              <span className={styles.linkLineSecond} />
+              <div className={clsx(styles.node, styles.nodeLeader)}>
+                <span>01</span>
+                <strong>LEADER</strong>
+              </div>
+              <div className={clsx(styles.node, styles.nodeReplicaOne)}><span>02</span></div>
+              <div className={clsx(styles.node, styles.nodeReplicaTwo)}><span>03</span></div>
+              <div className={styles.partitionLabel}>partition / 042</div>
+            </div>
+            <div className={styles.panelFooter}>
+              <span>TERM 0187</span>
+              <span>COMMIT INDEX 8,421,964</span>
+            </div>
+          </div>
           <img src={logoUrl} alt="" className={styles.heroLogo} />
         </div>
       </div>
@@ -182,8 +169,8 @@ export default function Home() {
           <div className="container">
             <SectionHeading
               eyebrow="Why teams use it"
-              title="Consensus mechanics without handing your system over to a black box"
-              subtitle="Kommander is a library, not a finished database product. That is the point: it gives you the hard distributed-systems machinery while keeping your service architecture, data model, and APIs in your hands"
+              title="The hard parts of consensus, ready to use"
+              subtitle="Build reliable distributed systems without giving up control of your application."
             />
             <div className={styles.cardGrid}>
               {advantageCards.map((card) => (
@@ -202,8 +189,8 @@ export default function Home() {
           <div className="container">
             <SectionHeading
               eyebrow="Used by"
-              title="Built into real distributed data systems"
-              subtitle="Kommander is not only an example consensus runtime. It is used as the embedded coordination layer in projects that need replicated state, durable agreement, and operational control."
+              title="Powering real distributed systems"
+              subtitle="Kommander is already used as an embedded coordination layer."
             />
             <div className={styles.usedByGrid}>
               {usedBy.map((project) => (
@@ -227,8 +214,8 @@ export default function Home() {
           <div className="container">
             <SectionHeading
               eyebrow="What it is"
-              title="A serious foundation for replicated control-plane work"
-              subtitle="Use Kommander when several machines need to agree on the same ordered stream of decisions and another node must be able to continue safely after a failure."
+              title="Is Kommander right for your project?"
+              subtitle="Use it when multiple nodes must agree on state and continue safely after a failure."
             />
             <div className={styles.fitGrid}>
               {fitCards.map((card) => (
@@ -251,8 +238,8 @@ export default function Home() {
           <div className="container">
             <SectionHeading
               eyebrow="What you get"
-              title="The value is not just Raft. It is the runtime around Raft"
-              subtitle="Partition executors, fair schedulers, WAL adapters, transport choices, lifecycle APIs, security controls, and diagnostics make the library usable in real services instead of only in toy examples."
+              title="More than a Raft implementation"
+              subtitle="Kommander includes the runtime features needed to operate consensus in production."
             />
             <div className={styles.calloutRow}>
               <div className={styles.calloutCard}>
@@ -260,9 +247,7 @@ export default function Home() {
                   Elastic partitions
                 </Heading>
                 <p className={styles.cardDescription}>
-                  Create partitions for new workloads, split hot ranges, merge cooled ranges,
-                  and fence stale callers with partition generations while your service keeps
-                  ownership of state-transfer behavior.
+                  Create, split, merge, and remove partitions at runtime as your workload changes.
                 </p>
                 <Link className={styles.inlineLink} to="/docs/guides/elastic-partitions">
                   Read the partition guide
@@ -273,8 +258,8 @@ export default function Home() {
                   Replica placement
                 </Heading>
                 <p className={styles.cardDescription}>
-                  Configure a replication factor per user partition so larger clusters can keep
-                  fixed-size replica sets while the system partition remains fully replicated.
+                  Set the replication factor for each partition and place replicas where they
+                  make the most sense.
                 </p>
                 <Link className={styles.inlineLink} to="/docs/guides/replica-placement">
                   Read the placement guide
@@ -285,45 +270,20 @@ export default function Home() {
                   Dynamic membership
                 </Heading>
                 <p className={styles.cardDescription}>
-                  Join new nodes as non-voting learners, promote them after they catch up,
-                  and remove members through a committed roster on the system partition so
-                  quorum is based on consensus, not discovery.
+                  Safely add nodes, let them catch up, promote them to voters, and remove old
+                  members.
                 </p>
                 <Link className={styles.inlineLink} to="/docs/guides/dynamic-cluster-membership">
                   Read the membership guide
                 </Link>
               </div>
-              <div className={styles.calloutCard}>
-                <Heading as="h3" className={styles.cardTitle}>
-                  Operational visibility
-                </Heading>
-                <p className={styles.cardDescription}>
-                  Metrics and logs explain queue pressure, operation latency, WAL batching,
-                  stale completions, and election behavior, while deterministic simulation
-                  helps reproduce timing-sensitive failures.
-                </p>
-              </div>
-              <div className={styles.calloutCard}>
-                <Heading as="h3" className={styles.cardTitle}>
-                  Jepsen fault testing
-                </Heading>
-                <p className={styles.cardDescription}>
-                  The Jepsen suite exercises a five-node Kommander harness with register and
-                  log-append workloads while faults partition, kill, pause, and churn nodes.
-                </p>
-                <Link
-                  className={styles.inlineLink}
-                  to="https://github.com/kahunakv/kommander-jepsen">
-                  Review the Jepsen suite
-                </Link>
-              </div>
             </div>
             <div className={styles.footerActions}>
-              <Link className="button button--primary button--lg" to="/docs/guides/creating-a-node">
+              <Link className={styles.primaryButton} to="/docs/guides/creating-a-node">
                 Create a node
               </Link>
-              <Link className="button button--secondary button--lg" to="/docs/guides/elastic-partitions">
-                Explore elastic partitions
+              <Link className={styles.secondaryButton} to="/docs/guides/elastic-partitions">
+                Explore the guides
               </Link>
             </div>
           </div>

@@ -30,12 +30,13 @@ For fast local simulations, use `InMemoryWAL` with `InMemoryCommunication`.
 The test suite includes several areas worth knowing about:
 
 - `Kommander.Tests.Simulation`: deterministic simulation runtime with seeded randomness, replay logs, virtual time, and reproducible failure scenarios.
+- `Kommander.Tests.Simulation.Scenarios.Random`: seeded random scenario generator, validation corpus, trace shrinking, and replay reports.
 - `Kommander.Tests.Chaos`: real in-memory multi-node clusters with a nemesis transport, hash-chain state machines, continuous invariant checking, and failure reports.
 - `Kommander.Tests.Scheduler`: focused tests for partition executors, fair read/write schedulers, timer behavior, transport batching, and the system coordinator.
 - `Kommander.Tests.RaftSafety`: safety assertions for election safety, commit monotonicity, stale WAL completions, stale append responses, log matching, and system-partition restore behavior.
 - `Kommander.Tests.WAL`: RocksDB, SQLite, and automatic compaction coverage.
 
-The deterministic simulation harness is especially useful when you need to reproduce leadership churn, delayed I/O, transport partitions, or replay a failure with the same random seed.
+The deterministic simulation harness is especially useful when you need to reproduce leadership churn, delayed I/O, transport partitions, or replay a failure with the same random seed. The random scenario path includes a validation corpus, trace shrinking, and a client history checker. The runtime uses virtual monotonic time and externally driven timers/schedulers through `TickSource`, `EnableInternalTimers`, and `EnableInternalSchedulingThreads`; keep those switches at their defaults outside simulation tests.
 
 The chaos harness is useful when you want a source-level safety check against a real `RaftManager` cluster rather than a pure simulation. It samples partition state on each partition executor, records commit-quorum acknowledgements when a test subscriber is attached, and checks invariants such as single leader per term, commit monotonicity, quorum discipline, and no divergent applied prefix.
 

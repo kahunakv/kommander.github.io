@@ -81,16 +81,20 @@ It does not apply to an explicit two-phase write. In that case, the caller uses 
 
 ## Crash Recovery Behavior
 
-With `WalSingleFsyncCommit` enabled, a crash can leave a proposed entry on disk. The committed marker of that entry can be unflushed.
+With either `WalSingleFsyncCommit` mode, a crash can leave a proposed entry on disk while its committed marker is not durable yet. Followers learn committed markers asynchronously, so the on-disk log type is not the full source of truth for the latest committed tail after a crash.
 
 Kommander handles that case conservatively:
 
 - It keeps the durable proposed tail. It does not reuse those log ids.
-- It restores the committed prefix from the durable committed records and the committed checkpoints.
+- It restores the committed frontier from the highest contiguous committed prefix and committed checkpoints.
 - The leader can supply the committed entries to the followers again through normal catch-up and backfill.
 - A node that restarts and becomes leader can recommit the durable proposed entries through the standard Raft rules.
 
 One invariant for the operator does not change. A write that the system acknowledges to the client reached quorum durability.
+
+Kommander also persists Raft hard state for each partition: the current term and the endpoint voted for in that term. Election code records that state before it solicits votes or sends a granted vote. If the WAL cannot persist the hard state, the election attempt is abandoned and retried later instead of acting on a vote the node might forget after a crash.
+
+The RocksDB backend opens with `TolerateCorruptedTailRecords`. If a process or host dies with a torn RocksDB WAL tail, RocksDB can discard the corrupt tail record and reopen. Kommander then rebuilds the committed frontier conservatively and uses Raft catch-up to resupply anything needed from the current leader.
 
 ## Application Durability Floor
 

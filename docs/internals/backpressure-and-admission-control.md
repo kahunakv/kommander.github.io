@@ -12,7 +12,8 @@ Kommander addresses that in three places:
 
 1. the partition executor admission gate for client proposals
 2. the WAL write scheduler queue limits
-3. the read scheduler queue limits.
+3. the read scheduler queue limits
+4. the outbound per-peer transport byte budget.
 
 ## Layer 1: Client Proposal Admission
 
@@ -79,6 +80,14 @@ This is currently an internal scheduler guard, not a user-facing `RaftConfigurat
 
 This matters because reads such as restore, range reads, and compaction bookkeeping still consume bounded resources. Kommander does not assume reads are free.
 
+## Layer 4: Outbound Transport Budget
+
+The outbound dispatcher keeps a queue per peer. `MaxOutboundQueueBytesPerPeer` bounds the log-payload bytes that can wait in that queue.
+
+When one peer stops draining, Kommander does not let the leader retain an unbounded amount of entry-carrying `AppendLogs` traffic for that peer. It drops over-budget entry-carrying appends and relies on heartbeat/backfill retry to resend what the follower still needs after the queue recovers.
+
+Control traffic and empty heartbeats still pass. The budget protects memory without stopping the liveness messages Raft needs to recover.
+
 ## Fairness And Drain Quanta
 
 Admission control works together with weighted draining in `RaftPartitionExecutor`.
@@ -112,6 +121,7 @@ When a partition gets hot, Kommander pushes back in stages:
 1. If too many client proposals are already waiting in the partition executor, new proposals are rejected with `ProposalQueueFull`.
 2. If proposals reach the WAL path but the WAL scheduler is saturated, WAL enqueue can fail with backpressure.
 3. If the system is doing too much synchronous WAL read work for one partition, the read scheduler can reject more reads for that partition.
+4. If one peer cannot drain outbound replication traffic, the dispatcher drops over-budget entry-carrying appends and retries them later.
 
 This layered design is deliberate. It stops overload near the source when possible, but still protects deeper subsystems if earlier gates are not enough.
 
@@ -120,6 +130,7 @@ This layered design is deliberate. It stops overload near the source when possib
 - Leave the defaults in place unless you have measured a real problem.
 - Treat `ProposalQueueFull` as a normal overload signal and retry with backoff.
 - Do not disable queue limits casually. Setting proposal or WAL depth limits to unbounded values removes an important safety valve.
+- Keep `MaxOutboundQueueBytesPerPeer` positive unless a controlled test intentionally needs the older unbounded dispatcher behavior.
 - If you increase queue depths, verify that heartbeat latency and election behavior remain healthy under load.
 
 ## Related Settings

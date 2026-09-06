@@ -76,7 +76,8 @@ Kommander supports capabilities commonly needed after the first deployment:
 - create, split, merge, and remove user partitions
 - place user partition replicas by replication factor
 - fence stale routing decisions with partition generations
-- redistribute partition leaders by count and measured load.
+- redistribute partition leaders by count and measured load
+- drain leadership away from nodes with unusually slow WAL commit latency.
 
 These features let the cluster adapt without treating its initial membership and partition layout as permanent.
 
@@ -85,6 +86,8 @@ These features let the cluster adapt without treating its initial membership and
 Fair schedulers keep one busy partition from monopolizing synchronous WAL work. Cross-partition group commit can combine writes into fewer storage flushes, while admission limits prevent client and WAL queues from growing without bound.
 
 Checkpoints and bounded compaction keep old recoverable history under control. Partition quiescence reduces heartbeat traffic when a cluster has many idle partitions.
+
+The optional leader balancer can also move leadership away from a node whose WAL commit latency is much worse than its peers. That does not evict the node or remove its replicas; it reduces leader-side write pressure while operators investigate the storage path.
 
 ### Security And Diagnostics
 

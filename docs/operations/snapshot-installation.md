@@ -46,10 +46,24 @@ The follower keeps the in-progress receive sessions bounded.
 | `SnapshotMaxPendingSessions` | `8` | The maximum number of concurrent receive sessions across all partitions on one node. |
 | `SnapshotMaxPendingBytes` | `512 MiB` | The maximum total bytes that the active sessions and the sessions in install hold in a buffer. |
 | `AllowLegacySnapshotSenders` | `false` | Accepts snapshot senders that do not fill the leader fields and the boundary fields. Use it temporarily. |
+| `SnapshotTransferStepTimeout` | `2 min` | The maximum time an outbound export step, stream read, or chunk send may make no progress before Kommander fails that attempt and retries later. |
+| `SnapshotRescueMaxConsecutiveCycles` | `3` | Consecutive below-floor rescue cycles before the leader trips a convergence breaker for that follower. |
+| `SnapshotRescueProbeInterval` | `5 min` | How often the leader allows one probe rescue while the breaker is tripped. |
+| `SnapshotExportRetryCacheMaxBytes` | `64 MiB` | Maximum snapshot export kept in memory for retries at the same snapshot index. Larger snapshots stream without retry caching. |
 
 A new session or a new chunk can exceed the count cap or the byte cap. Kommander then evicts the pending sessions with the oldest activity first. Kommander rejects one snapshot that cannot fit inside `SnapshotMaxPendingBytes`.
 
 A completed snapshot buffer stays charged against the byte cap during its install. Therefore, a slow application import cannot let the memory grow without a bound.
+
+## Rescue Breaker And Retry Cache
+
+Snapshot rescue handles a follower that has fallen below the leader's compaction floor. Normally, one successful snapshot install lets the follower resume from the snapshot boundary.
+
+If a follower repeatedly reports itself below the floor after successful installs, the leader trips a convergence breaker after `SnapshotRescueMaxConsecutiveCycles`. While the breaker is tripped, Kommander stops exporting the same full snapshot on every cooldown. It still allows one probe every `SnapshotRescueProbeInterval`, so a follower can recover without a manual reset when the underlying problem clears.
+
+`GetSnapshotStatuses(partitionId)` shows this condition as `RescueNotConverging`.
+
+The leader can cache a produced snapshot export for retries at the same snapshot index when the export is no larger than `SnapshotExportRetryCacheMaxBytes`. This avoids rerunning the application's export hook for every retry during a transient send failure. Larger snapshots are streamed chunk-by-chunk and are not cached.
 
 ## Durable Install Order
 
@@ -103,6 +117,9 @@ Each built-in WAL backend implements the boundary write:
 - Keep `SnapshotMaxPendingBytes` well above the size of your largest snapshot plus one install in flight.
 - Enable `GrpcEnableSnapshotCompression` when the snapshots are large and the network bandwidth is tighter than the CPU.
 - Keep `AllowLegacySnapshotSenders = false` for a normal cluster.
+- Keep `SnapshotTransferStepTimeout` comfortably above normal application export and network chunk latency. It is a progress timeout, not a whole-snapshot deadline.
+- Size `SnapshotExportRetryCacheMaxBytes` from available heap and normal snapshot size. Set it to `0` or lower only when retry caching is unwanted.
+- If `GetSnapshotStatuses` reports `RescueNotConverging`, inspect the follower's storage and application import path. The leader will probe again according to `SnapshotRescueProbeInterval`.
 - A learner join can time out after heavy compaction. Register the relevant transfer hook on every node.
 
 ## Related Reading

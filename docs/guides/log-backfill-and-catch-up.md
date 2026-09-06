@@ -25,7 +25,7 @@ Kommander has two replication paths.
 | Path | Used when | Log matching anchor | Bound |
 | --- | --- | --- | --- |
 | Live replication | A follower is keeping up with current traffic. | No. `PrevLogIndex = 0`. | Ordinary proposal, commit, or rollback traffic. |
-| Backfill | A follower lags by more than `BackfillThreshold`. | Yes. Uses `PrevLogIndex` and `PrevLogTerm`. | Up to `MaxBackfillEntriesPerRound` entries per round. |
+| Backfill | A follower lags by more than `BackfillThreshold`. | Yes. Uses `PrevLogIndex` and `PrevLogTerm`. | Up to `MaxBackfillEntriesPerRound` entries and `MaxBackfillBytesPerRound` payload bytes per round. |
 
 The live path is intentionally not anchored. A slightly slow follower may not have the latest anchor yet, and rejecting ordinary live appends without the backfill recovery loop can stall proposals.
 
@@ -89,8 +89,24 @@ If no, the follower rejects with `LogMismatch`. The leader backs up and retries 
 Backfill is intentionally bounded by:
 
 - `MaxBackfillEntriesPerRound`
+- `MaxBackfillBytesPerRound`
 
-That keeps one slow follower from forcing the leader to read and ship a huge amount of WAL history in one operation. Large catch-ups happen across multiple rounds while normal replication and heartbeat traffic continue.
+That keeps one slow follower from forcing the leader to read and ship a huge amount of WAL history in one operation. The byte bound matters when log entries are large: an entry-count limit alone can still materialize a very large batch. Kommander always allows one entry through, even if that single entry is larger than the byte limit, so an oversized command does not block convergence forever.
+
+Large catch-ups happen across multiple rounds while normal replication and heartbeat traffic continue.
+
+## No-Progress Pacing
+
+A follower can acknowledge a backfill batch without advancing its committed frontier. For example, it may have accepted duplicate entries while still missing the commit marker or a lower anchor needed to make the range contiguous.
+
+Kommander treats that as a no-progress episode only after a later success acknowledgement proves the frontier did not move. It then backs off before sending the same kind of batch again:
+
+- the pause starts around `HeartbeatInterval`
+- it doubles while the follower keeps proving no progress
+- it is capped by `BackfillNoProgressPauseCap`
+- a real frontier advance resets the pause.
+
+After `BackfillNoProgressAnchorFallbackShips` fruitless ships, the leader stops anchoring the next repair at `nextIndex` and anchors at the follower's reported committed frontier instead. Anchoring lower may resend idempotent entries, but it is safer than repeatedly anchoring above the entry the follower actually needs.
 
 ## Shared Backfill Reads
 
@@ -128,6 +144,9 @@ If the missing index is at or below the checkpoint floor, the gap is treated as 
 | `BackfillThreshold` | `10` | Follower lag must exceed this before the actively-behind backfill trigger starts. Smaller values start active backfill earlier. |
 | `FollowerSaturationBackoff` | `1 s` | Pause entry-carrying backfill to a follower after it reports WAL saturation. Heartbeats continue. |
 | `MaxBackfillEntriesPerRound` | `128` | Maximum committed entries sent in one backfill round. Larger values catch up faster but send larger batches. |
+| `MaxBackfillBytesPerRound` | `4 MiB` | Maximum log-payload bytes materialized for one backfill batch. One entry is still sent if a single entry exceeds the limit. |
+| `BackfillNoProgressPauseCap` | `30 s` | Maximum pause between fruitless backfill batches to the same follower. |
+| `BackfillNoProgressAnchorFallbackShips` | `2` | Number of fruitless ships before the next repair anchors at the follower's reported commit frontier. Values at or below `0` disable this fallback. |
 
 Compaction settings also affect catch-up indirectly:
 
@@ -143,6 +162,7 @@ More aggressive compaction can make snapshot repair more likely for far-behind f
 - Persistent lag beyond `BackfillThreshold` should trigger backfill.
 - Raising `BackfillThreshold` very high does not disable every repair path; use `BackfillEnabled = false` for that.
 - If lag does not shrink, inspect WAL read latency, transport failures, and follower health.
+- If lag is stuck but the leader is not busy, check `raft.backfill.no_progress_pauses_total`. It means Kommander is pacing duplicate backfill work that the follower keeps acknowledging without progress.
 - If `GetBackfillStatuses(partitionId)` stays non-empty, compare `LastCheckpoint` with `FirstAvailableIndex` to decide whether you are waiting on unresolved proposed entries or need snapshot repair.
 - If `GetSnapshotStatuses(partitionId)` stays non-empty, the follower likely needs state below the retained WAL floor and snapshot repair is stuck or retrying.
 - If several learners join at once, shared backfill reads reduce leader-side storage and encoding work, but `MaxBackfillEntriesPerRound` still controls per-round catch-up size.

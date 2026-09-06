@@ -74,8 +74,11 @@ Custom adapters implement `IWAL`.
 public interface IWAL : IDisposable
 {
     List<RaftLog> ReadLogs(int partitionId);
-    List<RaftLog> ReadLogsRange(int partitionId, long startLogIndex);
+    List<RaftLog> ReadLogsRange(int partitionId, long startLogIndex, int maxEntries = int.MaxValue);
+    List<RaftLog> ReadLogsRange(int partitionId, long startLogIndex, int maxEntries, long maxBytes);
+    long GetTermAt(int partitionId, long logIndex);
     RaftOperationStatus Write(List<(int partitionId, List<RaftLog> logs)> logs);
+    RaftOperationStatus Write(List<(int partitionId, List<RaftLog> logs)> logs, bool sync);
     long GetMaxLog(int partitionId);
     long GetCurrentTerm(int partitionId);
     long GetLastCheckpoint(int partitionId);
@@ -83,13 +86,32 @@ public interface IWAL : IDisposable
     int CountRemovableLogs(int partitionId);
     string? GetMetaData(string key);
     bool SetMetaData(string key, string value);
+    bool PersistHardState(int partitionId, long currentTerm, string? votedFor);
+    bool TryGetHardState(int partitionId, out long currentTerm, out string? votedFor);
     (RaftOperationStatus Status, int Removed) CompactLogsOlderThan(
         int partitionId,
         long lastCheckpoint,
-        int compactNumberEntries
+        int compactNumberEntries,
+        int? maxTotalEntries = null
+    );
+    RaftOperationStatus DeletePartitionWAL(int partitionId);
+    RaftOperationStatus TruncateLogsAfter(int partitionId, long afterLogId);
+    (RaftOperationStatus Status, long MaxLogId) TruncateLogsAfterAndGetMax(int partitionId, long afterLogId);
+    RaftOperationStatus TruncateProposedLogsAfter(int partitionId, long afterLogId);
+    (RaftOperationStatus Status, bool SuffixTruncated) InstallSnapshotBoundary(
+        int partitionId,
+        long snapshotIndex,
+        long lastIncludedTerm
     );
 }
 ```
+
+Several methods have default implementations in the source interface to keep simple test adapters compatible:
+
+- `ReadLogsRange(..., maxBytes)` can delegate to the entry-count overload, but durable adapters should enforce the byte cap during the scan so backfill does not materialize oversized batches.
+- `Write(..., sync)` can delegate to `Write(...)`; durable adapters should honor `sync: false` for commit-marker batches used by the single-fsync fast path.
+- `GetTermAt` can use `ReadLogsRange`, but durable adapters should implement a scalar lookup so log-matching checks do not read payloads.
+- `PersistHardState` and `TryGetHardState` use metadata keys by default. Durable adapters must make `SetMetaData` return `false` on storage failure instead of throwing, because election code will not solicit votes or grant a vote that it could not record.
 
 The counting methods are useful for tests, diagnostics, and compaction visibility:
 
