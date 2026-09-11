@@ -5,7 +5,7 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Metrics And Diagnostics | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Metrics And Diagnostics | Kommander"><meta data-rh="true" name="description" content="Kommander gives runtime diagnostics through two channels:"><meta data-rh="true" property="og:description" content="Kommander gives runtime diagnostics through two channels:"><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/" hreflang="x-default"><link data-rh="true" rel="preconnect" href="https://SPBBUBI3JT-dsn.algolia.net" crossorigin="anonymous"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Metrics And Diagnostics","item":"https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics"}]}</script><link rel="search" type="application/opensearchdescription+xml" title="Kommander" href="/kommander.github.io/opensearch.xml">
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.7cd45a08.css">
-<script src="/kommander.github.io/assets/js/runtime~main.06031278.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.a88c469d.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.1905d6e4.js" defer="defer"></script>
 </head>
 <body>
@@ -84,6 +84,11 @@
 <p>Observable gauge:</p>
 <ul>
 <li class=""><code>raft.wal.queue_depth</code>, with the tag <code>partition_id</code></li>
+<li class=""><code>raft.wal.delayed_write_rate</code></li>
+<li class=""><code>raft.wal.write_stalled</code></li>
+<li class=""><code>raft.wal.shard_live_sst_bytes</code></li>
+<li class=""><code>raft.wal.shard_l0_files</code></li>
+<li class=""><code>raft.wal.shard_l6_files</code></li>
 </ul>
 <p><code>raft.wal.queue_depth</code> reports the pending or in-flight WAL operations for each partition. A constant rise with flat replicated-log throughput shows WAL saturation or fsync saturation. An fsync is a durable flush to disk. <code>IRaft.GetPartitionWalQueueDepth</code> gives the same advisory value.</p>
 <p><code>raft.wal.batches_total</code> increments one time for each scheduler group write. One group write can cover more than one partition.</p>
@@ -110,6 +115,15 @@
 <li class=""><code>raft.wal.engine_reopens_total</code> counts RocksDB WAL engine reopens after a latched storage error, tagged by <code>outcome=success</code> or <code>outcome=failed</code>.</li>
 </ul>
 <p>Storage can continue to grow with compaction configured. These metrics then separate three causes: no checkpoint was written, the application durability floor keeps the tail on purpose, or the compaction failed.</p>
+<p>For <code>RocksDbWAL</code>, the storage-engine gauges show write stalls and physical reclamation:</p>
+<ul>
+<li class=""><code>raft.wal.delayed_write_rate</code> is the current RocksDB throttled write rate in bytes per second. Nonzero means the storage engine is slowing the Raft write path.</li>
+<li class=""><code>raft.wal.write_stalled</code> is <code>1</code> while RocksDB has stopped writes.</li>
+<li class=""><code>raft.wal.shard_live_sst_bytes</code> is live SST bytes across the Raft-log shard column families.</li>
+<li class=""><code>raft.wal.shard_l0_files</code> is the L0 file count across Raft-log shards. Growth toward the slowdown or stop trigger is a storage pressure signal.</li>
+<li class=""><code>raft.wal.shard_l6_files</code> is the bottom-level file count across Raft-log shards.</li>
+</ul>
+<p>Use these with <code>RocksDbWalTuning</code> and shared-memory sizing. A too-small shared write-buffer budget can force early flushes, increasing write amplification without changing consensus safety.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="consensus-invariant-checks">Consensus Invariant Checks<a href="#consensus-invariant-checks" class="hash-link" aria-label="Direct link to Consensus Invariant Checks" title="Direct link to Consensus Invariant Checks" translate="no">​</a></h2>
 <p>Counter:</p>
 <ul>
