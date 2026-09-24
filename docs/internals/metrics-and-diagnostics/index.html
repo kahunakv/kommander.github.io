@@ -5,7 +5,7 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Metrics And Diagnostics | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Metrics And Diagnostics | Kommander"><meta data-rh="true" name="description" content="Kommander gives runtime diagnostics through two channels:"><meta data-rh="true" property="og:description" content="Kommander gives runtime diagnostics through two channels:"><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/" hreflang="x-default"><link data-rh="true" rel="preconnect" href="https://SPBBUBI3JT-dsn.algolia.net" crossorigin="anonymous"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Metrics And Diagnostics","item":"https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics"}]}</script><link rel="search" type="application/opensearchdescription+xml" title="Kommander" href="/kommander.github.io/opensearch.xml">
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.7cd45a08.css">
-<script src="/kommander.github.io/assets/js/runtime~main.76498cc2.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.daccfd21.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.53a257a5.js" defer="defer"></script>
 </head>
 <body>
@@ -92,6 +92,10 @@
 <li class=""><code>raft.wal.shard_l0_files</code></li>
 <li class=""><code>raft.wal.shard_l6_files</code></li>
 <li class=""><code>raft.wal.alive_log_bytes</code></li>
+<li class=""><code>raft.wal.table_readers_memory</code></li>
+<li class=""><code>raft.wal.memtable_memory</code></li>
+<li class=""><code>raft.wal.block_cache_usage</code></li>
+<li class=""><code>raft.wal.block_cache_pinned_usage</code></li>
 <li class=""><code>raft.wal.oldest_pending_write_age_ms</code>, with the tag <code>partition_id</code></li>
 </ul>
 <p><code>raft.wal.queue_depth</code> reports the pending or in-flight WAL operations for each partition. A constant rise with flat replicated-log throughput shows WAL saturation or fsync saturation. An fsync is a durable flush to disk. <code>IRaft.GetPartitionWalQueueDepth</code> gives the same advisory value.</p>
@@ -129,8 +133,12 @@
 <li class=""><code>raft.wal.shard_l0_files</code> is the L0 file count across Raft-log shards. Growth toward the slowdown or stop trigger is a storage pressure signal.</li>
 <li class=""><code>raft.wal.shard_l6_files</code> is the bottom-level file count across Raft-log shards.</li>
 <li class=""><code>raft.wal.alive_log_bytes</code> is live RocksDB <code>.log</code> file bytes for the Raft WAL engine. Growth here affects restart replay even when SST reclamation looks healthy.</li>
+<li class=""><code>raft.wal.table_readers_memory</code> is native memory held by open RocksDB table readers, including index and filter blocks. Without shared resources this can grow with live SST bytes outside a configured cache budget.</li>
+<li class=""><code>raft.wal.memtable_memory</code> is native memtable memory across the WAL engine&#x27;s column families. A shared write-buffer manager bounds this value.</li>
+<li class=""><code>raft.wal.block_cache_usage</code> is the block-cache occupancy backing the WAL engine. With <code>RocksDbSharedResources</code>, this reports the whole shared cache, not only Kommander&#x27;s share.</li>
+<li class=""><code>raft.wal.block_cache_pinned_usage</code> is block-cache memory that cannot be evicted, such as blocks held by iterators or pinned index/filter blocks.</li>
 </ul>
-<p>Use these with <code>RocksDbWalTuning</code> and shared-memory sizing. A too-small shared write-buffer budget can force early flushes, increasing write amplification without changing consensus safety.</p>
+<p>Use these with <code>RocksDbWalTuning</code> and shared-memory sizing. A too-small shared write-buffer budget can force early flushes, increasing write amplification without changing consensus safety. A high <code>table_readers_memory</code> value without shared resources usually means index/filter blocks are outside your intended memory budget; a high pinned-cache value means the cache may be unable to evict enough data even when the nominal cache size looks large.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="consensus-invariant-checks">Consensus Invariant Checks<a href="#consensus-invariant-checks" class="hash-link" aria-label="Direct link to Consensus Invariant Checks" title="Direct link to Consensus Invariant Checks" translate="no">​</a></h2>
 <p>Counter:</p>
 <ul>
