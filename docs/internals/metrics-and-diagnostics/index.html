@@ -5,7 +5,7 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Metrics And Diagnostics | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Metrics And Diagnostics | Kommander"><meta data-rh="true" name="description" content="Kommander gives runtime diagnostics through two channels:"><meta data-rh="true" property="og:description" content="Kommander gives runtime diagnostics through two channels:"><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics/" hreflang="x-default"><link data-rh="true" rel="preconnect" href="https://SPBBUBI3JT-dsn.algolia.net" crossorigin="anonymous"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Metrics And Diagnostics","item":"https://kahunakv.github.io/kommander.github.io/docs/internals/metrics-and-diagnostics"}]}</script><link rel="search" type="application/opensearchdescription+xml" title="Kommander" href="/kommander.github.io/opensearch.xml">
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.7cd45a08.css">
-<script src="/kommander.github.io/assets/js/runtime~main.daccfd21.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.edabbe2b.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.53a257a5.js" defer="defer"></script>
 </head>
 <body>
@@ -50,6 +50,7 @@
 <p>Histogram:</p>
 <ul>
 <li class=""><code>raft.executor.operation_duration_ms</code></li>
+<li class=""><code>raft.round.stage_ms</code>, when round-stage instrumentation is enabled</li>
 </ul>
 <p>The tags are:</p>
 <ul>
@@ -64,6 +65,28 @@
 <li class=""><code>Maintenance</code></li>
 </ul>
 <p>Examine these signals first when an operation feels slow. A rise in <code>Client</code> latency with healthy <code>Control</code> and <code>Replication</code> latency shows that the system keeps the Raft priority correctly. A rise in control-plane latency usually shows deeper scheduler pressure or storage pressure.</p>
+<p><code>raft.round.stage_ms</code> is an opt-in diagnostic histogram for breaking one replication round into named stages. Enable it with the <code>KOMMANDER_ROUND_STAGES=1</code> environment variable or by enabling <code>RoundStageInstrumentation</code> in an embedded host. Each measurement has a <code>stage</code> tag.</p>
+<p>Useful stages include:</p>
+<ul>
+<li class=""><code>leader.queue</code></li>
+<li class=""><code>leader.propose</code></li>
+<li class=""><code>leader.wal</code></li>
+<li class=""><code>leader.wal_completion</code></li>
+<li class=""><code>leader.fanout</code></li>
+<li class=""><code>leader.replication</code></li>
+<li class=""><code>leader.ack_queue</code></li>
+<li class=""><code>leader.ack</code></li>
+<li class=""><code>leader.resume</code></li>
+<li class=""><code>leader.round</code></li>
+<li class=""><code>leader.commit_wal</code></li>
+<li class=""><code>follower.queue</code></li>
+<li class=""><code>follower.append</code></li>
+<li class=""><code>follower.wal</code></li>
+<li class=""><code>follower.wal_completion</code></li>
+<li class=""><code>follower.ack</code></li>
+<li class=""><code>transport.dispatch</code></li>
+</ul>
+<p>Use this histogram when a proposal is slow but the broad queue and WAL metrics do not isolate the delay. Stage means can be added to approximate average round cost. Percentiles from different stages should not be added, because each percentile can come from a different request. <code>Kommander.Benchmark</code> can enable the same instrumentation with <code>--stages</code>; it is useful for comparing <code>--fan-out-before-local-write true</code> and <code>false</code> under the same workload.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="wal-batch-metrics-and-throughput">WAL Batch Metrics And Throughput<a href="#wal-batch-metrics-and-throughput" class="hash-link" aria-label="Direct link to WAL Batch Metrics And Throughput" title="Direct link to WAL Batch Metrics And Throughput" translate="no">​</a></h2>
 <p>The WAL is the write-ahead log. It is the durable store for Raft log entries.</p>
 <p>Counters:</p>
