@@ -5,7 +5,7 @@
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Dynamic Cluster Membership | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Dynamic Cluster Membership | Kommander"><meta data-rh="true" name="description" content="Kommander can change the cluster roster at runtime."><meta data-rh="true" property="og:description" content="Kommander can change the cluster roster at runtime."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership/" hreflang="x-default"><link data-rh="true" rel="preconnect" href="https://SPBBUBI3JT-dsn.algolia.net" crossorigin="anonymous"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dynamic Cluster Membership","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/dynamic-cluster-membership"}]}</script><link rel="search" type="application/opensearchdescription+xml" title="Kommander" href="/kommander.github.io/opensearch.xml">
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.8ba5fea9.css">
-<script src="/kommander.github.io/assets/js/runtime~main.e982cd1f.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.96ef53ed.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.53a257a5.js" defer="defer"></script>
 </head>
 <body>
@@ -84,7 +84,11 @@
 <li class="">The leader replicates the state to it.</li>
 <li class="">The leader promotes it to <code>Voter</code> after its catch-up stays sufficient.</li>
 </ol>
-<p><code>JoinCluster(...)</code> does not return when the cluster only knows the node. It waits for the node to become a committed voter. It also returns at a timeout or a cancellation.</p>
+<p><code>JoinCluster(...)</code> does not return when the cluster only knows the node. It waits for the node to become a committed voter.</p>
+<p>Two configuration deadlines cover different failure modes:</p>
+<table><thead><tr><th>Property</th><th style="text-align:right">Default</th><th>Description</th></tr></thead><tbody><tr><td><code>JoinTimeout</code></td><td style="text-align:right"><code>60 s</code></td><td>Bounds seed admission and the initial partition-map assembly.</td></tr><tr><td><code>JoinPromotionStallTimeout</code></td><td style="text-align:right"><code>5 min</code></td><td>Bounds how long a learner may show no catch-up progress while it waits for promotion.</td></tr></tbody></table>
+<p>Promotion is deliberately progress-aware. Catching up a node can take longer than a fixed deadline when it needs a large snapshot, but the join continues while a partition frontier advances, a partition appears, snapshot chunks arrive, or an install starts or progresses. A caller cancellation token still stops any phase earlier.</p>
+<p>If a seed join fails after the cluster admitted the learner, Kommander asks the system-partition leader to remove it before throwing. This prevents a failed join from leaving a permanently stalled learner in the committed roster. If that cleanup cannot be acknowledged, Kommander logs a warning and an operator should inspect the roster.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="graceful-leave-and-decommission">Graceful Leave And Decommission<a href="#graceful-leave-and-decommission" class="hash-link" aria-label="Direct link to Graceful Leave And Decommission" title="Direct link to Graceful Leave And Decommission" translate="no">​</a></h2>
 <p>A node can leave with this call:</p>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token keyword" style="color:#00009f">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:#393A34">.</span><span class="token function" style="color:#d73a49">LeaveCluster</span><span class="token punctuation" style="color:#393A34">(</span><span class="token named-parameter punctuation" style="color:#393A34">dispose</span><span class="token punctuation" style="color:#393A34">:</span><span class="token plain"> </span><span class="token boolean" style="color:#36acaa">true</span><span class="token punctuation" style="color:#393A34">)</span><span class="token punctuation" style="color:#393A34">;</span><br></div></code></pre></div></div>
@@ -120,6 +124,7 @@
 <li class=""><code>DrainTimedOut</code>: The evacuation did not finish before <code>DecommissionDrainTimeout</code>. The role returned to <code>Voter</code>.</li>
 </ul>
 <p><code>LeaveClusterResult.Left</code> is true for <code>Committed</code> and for <code>NotAMember</code>. <code>LeaveClusterResult.Drained</code> tells you if the evacuation moved every replica that named the node before the removal. After a refused request or a failed request, the node stays a normal participant, or it becomes one again. After a committed removal, it stops its campaigns. Shut it down, or restart it through the normal join path.</p>
+<p>When a timed-out drain is confirmed rolled back to <code>Voter</code>, Kommander also releases the leave suppression state. The node can campaign normally and, if it is evicted later for an unrelated failure, <code>EnableAutoRejoin</code> works as it does for any other voter. If rollback cannot be confirmed, the suppression remains because the original removal can still finish; the warning in that path requires operator attention.</p>
 <p>Only one member can be <code>Leaving</code> at a time. Do not use RF 1 for a planned decommission workflow. A range can have the leaving node as its only voter. That range cannot drain safely after a loss of leadership during the drain.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="automatic-promotion">Automatic Promotion<a href="#automatic-promotion" class="hash-link" aria-label="Direct link to Automatic Promotion" title="Direct link to Automatic Promotion" translate="no">​</a></h2>
 <p>The promotion from a learner to a voter is automatic.</p>
@@ -129,6 +134,7 @@
 <li class=""><code>LearnerPromotionStableWindow</code></li>
 </ul>
 <p>Therefore, a node can join without harm to the quorum availability during its catch-up.</p>
+<p>Replica placement also logs a warning when an added learner remains not promotable for <code>LearnerPromotionStallWarningAfter</code>, which defaults to 30 seconds. The message identifies the last failed check, such as a missing leader hint, an unanswered probe, a missing follower frontier, or excessive lag. This threshold is diagnostic only and does not force or cancel promotion.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="catch-up-and-snapshot-repair">Catch-Up And Snapshot Repair<a href="#catch-up-and-snapshot-repair" class="hash-link" aria-label="Direct link to Catch-Up And Snapshot Repair" title="Direct link to Catch-Up And Snapshot Repair" translate="no">​</a></h2>
 <p>Kommander uses bounded log backfill for the catch-up of a learner. Backfill is the transfer of missing committed log entries from the leader.</p>
 <p>Backfill works while the learner needs entries above the current compaction floor. The WAL can already compact the history that a learner needs. The WAL is the write-ahead log. The leader then changes to snapshot installation. This needs the relevant application transfer hook.</p>
@@ -200,8 +206,11 @@
 <li class=""><code>BackfillEnabled</code></li>
 <li class=""><code>FollowerSaturationBackoff</code></li>
 <li class=""><code>MaxBackfillEntriesPerRound</code></li>
+<li class=""><code>JoinTimeout</code></li>
+<li class=""><code>JoinPromotionStallTimeout</code></li>
 <li class=""><code>LearnerPromotionLag</code></li>
 <li class=""><code>LearnerPromotionStableWindow</code></li>
+<li class=""><code>LearnerPromotionStallWarningAfter</code></li>
 <li class=""><code>GossipInterval</code></li>
 <li class=""><code>GossipFanout</code></li>
 <li class=""><code>PingInterval</code></li>
