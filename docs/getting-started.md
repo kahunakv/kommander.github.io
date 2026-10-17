@@ -4,6 +4,8 @@ sidebar_position: 2
 
 # Getting Started
 
+This page takes you from an empty project to a node that joins a cluster and replicates one command. At the end, you know the parts that every Kommander node needs, and where your own code connects to them. Use it to check your setup. Then continue to the guides to design a real service.
+
 :::tip Ready for a complete application?
 If you already understand the minimal setup and want to go deeper, jump to [Advanced Tutorial: Build A Replicated Key/Value Service](guides/advanced-replicated-simpledb.md). It covers a three-node service, partition routing, leader redirects, durable application state, recovery, and failure testing.
 :::

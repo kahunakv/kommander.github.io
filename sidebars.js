@@ -14,6 +14,7 @@ const sidebars = {
         'guides/replicating-logs',
         'guides/heterogeneous-write-coalescing',
         'guides/hosting-endpoints',
+        'guides/thread-free-embedded-mode',
         'operations/sample-server',
         'guides/advanced-replicated-simpledb',
         'guides/security-and-authentication',

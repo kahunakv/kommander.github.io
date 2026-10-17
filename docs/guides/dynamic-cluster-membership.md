@@ -118,7 +118,18 @@ The sequence is:
 3. The leader replicates the state to it.
 4. The leader promotes it to `Voter` after its catch-up stays sufficient.
 
-`JoinCluster(...)` does not return when the cluster only knows the node. It waits for the node to become a committed voter. It also returns at a timeout or a cancellation.
+`JoinCluster(...)` does not return when the cluster only knows the node. It waits for the node to become a committed voter.
+
+Two configuration deadlines cover different failure modes:
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `JoinTimeout` | `60 s` | Bounds seed admission and the initial partition-map assembly. |
+| `JoinPromotionStallTimeout` | `5 min` | Bounds how long a learner may show no catch-up progress while it waits for promotion. |
+
+Promotion is deliberately progress-aware. Catching up a node can take longer than a fixed deadline when it needs a large snapshot, but the join continues while a partition frontier advances, a partition appears, snapshot chunks arrive, or an install starts or progresses. A caller cancellation token still stops any phase earlier.
+
+If a seed join fails after the cluster admitted the learner, Kommander asks the system-partition leader to remove it before throwing. This prevents a failed join from leaving a permanently stalled learner in the committed roster. If that cleanup cannot be acknowledged, Kommander logs a warning and an operator should inspect the roster.
 
 ## Graceful Leave And Decommission
 
@@ -171,6 +182,8 @@ The important results are:
 
 `LeaveClusterResult.Left` is true for `Committed` and for `NotAMember`. `LeaveClusterResult.Drained` tells you if the evacuation moved every replica that named the node before the removal. After a refused request or a failed request, the node stays a normal participant, or it becomes one again. After a committed removal, it stops its campaigns. Shut it down, or restart it through the normal join path.
 
+When a timed-out drain is confirmed rolled back to `Voter`, Kommander also releases the leave suppression state. The node can campaign normally and, if it is evicted later for an unrelated failure, `EnableAutoRejoin` works as it does for any other voter. If rollback cannot be confirmed, the suppression remains because the original removal can still finish; the warning in that path requires operator attention.
+
 Only one member can be `Leaving` at a time. Do not use RF 1 for a planned decommission workflow. A range can have the leaving node as its only voter. That range cannot drain safely after a loss of leadership during the drain.
 
 ## Automatic Promotion
@@ -183,6 +196,8 @@ The leader promotes a learner after two conditions. The learner must stay suffic
 - `LearnerPromotionStableWindow`
 
 Therefore, a node can join without harm to the quorum availability during its catch-up.
+
+Replica placement also logs a warning when an added learner remains not promotable for `LearnerPromotionStallWarningAfter`, which defaults to 30 seconds. The message identifies the last failed check, such as a missing leader hint, an unanswered probe, a missing follower frontier, or excessive lag. This threshold is diagnostic only and does not force or cancel promotion.
 
 ## Catch-Up And Snapshot Repair
 
@@ -272,8 +287,11 @@ The primary settings for the membership are:
 - `BackfillEnabled`
 - `FollowerSaturationBackoff`
 - `MaxBackfillEntriesPerRound`
+- `JoinTimeout`
+- `JoinPromotionStallTimeout`
 - `LearnerPromotionLag`
 - `LearnerPromotionStableWindow`
+- `LearnerPromotionStallWarningAfter`
 - `GossipInterval`
 - `GossipFanout`
 - `PingInterval`

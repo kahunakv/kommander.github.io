@@ -51,6 +51,14 @@ HLCTimestamp timestamp = clock.SendOrLocalEvent(nodeId: 1);
 
 Use the HLC timestamp as an identifier for Kommander proposal control. Use `RaftReplicationResult.LogIndex` when you need the committed position in the partition log.
 
+## Recovery Floor
+
+Durable WAL adapters persist a per-partition HLC floor. The floor is an upper bound on the physical HLC component of timestamps already written to that partition's log.
+
+On restore, Kommander merges that floor into the local hybrid logical clock before the node can mint new proposal timestamps. It also considers the maximum timestamp from entries read during recovery. This prevents a restart after a wall-clock correction, compaction, or narrowed replay from producing a new proposal ticket that sorts behind entries the WAL already held.
+
+The floor is not a consensus rule and it does not replace Raft terms, log indexes, or commit checks. It is a timestamp hygiene rule for proposal tickets and for consumers that use HLCs as an operational ordering key.
+
 ## Further Reading
 
 - [Logical Physical Clocks and Consistent Snapshots in Globally Distributed Databases](https://cse.buffalo.edu/tech-reports/2014-04.pdf), the HLC paper by Kulkarni, Demirbas, Madappa, Avva, and Leone.

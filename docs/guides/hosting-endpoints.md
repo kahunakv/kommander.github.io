@@ -1,6 +1,10 @@
 # Hosting Endpoints
 
-Each process must give the equivalent Raft endpoints from its host application. This requirement applies to a network transport.
+Raft nodes send messages to each other all the time: vote requests, heartbeats, and log entries. With a network transport, each node receives these messages through endpoints in its own ASP.NET Core host. Kommander supplies the route map. Your host must expose it.
+
+If a node does not map the routes, the other nodes cannot reach it. The node then receives no vote requests, no heartbeats, and no log entries.
+
+Choose one transport and use it on every node. Map its routes in each process, as this page shows. For tests that run all the nodes in one process, use the in-memory transport. It needs no routes.
 
 ## gRPC
 

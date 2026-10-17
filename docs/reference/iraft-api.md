@@ -1,14 +1,18 @@
 # IRaft API
 
-`IRaft` is the primary application-facing interface.
+`IRaft` is the interface that your application uses to work with Kommander. `RaftManager` implements it. Use this page to find a member and to check its exact behavior: its parameters, its return values, and its status values.
+
+You do not need most of these members to start. A basic service uses five: `OnLogRestored` and `OnReplicationReceived` to apply entries, `JoinCluster` to start, `ReplicateLogs` to write, and `LeaveCluster` to stop. The guides explain the other members in context. For example, read [Elastic Partitions](../guides/elastic-partitions.md) before you use the partition APIs.
+
+The table groups the members by area.
 
 | Area | Members |
 | --- | --- |
 | Lifecycle | `JoinCluster`, `LeaveCluster`, `RequestLeaveAsync`, `UpdateNodes` |
 | Membership | `GetMembership`, `LocalRole`, `OnMembershipChanged` |
-| Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes`, `GetFollowerLagAsync`, `GetSnapshotStatuses`, `GetBackfillStatuses` |
-| Leadership | `AmILeaderQuick`, `AmILeader`, `ConfirmLeadershipAsync`, `ConfirmLocalApplicationAsync`, `WaitForLeader`, `WaitForLeaderStableAsync` |
-| Replication | `ReplicateLogs`, `ReplicateEntries`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs` |
+| Cluster state | `Joined`, `IsInitialized`, `GetNodes`, `GetLocalEndpoint`, `GetLocalNodeId`, `GetLocalNodeName`, `GetLastNodeActivity`, `GetActiveNodes`, `GetCommitIndex`, `GetFollowerLagAsync`, `GetFollowerProgress`, `GetSnapshotStatuses`, `GetBackfillStatuses` |
+| Leadership | `AmILeaderQuick`, `AmILeader`, `ConfirmLeadershipAsync`, `ConfirmLocalApplicationAsync`, `SetCandidacyWithheld`, `IsCandidacyWithheld`, `WaitForLeader`, `WaitForLeaderStableAsync` |
+| Replication | `ReplicateLogs`, `ReplicateEntries`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs`, `RequestReseedAsync` |
 | Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetNextAvailablePartitionId`, `GetPartitionGeneration`, `GetPartitionMap`, `GetPartitionReplicas`, `GetEffectiveReplicationFactor`, `SetReplicationFactorAsync`, `RegisterStateMachineTransfer` |
 | System partition state | `RegisterSystemStateTransfer`, `SetMinRetainIndex`, `AcquireRetentionHold` |
 | Partition load | `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, `GetPartitionCommitWaitMs` |
@@ -105,6 +109,31 @@ long? lag = await raft.GetFollowerLagAsync(
 
 `null` means there is no recorded lag value for that follower and partition on this node.
 
+`GetFollowerProgress` returns a richer leader-side snapshot of what the leader last heard from a follower:
+
+```csharp
+RaftFollowerProgress? progress = raft.GetFollowerProgress(
+    partitionId: 1,
+    followerEndpoint: "node-b:2070"
+);
+
+if (progress is { WalStalled: true })
+{
+    logger.LogWarning(
+        "Follower {Endpoint} is {Entries} durable entries behind and has waited {WaitMs} ms for WAL",
+        progress.Endpoint,
+        progress.EntriesBehind(progress.LeaderCommitIndex),
+        progress.WalStallMs
+    );
+}
+```
+
+Use this when an application-level protocol may wait on a follower and needs to know whether that follower can answer. `DurableFrontier` is the highest committed index the follower says is written to its disk. `ProtocolFrontier` is the higher protocol frontier that may advance while a WAL write is still pending. During a follower disk stall, the protocol frontier can keep rising while the durable frontier stands still.
+
+`null` means unknown, not caught up. Only the current leader records follower progress, and a leader reports `null` until the current leadership has folded an acknowledgement from that peer.
+
+`GetCommitIndex(partitionId)` returns the highest gap-free log id that is known committed and durable on the local node. It returns `-1` when the partition is not hosted locally or nothing has committed. The value excludes proposed-but-uncommitted entries and entries above a hole. It also waits for local WAL durability before publishing a higher value, so an observer never sees a commit index that the local disk later refused. Within one process lifetime the published value does not decrease; after a crash, it can restart lower until the leader re-supplies lazy commit markers or catch-up data.
+
 Leader-side catch-up diagnostics are available through:
 
 ```csharp
@@ -138,6 +167,8 @@ See [Partition Load Signals](../guides/partition-load-signals.md) for signal sem
 ## Replication APIs
 
 Use `ReplicateLogs` when every payload in the call shares one type, one `autoCommit` value, and one generation fence.
+
+`ReplicateLogs` also accepts `expectedTerm`. This is a local-leadership term fence for callers that made a decision based on this node's current term. If the term no longer matches, Kommander refuses the write before appending anything and returns `RaftOperationStatus.TermMismatch`. Re-read `GetPartitionTerm(partitionId)` and decide again instead of blindly retrying the same command on another replica.
 
 Use `ReplicateEntries` when a consumer has a mixed batch of per-entry-typed writes for one partition:
 
@@ -236,6 +267,8 @@ OrderView order = localProjection.Get(orderId);
 
 Concurrent confirmations coalesce into one in-flight round, and a fresh confirmation can be reused within the heartbeat interval. A `false` result means the node is not the published leader, quorum could not be confirmed within `LeadershipConfirmationTimeout`, apply catch-up did not finish in time, or admission control rejected the request.
 
+When application delivery trails the confirmed commit index, each caller waits for its own required applied index. Callers for the same index share the wait, and unrelated intermediate applies do not repeatedly wake them. A role change, term change, or lease invalidation releases parked confirmations immediately so a demoted node returns `false` instead of waiting for the full confirmation timeout.
+
 Use `ConfirmLocalApplicationAsync` when a local non-leader must prove its applied state has caught up before acting on it:
 
 ```csharp
@@ -247,6 +280,37 @@ await localMaintenance.PruneFilesReferencedByReplicatedState(cancellationToken);
 
 This is the follower-side read-index primitive. It asks the leader to confirm a same-term commit index, then waits until this node has applied through that index. It returns `false` for every unsafe or unavailable case, including no known leader, quorum confirmation failure, restore in progress, not-hosted partitions under replica placement, transport errors, timeout, or admission rejection. Entries committed after the call starts may or may not be visible, which matches normal read-index freshness.
 
+Concurrent follower confirmations for the same partition and believed leader are coalesced before the remote `GetReadIndex` call is sent. A quiet follower adds no extra round trip; under a burst, several calls can share one leader fetch. A call never joins a fetch that is already on the wire, so every returned read index is captured after that call arrived.
+
+## Reseed And Candidacy Control
+
+Use `RequestReseedAsync` when the local application projection for a partition is missing or untrusted even though Raft log catch-up may look complete:
+
+```csharp
+raft.SetCandidacyWithheld(partitionId, withheld: true);
+
+RaftOperationStatus status =
+    await raft.RequestReseedAsync(partitionId, cancellationToken);
+```
+
+The call is made on the replica that needs repair. It holds committed application delivery, asks the current leader for a fresh checkpoint, and waits for the leader to ship a forced snapshot. The receiver imports that snapshot even if the existing WAL boundary already appears to cover the snapshot index, because reseed is about repairing the application state.
+
+`RequestReseedAsync` returns:
+
+- `Success` when the request was accepted locally and sent, or when a reseed request is already pending
+- `NodeIsNotLeader` when the local node is the leader for that partition, because a leader cannot reseed itself from another leader
+- `Errored` when the local node does not host the partition or no leader is currently known.
+
+`SetCandidacyWithheld(partitionId, true)` keeps the repaired replica from becoming leader while its application state is suspect. It still votes, replicates, acknowledges, and participates as a follower. It also ignores leadership-transfer suggestions targeted at it. `IsCandidacyWithheld(partitionId)` reports the local flag.
+
+Clear the flag after the application confirms that the imported state is healthy:
+
+```csharp
+raft.SetCandidacyWithheld(partitionId, withheld: false);
+```
+
+The reseed hold is bounded by `ReseedRequestTimeout`. If it expires, committed delivery resumes and the replica may request reseed again.
+
 ## Test Hooks
 
 `IRaft` exposes several advanced members marked with `EditorBrowsable(EditorBrowsableState.Never)`:
@@ -256,8 +320,18 @@ This is the follower-side read-index primitive. It asks the leader to confirm a 
 - `TransferLeadershipAsync`
 - `SuspendHeartbeatsAsync`
 - `ResumeHeartbeatsAsync`
+- `HoldCommittedProposalRepliesForTesting`
+- `SetSnapshotInstallGateForTesting`
+- `HoldConsumerAppliesForTesting`
+- `ResumeConsumerAppliesForTesting`
 
 These are intended for deterministic tests and fault-injection scenarios, not ordinary application traffic or public API endpoints.
+
+`HoldCommittedProposalRepliesForTesting(partitionId, onHeld)` intercepts only the caller reply for a successful committed proposal. The entry is already durable on a quorum, the leader has advanced its commit frontier, commit-marker fan-out can continue, and followers can still apply it. The `HeldProposalReply` gives the partition id, ticket id, commit index, term, log ids, and the success site. A test can call `Release()` to complete the waiter or `Drop()` to make the caller observe the same indeterminate timeout shape as a leader that died after quorum durability but before answering.
+
+`SetSnapshotInstallGateForTesting(partitionId, phase, gate)` suspends a follower-side snapshot install at a named phase: `BeforeImport`, `AfterImport`, or `AfterBoundary`. The gate receives a read-only `SnapshotInstallSignal` with the snapshot index, boundary term, snapshot kind, phase, local max log id, and last applied index. The gate runs inline on the partition executor and is bounded by `LeadershipBarrierTimeout`; expiry fails the install and normal retry can continue.
+
+`HoldConsumerAppliesForTesting(partitionId)` pauses delivery of committed entries to the local consumer while replication, acknowledgements, elections, and the commit frontier continue. It holds the applied cursor honestly, so read-index confirmation, compaction fences, and backfill progress do not claim consumer progress that did not happen. `ResumeConsumerAppliesForTesting(partitionId)` drains the pending committed entries in log order. These hooks are useful for deterministic replay and crash-window tests.
 
 ## System Partition State
 
@@ -316,6 +390,9 @@ See [System Partition State Snapshots](../guides/system-partition-state-snapshot
 | `MemberNotFound` | A membership operation named an endpoint not present in the committed roster. |
 | `DrainInProgress` | A second decommission drain was refused because another member is already `Leaving`. |
 | `ProposalOutcomeUnknown` | The node accepted the proposal, but leadership moved or the completion arrived after step-down before this node could determine the final outcome. Treat it like `ProposalTimeout`: the write may still commit, so retry only with application-level idempotency or after reading the replicated state. |
+| `TargetNotCaughtUp` | A leadership-transfer target did not catch up to the leader's last index within the bounded wait. The leader resumed serving. The caller may retry later. |
+| `TermMismatch` | A proposal carried an `expectedTerm` fence that does not match this node's current term. The proposal was refused before append. Re-read the term and re-decide. |
+| `LeadershipNotConfirmed` | A replica-set change could not confirm leadership of the affected partition. Retry after that partition has a reachable, confirmed leader. |
 
 ## Elastic Partition APIs
 
@@ -335,13 +412,16 @@ long generation = raft.GetPartitionGeneration(2);
 IReadOnlyList<RaftPartitionRange> map = raft.GetPartitionMap();
 IReadOnlyList<RaftReplica> replicas = raft.GetPartitionReplicas(2);
 int effectiveRf = raft.GetEffectiveReplicationFactor(2);
+IReadOnlyList<int> awaitingPlacement = raft.GetPartitionsAwaitingPlacement();
 int nextId = raft.GetNextAvailablePartitionId();
 raft.RegisterStateMachineTransfer(new MyTransfer());
 ```
 
 `GetPartitionReplicas` returns the committed replica set for consumer-side routing. An empty list means legacy full replication, where every committed roster voter hosts the partition.
 
-`GetNextAvailablePartitionId` returns one past the highest partition id ever present in the committed map, including removed tombstones. It is advisory, not a reservation. Concurrent callers can receive the same id, and `CreatePartitionAsync` remains the operation that actually wins or loses allocation.
+`GetPartitionsAwaitingPlacement` returns active user partitions that still have an empty replica set while a replication factor applies. These ranges remain fully replicated until `EnablePlacementRebalancer` converts them to explicit placement. An empty result means the cluster is fully placed, or that full replication is intentional because no replication factor applies.
+
+`GetNextAvailablePartitionId` returns one past the highest partition id ever allocated. The committed high-water floor prevents reuse even when an old tombstone is no longer present in the routing map. It is advisory, not a reservation. Concurrent callers can receive the same id, and `CreatePartitionAsync` remains the operation that actually wins or loses allocation.
 
 Set a per-partition replication-factor override with:
 

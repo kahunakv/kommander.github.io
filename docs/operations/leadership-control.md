@@ -1,6 +1,13 @@
 # Leadership Control
 
-Kommander includes leadership-control support in the runtime and tests.
+Use the APIs on this page when your code must know which node leads a partition, or when a test must move leadership at a known moment.
+
+The APIs fall into two groups:
+
+- **Leader waiting.** `WaitForLeader` and `WaitForLeaderStableAsync` wait until a partition has a leader. Call them at startup or after a failover, before you route requests to the leader. They stop your service from acting on a leader that is still changing.
+- **Leadership movement.** `StepDownAsync`, `TransferLeadershipAsync`, and the heartbeat hooks are test hooks. Use them in deterministic tests and controlled experiments to cause a failover on purpose. They are not normal application APIs.
+
+To spread leaders across the nodes of a production cluster, do not call `TransferLeadershipAsync` from your own code. Enable the [leader balancer](leader-balancing.md) instead. It moves leadership in small steps.
 
 ## Stable Leader Waiting
 
@@ -49,7 +56,7 @@ The runtime can notify other nodes with a step-down notice so a new election can
 
 ## Leadership Transfer
 
-`TransferLeadershipAsync` asks the local leader to hand leadership to a specific up-to-date follower:
+`TransferLeadershipAsync` asks the local leader to hand leadership to a specific follower:
 
 ```csharp
 RaftOperationStatus status = await raft.TransferLeadershipAsync(
@@ -59,7 +66,16 @@ RaftOperationStatus status = await raft.TransferLeadershipAsync(
 );
 ```
 
-If the target is stale or unknown, the transfer can fail with a non-success `RaftOperationStatus`.
+The target no longer has to be perfectly caught up when the call starts. If it is behind, the leader pauses new proposal admission for that partition, keeps replicating to the target, and hands over as soon as the target reaches the leader's last log index. That catch-up wait is bounded by one election timeout.
+
+Important outcomes:
+
+- `Success` means the target was observed as the new leader
+- `Pending` means the handoff was sent, but the successor was not confirmed within the settle window
+- `TargetNotCaughtUp` means the target did not reach the leader's last index before the bounded wait expired, so the original leader resumed serving
+- `NodeIsNotLeader` means the local node was not the partition leader before it could accept the transfer request.
+
+While the handoff is pending, proposals are answered `NodeIsNotLeader` only after the leader change is published. If the target fails to catch up, the parked proposals are re-admitted in order.
 
 ## Heartbeat Suspension
 
@@ -72,4 +88,4 @@ These let tests pause and resume periodic outbound heartbeats for a partition wi
 
 ## Scope
 
-These APIs are exposed on `IRaft`, but they are marked as advanced test hooks in the codebase. Treat them as deterministic-test and controlled-experiment tools, not normal application write APIs.
+`StepDownAsync`, `TransferLeadershipAsync`, `SuspendHeartbeatsAsync`, and `ResumeHeartbeatsAsync` are exposed on `IRaft`, but they are marked as advanced test hooks in the codebase. Treat them as deterministic-test and controlled-experiment tools, not normal application write APIs.

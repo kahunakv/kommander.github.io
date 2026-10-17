@@ -8928,10 +8928,36 @@ leader validates the suggestion and executes it through Raft’s
              ▼
   Raft leadership transfer:
     - node-a stops accepting new proposals
+    - node-a records a pending transfer with a bounded wait
     - node-a sends remaining log entries to node-b
-    - node-a sends a TimeoutNow to node-b
+    - On each ack from node-b, node-a checks the target&#39;s progress
+    - When node-b reaches the goal index, node-a sends TimeoutNow
     - node-b starts an election and wins
     - node-b is now the leader of partition 5</code></pre>
+<h3 data-number="16.7.1" id="catch-up-before-handover"><span class="header-section-number">16.7.1</span> Catch-Up Before
+Handover</h3>
+<p>Under sustained write load, the target is almost always behind by the
+entries that are in flight. A naive check (“is the target caught up
+right now?”) would fail most transfers.</p>
+<p>Kommander follows Raft Section 3.10. When a transfer starts and the
+target is behind, the leader records a <strong>pending transfer</strong>
+with these fields:</p>
+<ul>
+<li>The target endpoint.</li>
+<li>The term the transfer was armed in.</li>
+<li>A bounded-wait timeout drawn from the election timeout range.</li>
+<li>The leader’s last log index at arm time (the goal index).</li>
+</ul>
+<p>The leader wakes from quiescence if needed and sends a heartbeat
+immediately. On every leader tick and on every ack from the target, the
+leader checks whether the target’s progress reached the goal index. When
+it does, the leader hands over leadership.</p>
+<p>During the wait, proposals are <strong>parked</strong> (not refused).
+If the target catches up, the parked proposals are answered with
+<code>NodeIsNotLeader</code> so the client re-routes. If the bounded
+wait expires, the leader resumes serving and answers
+<code>TargetNotCaughtUp</code>. The balancer can try again on the next
+pass.</p>
 <p>Dropping or ignoring a <code>LeaderMove</code> never violates Raft
 safety. The worst outcome is a wasted or skipped move. The balancer
 tries again on the next pass.</p>
@@ -12129,15 +12155,37 @@ Simulation</h3>
 partitions:</p>
 <div class="sourceCode" id="cb317"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb317-1"><a href="#cb317-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">PartitionNode</span><span class="op">(</span><span class="dt">string</span> endpoint<span class="op">)</span></span>
 <span id="cb317-2"><a href="#cb317-2" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">HealPartition</span><span class="op">(</span><span class="dt">string</span> endpoint<span class="op">)</span></span></code></pre></div>
-<p><code>PartitionNode</code> adds an endpoint to a
-<code>HashSet&lt;string&gt;</code> of partitioned endpoints. Every RPC
-method checks <code>IsPartitioned(source, target)</code> before routing.
-If either the source or the target is partitioned, the RPC returns an
-empty or failure response without reaching the target node.</p>
+<p><code>PartitionNode</code> adds an endpoint to a set of isolated
+endpoints. Every RPC method checks
+<code>IsPartitioned(source, target)</code> before routing. If either the
+source or the target is isolated, the RPC returns an empty or failure
+response without reaching the target node.</p>
 <p><code>HealPartition</code> removes the endpoint from the set. Traffic
 resumes immediately.</p>
-<p>This mechanism lets tests create asymmetric partitions, split-brain
-scenarios, and rolling failures without real network manipulation.</p>
+<h3 data-number="20.14.2" id="directional-link-blocks"><span class="header-section-number">20.14.2</span> Directional Link
+Blocks</h3>
+<p>Node-level isolation (<code>PartitionNode</code>) cuts all traffic to
+and from a node. Directional link blocks provide finer control. They
+drop messages on a single direction of a single link:</p>
+<div class="sourceCode" id="cb318"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb318-1"><a href="#cb318-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">BlockLink</span><span class="op">(</span><span class="dt">string</span> from<span class="op">,</span> <span class="dt">string</span> to<span class="op">)</span></span>
+<span id="cb318-2"><a href="#cb318-2" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">UnblockLink</span><span class="op">(</span><span class="dt">string</span> from<span class="op">,</span> <span class="dt">string</span> to<span class="op">)</span></span>
+<span id="cb318-3"><a href="#cb318-3" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">BlockLinkBothWays</span><span class="op">(</span><span class="dt">string</span> a<span class="op">,</span> <span class="dt">string</span> b<span class="op">)</span></span>
+<span id="cb318-4"><a href="#cb318-4" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">UnblockLinkBothWays</span><span class="op">(</span><span class="dt">string</span> a<span class="op">,</span> <span class="dt">string</span> b<span class="op">)</span></span>
+<span id="cb318-5"><a href="#cb318-5" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">HealAll</span><span class="op">()</span></span>
+<span id="cb318-6"><a href="#cb318-6" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">bool</span> <span class="fu">IsDeliveryBlocked</span><span class="op">(</span><span class="dt">string</span> from<span class="op">,</span> <span class="dt">string</span> to<span class="op">)</span></span></code></pre></div>
+<p><code>BlockLink(&quot;A&quot;, &quot;B&quot;)</code> drops every message from A to B.
+Messages from B to A still arrive. <code>BlockLinkBothWays</code> cuts
+both directions between exactly two nodes (a two-node partition).</p>
+<p><code>HealAll</code> removes all node isolations and all link blocks
+at once.</p>
+<p>The implementation stores filters in an immutable
+<code>DeliveryFilters</code> record. Updates use compare-and-swap, so
+concurrent writers do not lose each other’s changes. When no filter is
+set, the hot-path check is one reference comparison against
+<code>DeliveryFilters.None</code>.</p>
+<p>These link blocks let tests create asymmetric partitions, split-brain
+scenarios, one-way network faults, and rolling failures without real
+network manipulation.</p>
 <h2 data-number="20.15" id="inmemorywal"><span class="header-section-number">20.15</span> InMemoryWAL</h2>
 <p><code>InMemoryWAL</code> implements <code>IWAL</code> using a
 <code>SortedList&lt;long, RaftLog&gt;</code> per partition. The
@@ -12168,20 +12216,20 @@ Timeouts</h2>
 <p>In production, <code>ElectionCoordinator</code> draws election
 timeouts from <code>Random.Shared</code>. This is nondeterministic. For
 simulation and testing, <code>RaftConfiguration</code> provides:</p>
-<div class="sourceCode" id="cb318"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb318-1"><a href="#cb318-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">int</span><span class="op">?</span> ElectionTimeoutSeed <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb319"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb319-1"><a href="#cb319-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">int</span><span class="op">?</span> ElectionTimeoutSeed <span class="op">{</span> <span class="kw">get</span><span class="op">;</span> <span class="kw">set</span><span class="op">;</span> <span class="op">}</span></span></code></pre></div>
 <p>When this property is set, the election coordinator derives a
 per-node seed:</p>
-<div class="sourceCode" id="cb319"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb319-1"><a href="#cb319-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="kw">static</span> <span class="dt">int</span> <span class="fu">DeriveElectionSeed</span><span class="op">(</span></span>
-<span id="cb319-2"><a href="#cb319-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> configuredSeed<span class="op">,</span> <span class="dt">int</span> partitionId<span class="op">,</span> <span class="dt">int</span> localNodeId<span class="op">)</span></span>
-<span id="cb319-3"><a href="#cb319-3" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
-<span id="cb319-4"><a href="#cb319-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">unchecked</span></span>
-<span id="cb319-5"><a href="#cb319-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
-<span id="cb319-6"><a href="#cb319-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">int</span> mixed <span class="op">=</span> configuredSeed<span class="op">;</span></span>
-<span id="cb319-7"><a href="#cb319-7" aria-hidden="true" tabindex="-1"></a>        mixed <span class="op">=</span> mixed <span class="op">*</span> <span class="dv">397</span> <span class="op">^</span> partitionId<span class="op">;</span></span>
-<span id="cb319-8"><a href="#cb319-8" aria-hidden="true" tabindex="-1"></a>        mixed <span class="op">=</span> mixed <span class="op">*</span> <span class="dv">397</span> <span class="op">^</span> localNodeId<span class="op">;</span></span>
-<span id="cb319-9"><a href="#cb319-9" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> mixed<span class="op">;</span></span>
-<span id="cb319-10"><a href="#cb319-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
-<span id="cb319-11"><a href="#cb319-11" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb320"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb320-1"><a href="#cb320-1" aria-hidden="true" tabindex="-1"></a><span class="kw">private</span> <span class="kw">static</span> <span class="dt">int</span> <span class="fu">DeriveElectionSeed</span><span class="op">(</span></span>
+<span id="cb320-2"><a href="#cb320-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> configuredSeed<span class="op">,</span> <span class="dt">int</span> partitionId<span class="op">,</span> <span class="dt">int</span> localNodeId<span class="op">)</span></span>
+<span id="cb320-3"><a href="#cb320-3" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb320-4"><a href="#cb320-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">unchecked</span></span>
+<span id="cb320-5"><a href="#cb320-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb320-6"><a href="#cb320-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">int</span> mixed <span class="op">=</span> configuredSeed<span class="op">;</span></span>
+<span id="cb320-7"><a href="#cb320-7" aria-hidden="true" tabindex="-1"></a>        mixed <span class="op">=</span> mixed <span class="op">*</span> <span class="dv">397</span> <span class="op">^</span> partitionId<span class="op">;</span></span>
+<span id="cb320-8"><a href="#cb320-8" aria-hidden="true" tabindex="-1"></a>        mixed <span class="op">=</span> mixed <span class="op">*</span> <span class="dv">397</span> <span class="op">^</span> localNodeId<span class="op">;</span></span>
+<span id="cb320-9"><a href="#cb320-9" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> mixed<span class="op">;</span></span>
+<span id="cb320-10"><a href="#cb320-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb320-11"><a href="#cb320-11" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
 <p>The multiplication by 397 and XOR with the partition and node IDs
 produces a distinct seed per node. Without this mixing, all nodes in a
 partition would receive identical timeout sequences. Identical timeouts
@@ -12198,98 +12246,98 @@ Scenario</h2>
 cluster. The scenario starts all three nodes, schedules their standard
 timers, and registers an invariant that verifies no two nodes claim to
 be leader of the same partition in the same term.</p>
-<div class="sourceCode" id="cb320"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb320-1"><a href="#cb320-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> ThreeNodeElectionScenario <span class="op">:</span> SimulationScenario</span>
-<span id="cb320-2"><a href="#cb320-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
-<span id="cb320-3"><a href="#cb320-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> <span class="dt">string</span> Name <span class="op">=&gt;</span> <span class="st">&quot;three-node-election&quot;</span><span class="op">;</span></span>
-<span id="cb320-4"><a href="#cb320-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb320-5"><a href="#cb320-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="fu">ThreeNodeElectionScenario</span><span class="op">()</span></span>
-<span id="cb320-6"><a href="#cb320-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
-<span id="cb320-7"><a href="#cb320-7" aria-hidden="true" tabindex="-1"></a>        Seed <span class="op">=</span> <span class="dv">42</span><span class="op">;</span></span>
-<span id="cb320-8"><a href="#cb320-8" aria-hidden="true" tabindex="-1"></a>        NodeCount <span class="op">=</span> <span class="dv">3</span><span class="op">;</span></span>
-<span id="cb320-9"><a href="#cb320-9" aria-hidden="true" tabindex="-1"></a>        PartitionCount <span class="op">=</span> <span class="dv">1</span><span class="op">;</span></span>
-<span id="cb320-10"><a href="#cb320-10" aria-hidden="true" tabindex="-1"></a>        MaxSteps <span class="op">=</span> <span class="dv">200</span><span class="op">;</span></span>
-<span id="cb320-11"><a href="#cb320-11" aria-hidden="true" tabindex="-1"></a>        MaxLogicalTime <span class="op">=</span> <span class="dv">30</span>_000<span class="op">;</span></span>
-<span id="cb320-12"><a href="#cb320-12" aria-hidden="true" tabindex="-1"></a>        SchedulingMode <span class="op">=</span> SimulationSchedulingMode<span class="op">.</span><span class="fu">Random</span><span class="op">;</span></span>
-<span id="cb320-13"><a href="#cb320-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
-<span id="cb320-14"><a href="#cb320-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb320-15"><a href="#cb320-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> <span class="dt">void</span> <span class="fu">Configure</span><span class="op">(</span>SimulationRuntime runtime<span class="op">)</span></span>
-<span id="cb320-16"><a href="#cb320-16" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
-<span id="cb320-17"><a href="#cb320-17" aria-hidden="true" tabindex="-1"></a>        <span class="kw">for</span> <span class="op">(</span><span class="dt">int</span> i <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> i <span class="op">&lt;</span> NodeCount<span class="op">;</span> i<span class="op">++)</span></span>
-<span id="cb320-18"><a href="#cb320-18" aria-hidden="true" tabindex="-1"></a>        <span class="op">{</span></span>
-<span id="cb320-19"><a href="#cb320-19" aria-hidden="true" tabindex="-1"></a>            runtime<span class="op">.</span><span class="fu">SetNodeLifecycleStatus</span><span class="op">(</span></span>
-<span id="cb320-20"><a href="#cb320-20" aria-hidden="true" tabindex="-1"></a>                i<span class="op">,</span> SimulationNodeLifecycleStatus<span class="op">.</span><span class="fu">Running</span><span class="op">);</span></span>
-<span id="cb320-21"><a href="#cb320-21" aria-hidden="true" tabindex="-1"></a>            NodeVirtualTimerService<span class="op">.</span><span class="fu">ScheduleStandardTimers</span><span class="op">(</span></span>
-<span id="cb320-22"><a href="#cb320-22" aria-hidden="true" tabindex="-1"></a>                runtime<span class="op">,</span> i<span class="op">);</span></span>
-<span id="cb320-23"><a href="#cb320-23" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
-<span id="cb320-24"><a href="#cb320-24" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb320-25"><a href="#cb320-25" aria-hidden="true" tabindex="-1"></a>        runtime<span class="op">.</span><span class="fu">RegisterInvariant</span><span class="op">(</span></span>
-<span id="cb320-26"><a href="#cb320-26" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;single-leader-per-term&quot;</span><span class="op">,</span></span>
-<span id="cb320-27"><a href="#cb320-27" aria-hidden="true" tabindex="-1"></a>            snapshot <span class="op">=&gt;</span></span>
-<span id="cb320-28"><a href="#cb320-28" aria-hidden="true" tabindex="-1"></a>            <span class="op">{</span></span>
-<span id="cb320-29"><a href="#cb320-29" aria-hidden="true" tabindex="-1"></a>                <span class="co">// Verify at most one leader per partition per term</span></span>
-<span id="cb320-30"><a href="#cb320-30" aria-hidden="true" tabindex="-1"></a>                <span class="dt">var</span> leaders <span class="op">=</span> snapshot<span class="op">.</span><span class="fu">Nodes</span></span>
-<span id="cb320-31"><a href="#cb320-31" aria-hidden="true" tabindex="-1"></a>                    <span class="op">.</span><span class="fu">Where</span><span class="op">(</span>n <span class="op">=&gt;</span> n<span class="op">.</span><span class="fu">KnownLeader</span> <span class="op">!=</span> <span class="kw">null</span><span class="op">)</span></span>
-<span id="cb320-32"><a href="#cb320-32" aria-hidden="true" tabindex="-1"></a>                    <span class="op">.</span><span class="fu">GroupBy</span><span class="op">(</span>n <span class="op">=&gt;</span> <span class="op">(</span>n<span class="op">.</span><span class="fu">CurrentTerm</span><span class="op">,</span> n<span class="op">.</span><span class="fu">KnownLeader</span><span class="op">));</span></span>
-<span id="cb320-33"><a href="#cb320-33" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb320-34"><a href="#cb320-34" aria-hidden="true" tabindex="-1"></a>                <span class="kw">foreach</span> <span class="op">(</span><span class="dt">var</span> group <span class="kw">in</span> leaders<span class="op">)</span></span>
-<span id="cb320-35"><a href="#cb320-35" aria-hidden="true" tabindex="-1"></a>                <span class="op">{</span></span>
-<span id="cb320-36"><a href="#cb320-36" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">if</span> <span class="op">(</span>group<span class="op">.</span><span class="fu">Count</span><span class="op">()</span> <span class="op">&gt;</span> <span class="dv">1</span><span class="op">)</span></span>
-<span id="cb320-37"><a href="#cb320-37" aria-hidden="true" tabindex="-1"></a>                    <span class="op">{</span></span>
-<span id="cb320-38"><a href="#cb320-38" aria-hidden="true" tabindex="-1"></a>                        <span class="dt">var</span> nodeIds <span class="op">=</span> <span class="dt">string</span><span class="op">.</span><span class="fu">Join</span><span class="op">(</span><span class="st">&quot;, &quot;</span><span class="op">,</span></span>
-<span id="cb320-39"><a href="#cb320-39" aria-hidden="true" tabindex="-1"></a>                            group<span class="op">.</span><span class="fu">Select</span><span class="op">(</span>n <span class="op">=&gt;</span> n<span class="op">.</span><span class="fu">NodeId</span><span class="op">));</span></span>
-<span id="cb320-40"><a href="#cb320-40" aria-hidden="true" tabindex="-1"></a>                        <span class="kw">throw</span> <span class="kw">new</span> <span class="fu">InvariantViolationException</span><span class="op">(</span></span>
-<span id="cb320-41"><a href="#cb320-41" aria-hidden="true" tabindex="-1"></a>                            <span class="st">&quot;single-leader-per-term&quot;</span><span class="op">,</span></span>
-<span id="cb320-42"><a href="#cb320-42" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;Multiple leaders in term &quot;</span> <span class="op">+</span></span>
-<span id="cb320-43"><a href="#cb320-43" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;{group.Key.CurrentTerm}: &quot;</span> <span class="op">+</span></span>
-<span id="cb320-44"><a href="#cb320-44" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;nodes {nodeIds}&quot;</span><span class="op">,</span></span>
-<span id="cb320-45"><a href="#cb320-45" aria-hidden="true" tabindex="-1"></a>                            snapshot<span class="op">.</span><span class="fu">StepNumber</span><span class="op">,</span></span>
-<span id="cb320-46"><a href="#cb320-46" aria-hidden="true" tabindex="-1"></a>                            <span class="kw">null</span><span class="op">,</span> <span class="kw">null</span><span class="op">,</span> snapshot<span class="op">);</span></span>
-<span id="cb320-47"><a href="#cb320-47" aria-hidden="true" tabindex="-1"></a>                    <span class="op">}</span></span>
-<span id="cb320-48"><a href="#cb320-48" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
-<span id="cb320-49"><a href="#cb320-49" aria-hidden="true" tabindex="-1"></a>            <span class="op">});</span></span>
-<span id="cb320-50"><a href="#cb320-50" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
-<span id="cb320-51"><a href="#cb320-51" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb320-52"><a href="#cb320-52" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> IReadOnlyList<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;</span></span>
-<span id="cb320-53"><a href="#cb320-53" aria-hidden="true" tabindex="-1"></a>        <span class="fu">GetEnabledEvents</span><span class="op">(</span>SimulationRuntime runtime<span class="op">)</span></span>
-<span id="cb320-54"><a href="#cb320-54" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
-<span id="cb320-55"><a href="#cb320-55" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Return node lifecycle events plus any</span></span>
-<span id="cb320-56"><a href="#cb320-56" aria-hidden="true" tabindex="-1"></a>        <span class="co">// scenario-specific events</span></span>
-<span id="cb320-57"><a href="#cb320-57" aria-hidden="true" tabindex="-1"></a>        <span class="dt">var</span> events <span class="op">=</span> <span class="kw">new</span> List<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;();</span></span>
-<span id="cb320-58"><a href="#cb320-58" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Timer events are added automatically</span></span>
-<span id="cb320-59"><a href="#cb320-59" aria-hidden="true" tabindex="-1"></a>        <span class="co">// by the runtime from VirtualTime</span></span>
-<span id="cb320-60"><a href="#cb320-60" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> events<span class="op">;</span></span>
-<span id="cb320-61"><a href="#cb320-61" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
-<span id="cb320-62"><a href="#cb320-62" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<div class="sourceCode" id="cb321"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb321-1"><a href="#cb321-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> ThreeNodeElectionScenario <span class="op">:</span> SimulationScenario</span>
+<span id="cb321-2"><a href="#cb321-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb321-3"><a href="#cb321-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> <span class="dt">string</span> Name <span class="op">=&gt;</span> <span class="st">&quot;three-node-election&quot;</span><span class="op">;</span></span>
+<span id="cb321-4"><a href="#cb321-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb321-5"><a href="#cb321-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="fu">ThreeNodeElectionScenario</span><span class="op">()</span></span>
+<span id="cb321-6"><a href="#cb321-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb321-7"><a href="#cb321-7" aria-hidden="true" tabindex="-1"></a>        Seed <span class="op">=</span> <span class="dv">42</span><span class="op">;</span></span>
+<span id="cb321-8"><a href="#cb321-8" aria-hidden="true" tabindex="-1"></a>        NodeCount <span class="op">=</span> <span class="dv">3</span><span class="op">;</span></span>
+<span id="cb321-9"><a href="#cb321-9" aria-hidden="true" tabindex="-1"></a>        PartitionCount <span class="op">=</span> <span class="dv">1</span><span class="op">;</span></span>
+<span id="cb321-10"><a href="#cb321-10" aria-hidden="true" tabindex="-1"></a>        MaxSteps <span class="op">=</span> <span class="dv">200</span><span class="op">;</span></span>
+<span id="cb321-11"><a href="#cb321-11" aria-hidden="true" tabindex="-1"></a>        MaxLogicalTime <span class="op">=</span> <span class="dv">30</span>_000<span class="op">;</span></span>
+<span id="cb321-12"><a href="#cb321-12" aria-hidden="true" tabindex="-1"></a>        SchedulingMode <span class="op">=</span> SimulationSchedulingMode<span class="op">.</span><span class="fu">Random</span><span class="op">;</span></span>
+<span id="cb321-13"><a href="#cb321-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb321-14"><a href="#cb321-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb321-15"><a href="#cb321-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> <span class="dt">void</span> <span class="fu">Configure</span><span class="op">(</span>SimulationRuntime runtime<span class="op">)</span></span>
+<span id="cb321-16"><a href="#cb321-16" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb321-17"><a href="#cb321-17" aria-hidden="true" tabindex="-1"></a>        <span class="kw">for</span> <span class="op">(</span><span class="dt">int</span> i <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> i <span class="op">&lt;</span> NodeCount<span class="op">;</span> i<span class="op">++)</span></span>
+<span id="cb321-18"><a href="#cb321-18" aria-hidden="true" tabindex="-1"></a>        <span class="op">{</span></span>
+<span id="cb321-19"><a href="#cb321-19" aria-hidden="true" tabindex="-1"></a>            runtime<span class="op">.</span><span class="fu">SetNodeLifecycleStatus</span><span class="op">(</span></span>
+<span id="cb321-20"><a href="#cb321-20" aria-hidden="true" tabindex="-1"></a>                i<span class="op">,</span> SimulationNodeLifecycleStatus<span class="op">.</span><span class="fu">Running</span><span class="op">);</span></span>
+<span id="cb321-21"><a href="#cb321-21" aria-hidden="true" tabindex="-1"></a>            NodeVirtualTimerService<span class="op">.</span><span class="fu">ScheduleStandardTimers</span><span class="op">(</span></span>
+<span id="cb321-22"><a href="#cb321-22" aria-hidden="true" tabindex="-1"></a>                runtime<span class="op">,</span> i<span class="op">);</span></span>
+<span id="cb321-23"><a href="#cb321-23" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb321-24"><a href="#cb321-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb321-25"><a href="#cb321-25" aria-hidden="true" tabindex="-1"></a>        runtime<span class="op">.</span><span class="fu">RegisterInvariant</span><span class="op">(</span></span>
+<span id="cb321-26"><a href="#cb321-26" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;single-leader-per-term&quot;</span><span class="op">,</span></span>
+<span id="cb321-27"><a href="#cb321-27" aria-hidden="true" tabindex="-1"></a>            snapshot <span class="op">=&gt;</span></span>
+<span id="cb321-28"><a href="#cb321-28" aria-hidden="true" tabindex="-1"></a>            <span class="op">{</span></span>
+<span id="cb321-29"><a href="#cb321-29" aria-hidden="true" tabindex="-1"></a>                <span class="co">// Verify at most one leader per partition per term</span></span>
+<span id="cb321-30"><a href="#cb321-30" aria-hidden="true" tabindex="-1"></a>                <span class="dt">var</span> leaders <span class="op">=</span> snapshot<span class="op">.</span><span class="fu">Nodes</span></span>
+<span id="cb321-31"><a href="#cb321-31" aria-hidden="true" tabindex="-1"></a>                    <span class="op">.</span><span class="fu">Where</span><span class="op">(</span>n <span class="op">=&gt;</span> n<span class="op">.</span><span class="fu">KnownLeader</span> <span class="op">!=</span> <span class="kw">null</span><span class="op">)</span></span>
+<span id="cb321-32"><a href="#cb321-32" aria-hidden="true" tabindex="-1"></a>                    <span class="op">.</span><span class="fu">GroupBy</span><span class="op">(</span>n <span class="op">=&gt;</span> <span class="op">(</span>n<span class="op">.</span><span class="fu">CurrentTerm</span><span class="op">,</span> n<span class="op">.</span><span class="fu">KnownLeader</span><span class="op">));</span></span>
+<span id="cb321-33"><a href="#cb321-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb321-34"><a href="#cb321-34" aria-hidden="true" tabindex="-1"></a>                <span class="kw">foreach</span> <span class="op">(</span><span class="dt">var</span> group <span class="kw">in</span> leaders<span class="op">)</span></span>
+<span id="cb321-35"><a href="#cb321-35" aria-hidden="true" tabindex="-1"></a>                <span class="op">{</span></span>
+<span id="cb321-36"><a href="#cb321-36" aria-hidden="true" tabindex="-1"></a>                    <span class="kw">if</span> <span class="op">(</span>group<span class="op">.</span><span class="fu">Count</span><span class="op">()</span> <span class="op">&gt;</span> <span class="dv">1</span><span class="op">)</span></span>
+<span id="cb321-37"><a href="#cb321-37" aria-hidden="true" tabindex="-1"></a>                    <span class="op">{</span></span>
+<span id="cb321-38"><a href="#cb321-38" aria-hidden="true" tabindex="-1"></a>                        <span class="dt">var</span> nodeIds <span class="op">=</span> <span class="dt">string</span><span class="op">.</span><span class="fu">Join</span><span class="op">(</span><span class="st">&quot;, &quot;</span><span class="op">,</span></span>
+<span id="cb321-39"><a href="#cb321-39" aria-hidden="true" tabindex="-1"></a>                            group<span class="op">.</span><span class="fu">Select</span><span class="op">(</span>n <span class="op">=&gt;</span> n<span class="op">.</span><span class="fu">NodeId</span><span class="op">));</span></span>
+<span id="cb321-40"><a href="#cb321-40" aria-hidden="true" tabindex="-1"></a>                        <span class="kw">throw</span> <span class="kw">new</span> <span class="fu">InvariantViolationException</span><span class="op">(</span></span>
+<span id="cb321-41"><a href="#cb321-41" aria-hidden="true" tabindex="-1"></a>                            <span class="st">&quot;single-leader-per-term&quot;</span><span class="op">,</span></span>
+<span id="cb321-42"><a href="#cb321-42" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;Multiple leaders in term &quot;</span> <span class="op">+</span></span>
+<span id="cb321-43"><a href="#cb321-43" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;{group.Key.CurrentTerm}: &quot;</span> <span class="op">+</span></span>
+<span id="cb321-44"><a href="#cb321-44" aria-hidden="true" tabindex="-1"></a>                            $<span class="st">&quot;nodes {nodeIds}&quot;</span><span class="op">,</span></span>
+<span id="cb321-45"><a href="#cb321-45" aria-hidden="true" tabindex="-1"></a>                            snapshot<span class="op">.</span><span class="fu">StepNumber</span><span class="op">,</span></span>
+<span id="cb321-46"><a href="#cb321-46" aria-hidden="true" tabindex="-1"></a>                            <span class="kw">null</span><span class="op">,</span> <span class="kw">null</span><span class="op">,</span> snapshot<span class="op">);</span></span>
+<span id="cb321-47"><a href="#cb321-47" aria-hidden="true" tabindex="-1"></a>                    <span class="op">}</span></span>
+<span id="cb321-48"><a href="#cb321-48" aria-hidden="true" tabindex="-1"></a>                <span class="op">}</span></span>
+<span id="cb321-49"><a href="#cb321-49" aria-hidden="true" tabindex="-1"></a>            <span class="op">});</span></span>
+<span id="cb321-50"><a href="#cb321-50" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb321-51"><a href="#cb321-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb321-52"><a href="#cb321-52" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="kw">override</span> IReadOnlyList<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;</span></span>
+<span id="cb321-53"><a href="#cb321-53" aria-hidden="true" tabindex="-1"></a>        <span class="fu">GetEnabledEvents</span><span class="op">(</span>SimulationRuntime runtime<span class="op">)</span></span>
+<span id="cb321-54"><a href="#cb321-54" aria-hidden="true" tabindex="-1"></a>    <span class="op">{</span></span>
+<span id="cb321-55"><a href="#cb321-55" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Return node lifecycle events plus any</span></span>
+<span id="cb321-56"><a href="#cb321-56" aria-hidden="true" tabindex="-1"></a>        <span class="co">// scenario-specific events</span></span>
+<span id="cb321-57"><a href="#cb321-57" aria-hidden="true" tabindex="-1"></a>        <span class="dt">var</span> events <span class="op">=</span> <span class="kw">new</span> List<span class="op">&lt;</span>SimulationEvent<span class="op">&gt;();</span></span>
+<span id="cb321-58"><a href="#cb321-58" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Timer events are added automatically</span></span>
+<span id="cb321-59"><a href="#cb321-59" aria-hidden="true" tabindex="-1"></a>        <span class="co">// by the runtime from VirtualTime</span></span>
+<span id="cb321-60"><a href="#cb321-60" aria-hidden="true" tabindex="-1"></a>        <span class="kw">return</span> events<span class="op">;</span></span>
+<span id="cb321-61"><a href="#cb321-61" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb321-62"><a href="#cb321-62" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
 <p>To run the scenario:</p>
-<div class="sourceCode" id="cb321"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb321-1"><a href="#cb321-1" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> scenario <span class="op">=</span> <span class="kw">new</span> <span class="fu">ThreeNodeElectionScenario</span><span class="op">();</span></span>
-<span id="cb321-2"><a href="#cb321-2" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> options <span class="op">=</span> <span class="kw">new</span> SimulationRuntimeOptions</span>
-<span id="cb321-3"><a href="#cb321-3" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
-<span id="cb321-4"><a href="#cb321-4" aria-hidden="true" tabindex="-1"></a>    ReplayLogPath <span class="op">=</span> <span class="st">&quot;election-test.jsonl&quot;</span><span class="op">,</span></span>
-<span id="cb321-5"><a href="#cb321-5" aria-hidden="true" tabindex="-1"></a>    WriteReplayLog <span class="op">=</span> <span class="kw">true</span><span class="op">,</span></span>
-<span id="cb321-6"><a href="#cb321-6" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
-<span id="cb321-7"><a href="#cb321-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb321-8"><a href="#cb321-8" aria-hidden="true" tabindex="-1"></a><span class="kw">using</span> <span class="dt">var</span> runtime <span class="op">=</span> <span class="kw">new</span> <span class="fu">SimulationRuntime</span><span class="op">(</span>scenario<span class="op">,</span> options<span class="op">);</span></span>
-<span id="cb321-9"><a href="#cb321-9" aria-hidden="true" tabindex="-1"></a>SimulationResult result <span class="op">=</span> runtime<span class="op">.</span><span class="fu">Run</span><span class="op">();</span></span>
-<span id="cb321-10"><a href="#cb321-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb321-11"><a href="#cb321-11" aria-hidden="true" tabindex="-1"></a>Assert<span class="op">.</span><span class="fu">True</span><span class="op">(</span>result<span class="op">.</span><span class="fu">Passed</span><span class="op">,</span></span>
-<span id="cb321-12"><a href="#cb321-12" aria-hidden="true" tabindex="-1"></a>    result<span class="op">.</span><span class="fu">Violation</span><span class="op">?.</span><span class="fu">Message</span> <span class="op">??</span> <span class="st">&quot;Unknown failure&quot;</span><span class="op">);</span></span></code></pre></div>
+<div class="sourceCode" id="cb322"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb322-1"><a href="#cb322-1" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> scenario <span class="op">=</span> <span class="kw">new</span> <span class="fu">ThreeNodeElectionScenario</span><span class="op">();</span></span>
+<span id="cb322-2"><a href="#cb322-2" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> options <span class="op">=</span> <span class="kw">new</span> SimulationRuntimeOptions</span>
+<span id="cb322-3"><a href="#cb322-3" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb322-4"><a href="#cb322-4" aria-hidden="true" tabindex="-1"></a>    ReplayLogPath <span class="op">=</span> <span class="st">&quot;election-test.jsonl&quot;</span><span class="op">,</span></span>
+<span id="cb322-5"><a href="#cb322-5" aria-hidden="true" tabindex="-1"></a>    WriteReplayLog <span class="op">=</span> <span class="kw">true</span><span class="op">,</span></span>
+<span id="cb322-6"><a href="#cb322-6" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb322-7"><a href="#cb322-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb322-8"><a href="#cb322-8" aria-hidden="true" tabindex="-1"></a><span class="kw">using</span> <span class="dt">var</span> runtime <span class="op">=</span> <span class="kw">new</span> <span class="fu">SimulationRuntime</span><span class="op">(</span>scenario<span class="op">,</span> options<span class="op">);</span></span>
+<span id="cb322-9"><a href="#cb322-9" aria-hidden="true" tabindex="-1"></a>SimulationResult result <span class="op">=</span> runtime<span class="op">.</span><span class="fu">Run</span><span class="op">();</span></span>
+<span id="cb322-10"><a href="#cb322-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb322-11"><a href="#cb322-11" aria-hidden="true" tabindex="-1"></a>Assert<span class="op">.</span><span class="fu">True</span><span class="op">(</span>result<span class="op">.</span><span class="fu">Passed</span><span class="op">,</span></span>
+<span id="cb322-12"><a href="#cb322-12" aria-hidden="true" tabindex="-1"></a>    result<span class="op">.</span><span class="fu">Violation</span><span class="op">?.</span><span class="fu">Message</span> <span class="op">??</span> <span class="st">&quot;Unknown failure&quot;</span><span class="op">);</span></span></code></pre></div>
 <p>The same seed (42) produces the same election outcome every time. The
 replay log at <code>election-test.jsonl</code> records every random
 choice and event selection.</p>
 <h2 data-number="20.18" id="replaying-a-recorded-run"><span class="header-section-number">20.18</span> Replaying a Recorded Run</h2>
 <p>To replay the run with full validation:</p>
-<div class="sourceCode" id="cb322"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb322-1"><a href="#cb322-1" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> scenario <span class="op">=</span> <span class="kw">new</span> ThreeNodeElectionScenario</span>
-<span id="cb322-2"><a href="#cb322-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
-<span id="cb322-3"><a href="#cb322-3" aria-hidden="true" tabindex="-1"></a>    SchedulingMode <span class="op">=</span> SimulationSchedulingMode<span class="op">.</span><span class="fu">Replay</span><span class="op">,</span></span>
-<span id="cb322-4"><a href="#cb322-4" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
-<span id="cb322-5"><a href="#cb322-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb322-6"><a href="#cb322-6" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> options <span class="op">=</span> <span class="kw">new</span> SimulationRuntimeOptions</span>
-<span id="cb322-7"><a href="#cb322-7" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
-<span id="cb322-8"><a href="#cb322-8" aria-hidden="true" tabindex="-1"></a>    ReplayLogPath <span class="op">=</span> <span class="st">&quot;election-test.jsonl&quot;</span><span class="op">,</span></span>
-<span id="cb322-9"><a href="#cb322-9" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
-<span id="cb322-10"><a href="#cb322-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb322-11"><a href="#cb322-11" aria-hidden="true" tabindex="-1"></a><span class="kw">using</span> <span class="dt">var</span> runtime <span class="op">=</span> <span class="kw">new</span> <span class="fu">SimulationRuntime</span><span class="op">(</span>scenario<span class="op">,</span> options<span class="op">);</span></span>
-<span id="cb322-12"><a href="#cb322-12" aria-hidden="true" tabindex="-1"></a>SimulationResult result <span class="op">=</span> runtime<span class="op">.</span><span class="fu">Run</span><span class="op">();</span></span></code></pre></div>
+<div class="sourceCode" id="cb323"><pre class="sourceCode csharp"><code class="sourceCode cs"><span id="cb323-1"><a href="#cb323-1" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> scenario <span class="op">=</span> <span class="kw">new</span> ThreeNodeElectionScenario</span>
+<span id="cb323-2"><a href="#cb323-2" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb323-3"><a href="#cb323-3" aria-hidden="true" tabindex="-1"></a>    SchedulingMode <span class="op">=</span> SimulationSchedulingMode<span class="op">.</span><span class="fu">Replay</span><span class="op">,</span></span>
+<span id="cb323-4"><a href="#cb323-4" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb323-5"><a href="#cb323-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb323-6"><a href="#cb323-6" aria-hidden="true" tabindex="-1"></a><span class="dt">var</span> options <span class="op">=</span> <span class="kw">new</span> SimulationRuntimeOptions</span>
+<span id="cb323-7"><a href="#cb323-7" aria-hidden="true" tabindex="-1"></a><span class="op">{</span></span>
+<span id="cb323-8"><a href="#cb323-8" aria-hidden="true" tabindex="-1"></a>    ReplayLogPath <span class="op">=</span> <span class="st">&quot;election-test.jsonl&quot;</span><span class="op">,</span></span>
+<span id="cb323-9"><a href="#cb323-9" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb323-10"><a href="#cb323-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb323-11"><a href="#cb323-11" aria-hidden="true" tabindex="-1"></a><span class="kw">using</span> <span class="dt">var</span> runtime <span class="op">=</span> <span class="kw">new</span> <span class="fu">SimulationRuntime</span><span class="op">(</span>scenario<span class="op">,</span> options<span class="op">);</span></span>
+<span id="cb323-12"><a href="#cb323-12" aria-hidden="true" tabindex="-1"></a>SimulationResult result <span class="op">=</span> runtime<span class="op">.</span><span class="fu">Run</span><span class="op">();</span></span></code></pre></div>
 <p>The runtime reads the replay log, validates the seed and scenario
 name, and then replays every step. At each step, it verifies:</p>
 <ol type="1">

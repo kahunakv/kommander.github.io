@@ -1,15 +1,17 @@
 # ASP.NET Core Sample Server
 
-`Kommander.Server` is an ASP.NET Core host in the Kommander repository. You can run it directly. The WAL is the write-ahead log.
+`Kommander.Server` is a ready-made ASP.NET Core host in the Kommander repository. Use it to run a Kommander cluster before you write any host code of your own. Start several instances on your machine, and you can watch leader election, replication, and failover.
+
+The server is also a reference. When you build your own host, compare your wiring with `Kommander.Server/Program.cs`. It is a sample, not a product: it has no application API, and it writes only demo entries.
 
 The host does these steps:
 
 1. It creates a `RaftManager`.
 2. It uses static discovery.
-3. It creates the selected durable WAL adapter.
+3. It creates the selected durable WAL (write-ahead log) adapter.
 4. It uses `GrpcCommunication`.
 5. It maps the REST and gRPC Raft routes.
-6. It starts a background replication service.
+6. It starts a background replication service. Every 20 seconds, this service writes demo `Greeting` entries to the partitions that the node leads. It then writes a checkpoint.
 
 Important command-line options:
 

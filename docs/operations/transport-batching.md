@@ -1,6 +1,12 @@
 # Transport Batching
 
-Kommander transport code uses `BatchRequests` for grouped transport work.
+Transport batching reduces the network cost of Raft traffic. Kommander puts many small Raft messages for one peer into a single transport request. The nodes then send fewer requests and spend less time on the overhead of each message. The gain is largest under a heavy write load.
+
+Batching is automatic. Application code does not call `BatchRequests`, and you do not need to configure it. Read this page for one of these reasons:
+
+- You write a custom transport adapter, and it must implement `BatchRequests`.
+- You must limit the memory that a leader uses for a slow peer. See [Per-Peer Outbound Budget](#per-peer-outbound-budget).
+- You run a write-heavy cluster on gRPC and want fewer stream writes. See [gRPC Append-Log Coalescing](#grpc-append-log-coalescing). This option is off by default.
 
 ## What Gets Batched
 

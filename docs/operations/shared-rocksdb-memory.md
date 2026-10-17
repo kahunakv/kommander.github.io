@@ -12,6 +12,7 @@ Without coordination, those two databases use separate RocksDB memory resources.
 | --- | --- | --- |
 | Block cache | Yes | One RocksDB LRU block cache applies to the WAL column families of Kommander and to the host database. |
 | Write-buffer manager | Yes | One native RocksDB write-buffer manager accounts for the memtable memory of the databases that share it. |
+| WAL table-reader index/filter blocks | Yes, for Kommander's WAL | When shared resources are passed to `RocksDbWAL`, Kommander charges shard index/filter blocks to the shared block cache instead of leaving them as unbounded table-reader memory. |
 | RocksDB background environment | Already shared | The default process environment of RocksDB is already common in the process. |
 | On-disk data | No | The Kommander WAL files and the host database files stay separate. |
 | Raft behavior | No | The replication, the recovery, the snapshots, and the wire behavior do not change. |
@@ -102,6 +103,17 @@ An early disposal of the bundle must not cause a crash, because RocksDB keeps na
 | `BlockCache.GetUsage()` | The current occupancy of the block cache. This value is most useful after read traffic fills the cache. |
 
 To verify the sharing, watch `MemtableMemoryUsage` during a write through Kommander and a write through the host database. Both databases draw from the same budget if both writes move that shared counter.
+
+Kommander also exports RocksDB WAL memory gauges through the `Kommander` meter:
+
+| Gauge | Meaning |
+| --- | --- |
+| `raft.wal.memtable_memory` | Native memtable memory used by the Kommander WAL engine. |
+| `raft.wal.block_cache_usage` | Current block-cache occupancy. With shared resources this is the whole shared cache, not only Kommander's share. |
+| `raft.wal.block_cache_pinned_usage` | Cache bytes that cannot be evicted right now. |
+| `raft.wal.table_readers_memory` | Table-reader memory still outside the block cache. This should stay much smaller when shared resources are configured. |
+
+Read these with process RSS and the host database's own metrics. The shared cache gauge can look large because it includes blocks used by every database that borrowed the cache; that is expected. The value that should shrink for Kommander's WAL after enabling shared resources is `raft.wal.table_readers_memory`, because index/filter blocks move under the shared cache budget.
 
 ## What Does Not Change
 

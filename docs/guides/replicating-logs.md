@@ -1,5 +1,9 @@
 # Replicating Logs
 
+Replication is how your service makes a decision durable on more than one node. Your code proposes a command on the partition leader. Kommander stores the command on a quorum of replicas and only then reports success. Every replica of the partition then receives the committed commands in the same order. If the leader fails after the commit, the command is not lost.
+
+This page covers `ReplicateLogs`, the main write API of Kommander, and the result that it returns.
+
 A leader replicates the application payloads as ordered log entries. The `type` field is a string that the application defines. Your state machine uses it to interpret `LogData`.
 
 Partition `0` is reserved for the system partition of Kommander. Use partition `1` or a higher number for application replication.
@@ -46,6 +50,8 @@ Use [`ReplicateEntries`](./heterogeneous-write-coalescing.md) if one burst conta
 Examine `Success` and `Status` in your first integration. Use `TicketId` when you disable the auto-commit and must commit or roll back manually. Use `LogIndex` when your application tracks the committed order position.
 
 Treat `ProposalOutcomeUnknown` and `ProposalTimeout` as indeterminate outcomes. The proposal may already exist in the log and may still commit under a later leader. Do not assume the write failed. Use an idempotency key in your application command, or read the replicated state before retrying a non-idempotent operation.
+
+`ProposalTimeout` is controlled by `RaftConfiguration.ProposalTimeout`, which defaults to `10 s`. It bounds how long the caller waits; it does not cancel the proposal inside Raft. A write can time out for the caller after it became durable on a quorum but before the original leader delivered the reply.
 
 ## Manual Commit And Rollback
 

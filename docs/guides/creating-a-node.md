@@ -1,5 +1,9 @@
 # Creating A Node
 
+A node is one member of a Kommander cluster. In code, a node is one `RaftManager` instance, and each process in a real cluster usually runs one node. This page shows how to build a node, start it, and stop it. At the end, your process can join a cluster and receive committed entries.
+
+You choose each part of the node yourself: where it stores the log, how it sends messages, and how it finds its peers. You can therefore embed Kommander in the host and the infrastructure that your service already uses.
+
 `RaftManager` is the primary implementation of `IRaft`. A node combines these parts: the configuration, the discovery, the storage, the communication, a hybrid logical clock, the partition executors, and the fair WAL schedulers. The WAL is the write-ahead log.
 
 ```csharp

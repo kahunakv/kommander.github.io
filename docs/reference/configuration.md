@@ -1,6 +1,10 @@
 # Configuration
 
-`RaftConfiguration` controls node identity, network behavior, election timing, and fair WAL scheduler workers.
+Use this page to look up a setting of `RaftConfiguration`. You do not need to read it from top to bottom. A new node needs only a few settings. The [Getting Started](../getting-started.md) example sets only `NodeName`, `NodeId`, `Host`, `Port`, and `InitialPartitions`, and keeps the defaults for everything else.
+
+Change another setting when a guide or a metric tells you to. The guide for each feature explains when its settings matter.
+
+`RaftConfiguration` controls node identity, network behavior, election timing, and fair WAL scheduler workers. The first table lists the general settings. The sections after it group the settings by feature, for example Transport Security, Replica Placement, and Partition Quiescence.
 
 | Property | Default | Description |
 | --- | ---: | --- |
@@ -16,7 +20,7 @@
 | `HttpTimeout` | `5` | REST request timeout in seconds. |
 | `HttpVersion` | `2.0` | REST HTTP version. |
 | `HeartbeatInterval` | `500 ms` | Leader heartbeat interval. |
-| `RecentHeartbeat` | `100 ms` | Per-partition heartbeat throttle window for leader heartbeats sent to a follower. |
+| `RecentHeartbeat` | `100 ms` | Per-partition heartbeat throttle window for leader heartbeats sent to a follower. Must be lower than `HeartbeatInterval`; `TimeSpan.Zero` disables the de-dup window. |
 | `VotingTimeout` | `1500 ms` | Candidate vote wait timeout. |
 | `CheckLeaderInterval` | `250 ms` | Leader election supervision interval. |
 | `TimerInitialDelay` | `2500 ms` | Initial delay before periodic Raft timers start firing. |
@@ -29,6 +33,7 @@
 | `TickSource` | system monotonic clock | Monotonic tick source used by elapsed-time gates. Production should keep the default; deterministic simulations replace it with a virtual clock. |
 | `EnableInternalTimers` | `true` | When `false`, wall-clock timers are not registered and an external driver must trigger timer work. Intended for deterministic simulations only. |
 | `EnableInternalSchedulingThreads` | `true` | When `false`, partition executors, WAL writes, and outbound dispatchers do not create their own scheduling threads. Intended for deterministic simulations only. |
+| `EnableHostPumpedScheduling` | `true` in thread-free builds | Browser/thread-free build option that pumps partition executors, WAL writes, and outbound dispatch from async continuations on the host scheduler instead of OS threads. Exists only in `KOMMANDER_THREAD_FREE` builds. |
 | `InvariantChecks` | build-dependent | Controls built-in consensus invariant checks. Default policy throws in debug builds and logs/counts in release builds. |
 | `SlowRaftStateMachineLog` | `50 ms` | Slow partition state-machine operation warning threshold. |
 | `SlowRaftWALMachineLog` | `25 ms` | Slow WAL warning threshold. |
@@ -42,6 +47,10 @@
 | `MaxWalGroupBatchPartitions` | `64` | Maximum number of ready partitions coalesced into one cross-partition WAL write call. For RocksDB this can reduce many partition writes to one `db.Write` / fsync. For SQLite this allows the adapter to group writes by shard. |
 | `WalGroupCommitLingerMs` | `0` | Adaptive WAL group-commit linger window in milliseconds. Values above `0` let a write worker briefly gather more ready partitions before issuing one storage sync. |
 | `WalSingleFsyncCommit` | `true` | Enables the auto-commit single-fsync fast path. Acknowledges when the proposed entry is quorum-durable and writes the committed marker lazily. |
+| `FanOutBeforeLocalWrite` | `true` | Lets a leader send a proposal to followers while its own WAL proposed write is queued, instead of waiting for the local proposed write to finish first. The leader still waits for local durability before returning success. |
+| `FollowerApplyInOwnTurn` | `true` | Lets a follower acknowledge an append before delivering newly committed entries to the application in separate maintenance turns. The system partition always applies inline. |
+| `FollowerApplyTurnTime` | `100 us` | Time budget for one follower application-delivery turn before it yields to queued replication work. `TimeSpan.Zero` leaves only the entry budget. |
+| `FollowerApplyTurnBudget` | `1024` | Normal entry budget for one follower application-delivery turn. A large backlog can exceed it to apply backpressure. Values at or below `0` remove the entry limit. |
 | `ApplicationDurabilityProvider` | `null` | Optional application-owned durability floor. When set, restart replay widens below checkpoints as needed and compaction is fenced so committed entries are not removed before the application has durably applied them. |
 | `MaxDrainQuantumControl` | `8` | Maximum control-plane operations drained per partition-executor wake cycle. |
 | `MaxDrainQuantumReplication` | `4` | Maximum replication operations drained per partition-executor wake cycle. |
@@ -50,14 +59,19 @@
 | `GrpcChannelsPerNode` | `4` | Pooled gRPC channels and streaming calls created per peer. Values are clamped to the range `1` through `64`. |
 | `GrpcEnableMultipleHttp2Connections` | `false` | Allows each pooled gRPC channel to open additional HTTP/2 connections when stream capacity is saturated. |
 | `GrpcEnableSnapshotCompression` | `false` | Enables gzip for gRPC snapshot installation. Hot replication streams remain uncompressed. |
+| `GrpcMaxMessageBytes` | `16 MiB` | Maximum gRPC message this node sends and accepts. Keep `MaxOutboundBatchBytes` and `MaxBackfillBytesPerRound` below this value on every peer. |
 | `GrpcEnableAppendLogsCoalescing` | `false` | Enables backpressure-driven coalescing of queued append-log stream writes into bounded gRPC batch frames. |
 | `GrpcAppendLogsMaxCoalesceBatch` | `256` | Maximum append-log items sent in one coalesced gRPC batch frame. Only applies when `GrpcEnableAppendLogsCoalescing` is enabled. |
 | `MaxOutboundQueueBytesPerPeer` | `64 MiB` | Maximum entry-payload bytes queued for one outbound peer. When exceeded, entry-carrying `AppendLogs` messages are dropped and later retried; control messages and empty heartbeats still pass. |
+| `MaxOutboundBatchBytes` | `4 MiB` | Maximum log-payload bytes packed into one outbound `BatchRequests` frame. Values at or below `0` disable the byte cap. |
 | `EnableSharedExecutorPool` | `true` | Lets user partitions share a bounded executor pool instead of each partition owning a dedicated OS thread. Also enables hot-set `CheckLeader` ticks. |
 | `PartitionExecutorPoolSize` | `0` | Worker count for the shared partition executor pool. `0` resolves to `Environment.ProcessorCount`; values below `0` are clamped to `1`. |
 | `EnableQuiescence` | `true` | Allows idle partitions to suppress per-partition heartbeats and rely on SWIM node liveness until new work arrives. |
 | `QuiesceAfter` | `1500 ms` | Idle duration before a leader quiesces a partition. Requires no active proposals. |
 | `LeadershipBarrierTimeout` | `10 s` | Maximum time a newly elected leader waits for its internal promotion barrier to commit before reverting to follower. Must be positive. |
+| `ProposalTimeout` | `10 s` | Maximum time a caller waits for `ReplicateLogs` or `ReplicateCheckpoint` to reach a terminal status. The proposal is not cancelled when this fires; the result is indeterminate and is reported as `ProposalTimeout`. Must be positive. |
+| `WalStallStepDownTimeout` | `3 s` | How long a leader's local WAL write may remain unanswered before it steps down and refuses to campaign again until the write completes. `TimeSpan.Zero` disables the watchdog and candidacy gate. |
+| `WalStallWarnThreshold` | `500 ms` | Age at which pending WAL writes are reported as stalls and peer WAL-stall protection activates. `TimeSpan.Zero` disables only the log lines; peer rules use `500 ms`. |
 | `SelfRepairPeerDownGrace` | `30 s` | Grace window before promotion-gate self-repair can perform destructive repair while a voter peer is not alive. Set above expected voter restart time; `TimeSpan.Zero` disables the grace. |
 | `LeadershipConfirmationTimeout` | `2 s` | Maximum time `ConfirmLeadershipAsync` waits for quorum confirmation and local apply catch-up before returning `false`. |
 | `EnableCheckQuorum` | `false` | When enabled, a leader steps down if it has not heard same-term acknowledgements from a majority for the configured check-quorum window. |
@@ -69,17 +83,25 @@
 | `MaxBackfillBytesPerRound` | `4 MiB` | Maximum payload bytes materialized for one backfill batch. The batch still contains one entry when a single entry exceeds the limit. |
 | `BackfillNoProgressPauseCap` | `30 s` | Maximum exponential pause between backfill batches when a follower acknowledges batches without advancing its commit frontier. |
 | `BackfillNoProgressAnchorFallbackShips` | `2` | Fruitless backfill ships before the leader anchors the next batch at the follower's reported commit frontier instead of `nextIndex`. Values at or below `0` disable this fallback. |
+| `BackfillSeededCatchUpGraceCap` | `3 min` | Maximum extra grace after a successful snapshot install before the no-progress probe can escalate to another snapshot. `TimeSpan.Zero` disables the grace. |
 | `SnapshotReceiveSessionTtl` | `30 s` | Idle timeout for an incomplete snapshot receive session. Expiry runs lazily on later snapshot receives. |
 | `SnapshotMaxPendingSessions` | `8` | Maximum concurrent snapshot receive sessions buffered by one node. |
 | `SnapshotMaxPendingBytes` | `512 MiB` | Maximum total bytes buffered by active and installing snapshot receive sessions. |
+| `SnapshotStagingDirectory` | `null` | Node-private directory used to spill snapshot receive sessions to disk. `null` keeps all staged snapshot bytes in memory. |
+| `SnapshotStagingMemoryBytes` | `64 MiB` | Resident snapshot-staging budget when `SnapshotStagingDirectory` is set. `0` stages every session on disk. |
 | `AllowLegacySnapshotSenders` | `false` | Compatibility switch for peers that do not send snapshot leader and boundary metadata. Keep disabled for normal clusters. |
 | `SnapshotTransferStepTimeout` | `2 min` | Maximum time one outbound snapshot-transfer step may spend without progress. A hung export, stream read, or chunk send fails the attempt so normal retry/backoff can continue. |
+| `SnapshotChunkAckTimeout` | `15 s` | Maximum time to wait for one snapshot chunk acknowledgement. The effective per-chunk bound is the smaller of this value and `SnapshotTransferStepTimeout`. |
+| `ReseedRequestTimeout` | `3 min` | Maximum time a follower-requested reseed may keep committed applies held while the leader produces and ships the forced snapshot. Expiry resumes local delivery and the follower may request reseed again. |
 | `SnapshotRescueMaxConsecutiveCycles` | `3` | Consecutive below-floor snapshot rescue cycles before the leader trips a convergence breaker for that follower. Values at or below `0` disable the breaker. |
 | `SnapshotRescueProbeInterval` | `5 min` | Probe cadence after the snapshot rescue breaker trips. Values at or below `0` disable probes until the follower converges by another path. |
 | `SnapshotExportRetryCacheMaxBytes` | `64 MiB` | Maximum leader-side snapshot export cached for retries at the same index. Larger exports stream chunk-by-chunk without caching. |
 | `MaxPreAuthRequestBodyBytes` | `32 MiB` | Maximum REST request body read and digested before a shared-secret signature is verified. Larger unauthenticated bodies are refused. |
+| `JoinTimeout` | `60 s` | Liveness deadline for seed admission and initial partition-map assembly. It does not limit a learner that is still making catch-up progress. |
+| `JoinPromotionStallTimeout` | `5 min` | Maximum time a seed-joining learner may show no catch-up progress while waiting for voter promotion. A failed admitted joiner is withdrawn from the roster. |
 | `LearnerPromotionLag` | `10` | Maximum lag a learner may have on any partition and still be considered caught up enough for promotion. |
 | `LearnerPromotionStableWindow` | `3 s` | How long a learner must remain within `LearnerPromotionLag` before promotion to voter. |
+| `LearnerPromotionStallWarningAfter` | `30 s` | Time a placement-added learner may remain not promotable before the placement controller logs a diagnostic warning. It does not change promotion decisions. |
 | `GossipInterval` | `5 s` | Interval between membership gossip rounds. |
 | `GossipFanout` | `2` | Random peers contacted per gossip round. `0` disables gossip. |
 | `PingTimeout` | `500 ms` | SWIM direct/indirect probe timeout. |
@@ -110,7 +132,7 @@
 | `SlowNodeEnterPasses` | `3` | Consecutive balancer passes a node must look slow before it is classified as degraded. |
 | `SlowNodeExitPasses` | `6` | Consecutive clean passes required before a classified node is released. |
 | `ReplicationFactor` | `0` | Target voter replicas per user partition. `0` means legacy full replication across every roster voter. |
-| `EnablePlacementRebalancer` | `false` | Enables ongoing replica placement repair, trim, and balancing. In-flight transitions still complete when disabled. |
+| `EnablePlacementRebalancer` | `false` | Enables ongoing replica placement repair, trim, balancing, and conversion of legacy full-replication ranges to explicit placement. In-flight transitions still complete when disabled. |
 | `PlacementPassInterval` | `5 s` | Cadence for placement-controller passes on the system-partition leader. Independent of the leader-balancer timer. Non-positive disables the timer, but event-driven kicks can still run. |
 | `MaxReplicaMovesPerPass` | `4` | Maximum new replica placement moves started in one controller pass across repair and balance priorities. |
 | `MaxConcurrentReplicaTransfers` | `1` | Maximum balance-class replica transfers allowed in flight at once. Repair work has a separate budget. |
@@ -121,7 +143,11 @@
 | `CompactEveryOperations` | `10000` | Committed operations between automatic WAL compaction triggers per partition. Set to `0` or lower to disable automatic compaction. |
 | `CompactNumberEntries` | `100` | Max entries the WAL adapter is asked to remove per `CompactLogsOlderThan` call. Values below `1` are treated as `1`. |
 | `MaxEntriesPerCompaction` | `5000` | Upper bound on entries removed during one triggered compaction pass before yielding. Values below `CompactNumberEntries` are treated as `CompactNumberEntries`. |
-| `CompactionLiveReplicaLagBudget` | `100000` | Maximum entries retained below the checkpoint for a live, acking follower that has not replicated them yet. Values at or below `0` disable the hold. |
+| `CompactionLiveReplicaLagBudget` | `1000000` | Minimum entry depth retained below the checkpoint for a lagging replica. The time window can raise the effective budget. Values at or below `0` disable the hold on that node. |
+| `CompactionLiveReplicaLagWindow` | `3 min` | Recent committed history used to raise the live-replica retention budget with the write rate. `TimeSpan.Zero` uses the entry count alone. |
+| `CompactionLiveReplicaLagCap` | `10000000` | Maximum entries by which the time window can raise live-replica retention. Values at or below `0` disable the window. |
+| `CompactionSilentPeerRetentionWindow` | `2 min` | How long compaction keeps a bounded log tail for a peer that stopped answering, so a short restart can catch up from the log instead of immediately requiring a snapshot. `TimeSpan.Zero` disables the hold. |
+| `CompactionDurabilityClampReportInterval` | `60 s` | Rate limit and stall threshold for warnings when `ApplicationDurabilityProvider` clamps compaction. Values at or below `0` keep only streak start and end log lines. |
 
 ## Transport Security
 
@@ -169,15 +195,19 @@ Use these startup logs as a deployment audit. A shipped default may be informati
 | `GrpcChannelsPerNode` | `4` | Number of long-lived channels and matching streaming calls per peer URL. Values below `1` become `1`; values above `64` become `64` and produce a warning. |
 | `GrpcEnableMultipleHttp2Connections` | `false` | Lets each channel's handler open more than one HTTP/2 connection to a peer instead of multiplexing every stream over one connection. |
 | `GrpcEnableSnapshotCompression` | `false` | Requests gzip encoding for unary snapshot installation and registers the matching server provider. Normal replication streams explicitly remain uncompressed. |
+| `GrpcMaxMessageBytes` | `16 MiB` | Max receive size for the gRPC server and max send/receive size for pooled client channels. |
 | `GrpcEnableAppendLogsCoalescing` | `false` | Coalesces append-log items that naturally queue behind an in-flight stream write into one `GrpcBatchRequestsRequest`. |
-| `GrpcAppendLogsMaxCoalesceBatch` | `256` | Maximum append-log items drained into one coalesced batch frame. Reduce this if entries are large enough to approach gRPC receive-message limits. |
+| `GrpcAppendLogsMaxCoalesceBatch` | `256` | Maximum append-log items drained into one coalesced batch frame. The byte cap for the frame is `MaxOutboundBatchBytes`. |
 | `MaxOutboundQueueBytesPerPeer` | `64 MiB` | Maximum log-payload bytes queued for one peer in the outbound dispatcher. Over-budget entry-carrying append messages are dropped and retried by heartbeat/backfill; control traffic is not dropped by this budget. |
+| `MaxOutboundBatchBytes` | `4 MiB` | Maximum log-payload bytes packed into one outbound transport batch frame. Must not exceed `GrpcMaxMessageBytes`. |
 
 More channels increase per-peer concurrency, but every channel owns a long-lived `SocketsHttpHandler` and TCP/HTTP/2 connection. Increase `GrpcChannelsPerNode` only when measurements show stream saturation. `GrpcEnableMultipleHttp2Connections` can raise concurrency further, with a corresponding increase in connections.
 
 Snapshot compression trades CPU for lower network use during `SendInstallSnapshot`. It does not compress the hot append-log stream.
 
 Append-log coalescing is backpressure-driven. An idle stream sends immediately as a batch of one; Kommander does not add a delay to wait for more work. Under sustained write load, queued append-log items are grouped after the in-flight stream write completes, reducing semaphore acquisitions and HTTP/2 frame churn.
+
+The byte caps prevent one large `BatchRequests` frame from exceeding a peer's gRPC receive limit. Raise `GrpcMaxMessageBytes` on receivers before raising `MaxOutboundBatchBytes` or `MaxBackfillBytesPerRound` on senders. Startup validation rejects a configuration where `MaxOutboundBatchBytes` or `MaxBackfillBytesPerRound` is greater than `GrpcMaxMessageBytes`.
 
 ## Partition Scaling
 
@@ -210,12 +240,17 @@ If a client proposal limit is hit, the runtime can reject new work with `RaftOpe
 | Property | Default | Description |
 | --- | ---: | --- |
 | `LeadershipBarrierTimeout` | `10 s` | Bounds the promotion barrier for a newly elected leader that inherits prior-term WAL entries. During the barrier, heartbeats can flow, but leadership is not published to applications. |
+| `ProposalTimeout` | `10 s` | Bounds how long a write caller waits for a proposal outcome. A timeout does not roll back or cancel a quorum-durable proposal. |
+| `WalStallStepDownTimeout` | `3 s` | Bounds how long a leader can keep serving while its own WAL write is not completing. A timeout demotes the leader so callers can re-route to a replica with a healthy disk. |
+| `WalStallWarnThreshold` | `500 ms` | Controls local durable-write stall logs and the peer-stall threshold used to pause backfill and snapshot transfer toward a stalled follower. |
 | `SelfRepairPeerDownGrace` | `30 s` | Defers promotion-gate destructive self-repair while a voter peer is down. Keep it above normal voter restart time so a short outage does not look like proof that missing log ranges are gone. |
 | `LeadershipConfirmationTimeout` | `2 s` | Bounds `ConfirmLeadershipAsync`, including its same-term quorum acknowledgement round and the wait for the local apply frontier to cover the confirmed commit index. |
 | `EnableCheckQuorum` | `false` | Makes an active leader step down after losing same-term quorum contact for the configured window. This helps stale leaders fail faster, but linearizable local reads should still use `ConfirmLeadershipAsync`. |
 | `CheckQuorumIntervalMultiplier` | `8` | Multiplier applied to `HeartbeatInterval` for the check-quorum step-down window. |
 
 The promotion barrier protects newly elected leaders from serving before inherited committed entries have been applied locally. If a clean failover has no inherited tail, leadership publishes immediately. If prior-term entries exist above the local commit frontier, Kommander commits an internal no-op first, drains inherited entries, and only then reports the node as leader.
+
+When quiescence and check-quorum are both enabled, a quiesced leader stays in the hot set long enough for its forced heartbeat probe to run before the check-quorum window expires. That keeps idle partitions from waiting for the slower full safety sweep to discover lost quorum contact.
 
 `ConfirmLeadershipAsync` is the read-side safety API. Use it before serving authoritative local reads from a leader-owned projection. It confirms that the node still has same-term quorum contact and that its local state machine has applied through the commit index observed by that confirmation round.
 
@@ -229,6 +264,7 @@ The promotion barrier protects newly elected leaders from serving before inherit
 | `MaxWalGroupBatchPartitions` | `64` | Maximum ready partitions coalesced into one `IWAL.Write` call. |
 | `WalGroupCommitLingerMs` | `0` | Adaptive wait window that lets a WAL worker gather more ready partitions into one sync before writing. |
 | `WalSingleFsyncCommit` | `true` | Removes the committed-marker sync from the client-visible `autoCommit` path by acknowledging after propose quorum durability. |
+| `FanOutBeforeLocalWrite` | `true` | Overlaps follower replication with the leader's local proposed-entry WAL write. Quorum success still requires the leader's local durable write. |
 | `ApplicationDurabilityProvider` | `null` | Optional floor reported by the application for the highest committed WAL index durably applied to the application's own storage. |
 | `WriteIOThreads` | `4` | Number of scheduler workers. Each worker can process one cross-partition group batch at a time. |
 | `SqliteWalShardCount` | `0` | Desired SQLite shard count when creating a new WAL directory. |
@@ -264,16 +300,22 @@ Kommander supports runtime cluster membership management with learners, promotio
 | `MaxBackfillBytesPerRound` | `4 MiB` | Maximum payload bytes read and shipped in one backfill round. |
 | `BackfillNoProgressPauseCap` | `30 s` | Maximum pause when a follower keeps acknowledging duplicate batches without advancing its commit frontier. |
 | `BackfillNoProgressAnchorFallbackShips` | `2` | Fruitless ships before the leader re-anchors at the follower's reported frontier. |
+| `BackfillSeededCatchUpGraceCap` | `3 min` | Maximum grace after snapshot seeding before no-progress detection can trigger another snapshot. |
 | `SnapshotReceiveSessionTtl` | `30 s` | How long an incomplete snapshot receive session may sit idle before the receiver drops its buffered state. |
 | `SnapshotMaxPendingSessions` | `8` | Maximum concurrent snapshot receive sessions on one node. |
 | `SnapshotMaxPendingBytes` | `512 MiB` | Maximum live bytes used by snapshot receive buffers, including completed buffers still installing. |
+| `SnapshotStagingDirectory` | `null` | Node-private directory for snapshot spill files. `null` keeps staging in memory. |
+| `SnapshotStagingMemoryBytes` | `64 MiB` | Resident staging budget when a spill directory is configured. |
 | `AllowLegacySnapshotSenders` | `false` | Accepts snapshot chunks that omit `LeaderTerm`, `LeaderEndpoint`, or `LastIncludedTerm`. Use only during a controlled compatibility window. |
 | `SnapshotTransferStepTimeout` | `2 min` | Maximum no-progress time for one outbound snapshot transfer step. |
 | `SnapshotRescueMaxConsecutiveCycles` | `3` | Consecutive non-converging rescue cycles before the leader trips a breaker. |
 | `SnapshotRescueProbeInterval` | `5 min` | Probe cadence while the rescue breaker is tripped. |
 | `SnapshotExportRetryCacheMaxBytes` | `64 MiB` | Maximum snapshot export cached in memory for retry. |
+| `JoinTimeout` | `60 s` | Deadline for admission and initial cluster assembly during a join. |
+| `JoinPromotionStallTimeout` | `5 min` | No-progress deadline while a seed join waits for learner promotion. |
 | `LearnerPromotionLag` | `10` | Maximum lag a learner may have on any partition and still be considered caught up enough for promotion. |
 | `LearnerPromotionStableWindow` | `3 s` | How long a learner must remain within `LearnerPromotionLag` before promotion to voter. |
+| `LearnerPromotionStallWarningAfter` | `30 s` | Diagnostic warning threshold for a placement learner that remains not promotable. |
 | `GossipInterval` | `5 s` | Interval between membership gossip rounds. |
 | `GossipFanout` | `2` | Random peers contacted per gossip round. `0` disables gossip. |
 | `PingInterval` | `1 s` | SWIM ping round interval. Set to `0` or lower to disable the detector. Must stay below `StartElectionTimeout` when quiescence is enabled. |
@@ -294,12 +336,30 @@ The snapshot receive path is bounded and term-aware.
 | `SnapshotReceiveSessionTtl` | `30 s` | Idle timeout for an incomplete snapshot receive session. The sweep is lazy and runs when another snapshot chunk arrives. |
 | `SnapshotMaxPendingSessions` | `8` | Maximum number of concurrent receive sessions buffered across all partitions on one node. |
 | `SnapshotMaxPendingBytes` | `512 MiB` | Maximum total buffered snapshot bytes. Completed buffers still count while their partition-executor install is running. |
+| `SnapshotStagingDirectory` | `null` | Node-private directory used to spill staged snapshots to disk. `null` keeps staging in memory. |
+| `SnapshotStagingMemoryBytes` | `64 MiB` | Maximum staged snapshot bytes kept resident when a spill directory is configured. `0` stages every session on disk. |
 | `AllowLegacySnapshotSenders` | `false` | Allows peers that omit the snapshot leader-term and boundary-term fields. Keep disabled unless you are rolling through an older wire contract. |
 | `SnapshotTransferStepTimeout` | `2 min` | Bounds one outbound transfer step: application export, one stream read, or one chunk send. A step that keeps making progress gets a fresh timeout; a stuck step fails and is retried later. |
+| `SnapshotChunkAckTimeout` | `15 s` | Bounds one receiver acknowledgement after the sender transmits a snapshot chunk. This prevents a stuck install path from holding the transport call open until the whole-step timeout. |
+| `ReseedRequestTimeout` | `3 min` | Bounds a follower-initiated forced reseed snapshot. If it expires, the follower releases held applies and can request reseed again. |
 
 The final snapshot chunk is installed on the partition's single-writer executor. That serializes stale-leader rejection, application import, durable checkpoint-boundary writes, and apply-frontier seeding with the rest of the partition state machine.
 
 See [Snapshot Installation](../operations/snapshot-installation.md) for the receive contract and import requirements.
+
+## Thread-Free Embedded Mode
+
+Kommander's browser target frameworks use a thread-free build for hosts that cannot create OS threads, such as single-threaded `browser-wasm`.
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `EnableHostPumpedScheduling` | `true` | Runs the partition executor pool, WAL write scheduler, and outbound dispatcher from an async host pump. Leave enabled for browser hosts unless a deterministic harness drives the node itself. |
+| `EnableInternalSchedulingThreads` | `false` | The thread-free build refuses internal scheduling threads because `Thread.Start` is unavailable. |
+| `EnableSharedExecutorPool` | `true` | Required in the thread-free build. Dedicated partition threads are not available. |
+
+Browser builds leave out server transports, gRPC clients, RocksDB, SQLite, multicast discovery, and certificate-based transport security. Use `InMemoryWAL`, `StaticDiscovery`, and either the REST client or the in-memory transport.
+
+See [Thread-Free Embedded Mode](../guides/thread-free-embedded-mode.md) for build settings and runtime limits.
 
 ## Automatic Leader Balancing
 
@@ -338,7 +398,7 @@ Replica placement controls which nodes host each user partition.
 | Property | Default | Description |
 | --- | ---: | --- |
 | `ReplicationFactor` | `0` | Target number of voter replicas per user partition. `0` means full replication across every roster voter. |
-| `EnablePlacementRebalancer` | `false` | Master switch for ongoing placement passes. Initial placement still honors `ReplicationFactor`, and in-flight transitions still complete. |
+| `EnablePlacementRebalancer` | `false` | Master switch for ongoing placement, including conversion of legacy full-replication ranges to explicit replica sets. Initial placement still honors `ReplicationFactor`, and in-flight transitions still complete. |
 | `PlacementPassInterval` | `5 s` | Placement-controller cadence on the system-partition leader. This is separate from `LeaderBalancerInterval`. |
 | `MaxReplicaMovesPerPass` | `4` | Maximum new add/remove placement moves initiated in one pass. |
 | `MaxConcurrentReplicaTransfers` | `1` | Balance-class move budget for ranges with a learner or removing replica. |
@@ -348,8 +408,11 @@ Replica placement controls which nodes host each user partition.
 | `Zone` | `null` | Optional zone or rack hint for this node. Placement prefers spreading a range's replicas across distinct zones when hints exist. |
 | `LearnerPromotionLag` | `10` | Maximum lag a learner replica may have and still be considered caught up. |
 | `LearnerPromotionStableWindow` | `3 s` | Stable catch-up window before a learner replica is promoted to voter. |
+| `LearnerPromotionStallWarningAfter` | `30 s` | Diagnostic warning threshold for a learner that remains not promotable. |
 
 `ReplicationFactor = 0` keeps the legacy behavior where every committed roster voter hosts every user partition. When RF is greater than `0`, each range records its own replica set in the committed partition map, and quorum is computed over that range's voter replicas.
+
+An existing range can still have an empty replica set after a replication factor starts applying. With `EnablePlacementRebalancer = true`, the controller first records every current roster voter as the explicit replica set without changing quorum, then converges toward the target RF. With the rebalancer disabled, the range remains fully replicated and every joining voter adds another copy. Use `GetPartitionsAwaitingPlacement()` or `raft.placement.ranges_awaiting_initial` to find these ranges.
 
 Prefer odd RF values. RF 4 usually costs more than RF 3 without increasing tolerated failures, because both require a majority and both tolerate one failed replica.
 
@@ -383,5 +446,6 @@ Higher control and replication quanta help Raft protocol traffic stay ahead of c
 Two timing behaviors matter for operators and test authors:
 
 - `HeartbeatInterval` and `CheckLeaderInterval` must both stay below `StartElectionTimeout`. Heartbeats are sent from the `CheckLeader` timer pass, so either interval at or above the lower election timeout causes followers to time out before the next heartbeat and leadership churns indefinitely.
+- `RecentHeartbeat` must stay below `HeartbeatInterval`. If the de-dup window is equal to or greater than the heartbeat cadence, timer-driven heartbeats can be skipped continuously and follower repair stops making progress.
 - `ElectionTimeoutSeed` lets each partition derive its election timeout randomness from a deterministic seed combined with the partition id. That makes election behavior reproducible in tests without making every partition use the exact same sequence.
-- `RecentHeartbeat` throttles heartbeats per `(node, partition)` pair. That avoids one busy partition suppressing heartbeats for every other partition on the same follower.
+- `RecentHeartbeat` throttles heartbeats per `(node, partition)` pair using monotonic time. That avoids one busy partition suppressing heartbeats for every other partition on the same follower, and avoids HLC clock skew affecting the heartbeat de-dup decision.

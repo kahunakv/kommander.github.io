@@ -13,6 +13,11 @@
  * The `apiKey` field below is intentionally a placeholder. The crawler key is
  * write-capable - keep it in the dashboard, never in this repository.
  *
+ * `initialIndexSettings` below applies only when the crawler creates the
+ * index. To change the settings of the existing index, edit
+ * algolia/index-settings.json (keep it in sync with the block below) and run
+ * algolia/apply-index-settings.mjs.
+ *
  * Selectors are grounded in the generated HTML: the page title is
  * `<article><header><h1>`, and body copy lives in `article p` / `article li`.
  */
@@ -57,7 +62,7 @@ new Crawler({
   ],
   initialIndexSettings: {
     kahunakv_github_io_spbbubi3jt_pages: {
-      attributesForFaceting: ["type", "lang"],
+      attributesForFaceting: ["type", "lang", "language", "version", "docusaurus_tag"],
       attributesToRetrieve: [
         "hierarchy",
         "content",

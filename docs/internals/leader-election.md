@@ -96,3 +96,5 @@ One concrete case is a follower that becomes isolated while the other two nodes 
 Leaders throttle repeated heartbeats with the `RecentHeartbeat` window.
 
 Kommander scopes that throttle key by both node and partition. That matters because one node can host many partitions at once. If throttling were keyed only by node, one active partition could suppress heartbeats for every other partition on the same follower and trigger avoidable elections.
+
+`RecentHeartbeat` is measured with the monotonic tick source, not by subtracting hybrid-logical-clock timestamps from peers. That keeps a skewed peer clock from freezing heartbeat de-dup and silencing the repair path. The configuration must keep `RecentHeartbeat < HeartbeatInterval`; set it to `TimeSpan.Zero` in special test harnesses that intentionally disable the window.

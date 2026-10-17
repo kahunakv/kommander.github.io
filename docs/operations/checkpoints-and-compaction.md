@@ -1,6 +1,12 @@
 # Checkpoints And Compaction
 
-Checkpoint replication is part of the main flow that the application uses.
+Checkpoints and compaction keep the WAL from growing without limit. The WAL is the write-ahead log. Without compaction, each node keeps every log entry of every partition. Disk use then grows for as long as the cluster runs.
+
+A checkpoint is a marker that your application writes into the log of a partition. It says that the application has a stable point there. After the checkpoint commits, compaction can remove the WAL entries that are older than it.
+
+Your application must do one thing for this to work. Automatic compaction is on by default: Kommander schedules a compaction pass on each partition every `10000` committed operations (`CompactEveryOperations`). But Kommander does not write checkpoints on a schedule of its own. If your application never calls `ReplicateCheckpoint`, the compaction passes run but usually find nothing to remove.
+
+This page covers the runtime side: how to write a checkpoint, and what limits compaction. For the application side, such as when to write a checkpoint and how a restore uses it, read [Checkpointing And Recovery](../guides/checkpointing-and-recovery.md).
 
 ## Replicate A Checkpoint
 
@@ -19,12 +25,6 @@ Internally, a checkpoint uses these log types:
 - `CommittedCheckpoint`
 - `RolledBackCheckpoint`
 
-## Why Checkpoints Matter
-
-Automatic WAL compaction removes only the history that is older than the last committed checkpoint. The WAL is the write-ahead log. If an application writes no checkpoint, there is little or nothing to compact.
-
-A checkpoint is a marker. It says that the application has a stable point here. Older WAL history can become removable later.
-
 ## Automatic Compaction
 
 Kommander can start automatic WAL compaction for each partition after a configured number of committed operations.
@@ -35,6 +35,8 @@ The relevant settings are:
 - `CompactNumberEntries`
 - `MaxEntriesPerCompaction`
 - `CompactionLiveReplicaLagBudget`
+- `CompactionSilentPeerRetentionWindow`
+- `CompactionDurabilityClampReportInterval`
 
 A compaction pass does these steps:
 
@@ -48,9 +50,21 @@ Because of the limit, one compaction trigger cannot hold the partition for an un
 
 Compaction also considers live follower progress. If a follower is alive, still acknowledging the leader, and has not yet replicated entries below the checkpoint, the leader can temporarily hold the compaction floor behind that follower.
 
-`CompactionLiveReplicaLagBudget` controls the maximum number of below-checkpoint entries retained for this purpose. The default is `100000`. This makes ordinary log backfill more likely to repair a live lagging replica before compaction forces a snapshot rescue.
+`CompactionLiveReplicaLagBudget` is the minimum number of below-checkpoint entries retained for this purpose. The default is `1000000`. Kommander also sizes retention from the entries committed during `CompactionLiveReplicaLagWindow`, capped by `CompactionLiveReplicaLagCap`. The effective budget is:
 
-Values at or below `0` disable this hold. Disabling it is safe for correctness, but it can make snapshot installation more common when followers are healthy but temporarily behind.
+```text
+max(entry budget, min(entries committed during the window, entry cap))
+```
+
+The time window keeps the amount of recoverable history useful as the write rate rises. The cap bounds the disk cost. Before a new leader has enough rate history, the fixed entry budget applies by itself.
+
+Set `CompactionLiveReplicaLagWindow = TimeSpan.Zero` or `CompactionLiveReplicaLagCap <= 0` to use only the fixed count. Values at or below `0` for `CompactionLiveReplicaLagBudget` disable the hold on that node. Disabling it is safe for correctness, but it can make snapshot installation more common when followers are healthy but temporarily behind.
+
+The leader sends the retention floor with appends. Followers honor that floor within their own configured budget, so a leadership change is less likely to discard the log tail another replica still needs. `CompactionSilentPeerRetentionWindow` also protects a peer that is temporarily silent or has not yet reported a frontier to a newly elected leader.
+
+`CompactionSilentPeerRetentionWindow` adds a bounded hold for a peer that stopped answering. Inside the window, the leader keeps enough log tail for the peer to recover from a short restart or pause without immediately needing a snapshot. The budget still limits how much WAL can be retained. When the window expires, the silent peer no longer holds compaction back and snapshot rescue can seed it later.
+
+`CompactionDurabilityClampReportInterval` controls the warning cadence when `ApplicationDurabilityProvider` keeps compaction clamped. A clamped pass is not automatically a stalled application flusher; under load, the application floor can lag while still advancing. Kommander logs the start of a clamped streak, rate-limited reminders, a stronger stalled warning only when the floor stays unchanged for the interval, and a clear line when the streak ends.
 
 ## Retain Floors
 
@@ -111,4 +125,8 @@ See [Snapshot Installation](./snapshot-installation.md) for the full install seq
 | `CompactEveryOperations` | `10000` | Committed operations between automatic compaction triggers. Set to `0` or lower to disable automatic compaction. |
 | `CompactNumberEntries` | `100` | Maximum entries removed per adapter delete batch. |
 | `MaxEntriesPerCompaction` | `5000` | Maximum entries removed during one triggered compaction pass before yielding. |
-| `CompactionLiveReplicaLagBudget` | `100000` | Maximum entries retained below a checkpoint for a live, acking follower that still needs ordinary backfill. |
+| `CompactionLiveReplicaLagBudget` | `1000000` | Minimum retained entry depth for a lagging replica. The rate-sensitive time window can raise it. |
+| `CompactionLiveReplicaLagWindow` | `3 min` | Recent commit window used to size retention by write rate. `TimeSpan.Zero` uses only the fixed count. |
+| `CompactionLiveReplicaLagCap` | `10000000` | Upper bound on the entries added by the time-sized window. Values at or below `0` disable the window. |
+| `CompactionSilentPeerRetentionWindow` | `2 min` | Bounded time a non-answering peer can keep a retained log tail for restart catch-up. |
+| `CompactionDurabilityClampReportInterval` | `60 s` | Warning cadence and stalled-floor threshold for application durability clamp diagnostics. |

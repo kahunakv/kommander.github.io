@@ -1,6 +1,6 @@
 # Support Types
 
-Kommander exposes a few utility types used internally and available to callers.
+This page lists public helper types. You meet most of them as parameter types or return types of the [elastic partition APIs](../guides/elastic-partitions.md), so you read about them when you split, merge, or place partitions. The other types are general helpers that Kommander uses internally. You can use them in your own code, but you do not need them to use Kommander.
 
 ## Parallelization Extensions
 

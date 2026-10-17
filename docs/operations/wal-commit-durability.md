@@ -9,10 +9,11 @@ Without the single-fsync fast path, a normal auto-commit write does two durable 
 1. It writes the proposed entry and syncs it.
 2. It writes the committed marker after the quorum acknowledgement, then syncs it.
 
-That older two-sync path is safe and predictable. The storage sync latency can still dominate the write latency. Kommander gives two WAL settings that reduce the cost in different ways:
+That older two-sync path is safe and predictable. The storage sync latency can still dominate the write latency. Kommander gives WAL settings that reduce the cost in different ways:
 
 - `WalGroupCommitLingerMs` improves the batch density and the throughput when concurrent writes arrive at staggered times.
 - `WalSingleFsyncCommit` removes the second sync from the auto-commit path that the client can see.
+- `FanOutBeforeLocalWrite` overlaps the leader's proposed-entry write with follower appends.
 
 These settings apply to a durable WAL adapter. `InMemoryWAL` does no fsync. A durable adapter with `syncWrites: false` already trades crash durability for test speed or benchmark speed.
 
@@ -79,6 +80,32 @@ This is a latency optimization. It removes one serial sync from the path that th
 
 It does not apply to an explicit two-phase write. In that case, the caller uses `autoCommit: false`, then calls `CommitLogs` or `RollbackLogs`. That path keeps its separate durable commit behavior.
 
+The lazy marker path applies only when the node already holds the entry durably as a proposed row. If a follower receives a `Committed` row or `CommittedCheckpoint` as the first local write for that log id, Kommander treats it as first durability and syncs it. This preserves crash durability for followers that receive the committed form before they have written the proposed form locally.
+
+## Fan-Out Before Local Write
+
+`FanOutBeforeLocalWrite` is enabled by default. The leader sends a new proposal to followers as soon as its own `Proposed` write is queued, rather than waiting for that local write to become durable first. The leader's WAL write and the followers' WAL writes can then run at the same time.
+
+```text
+serial:      leader propose fsync -> send -> follower append fsync -> ack -> quorum
+overlapped:  leader propose fsync ---------+
+             send -> follower append fsync +-> quorum
+```
+
+The meaning of an acknowledgement does not change. A proposal is not treated as quorum-complete until the leader's own write is durable too. Followers can answer first, but `RaftProposalQuorum` keeps the proposal short of quorum until the leader's local durability is recorded.
+
+The visible failure case changes slightly. If the leader's local write fails after the followers already received the proposal, a later leader might still commit that entry. Kommander reports `ProposalOutcomeUnknown`, so callers must handle it like `ProposalTimeout`: retry only with idempotency or after reading the replicated state.
+
+Set `FanOutBeforeLocalWrite = false` when you want the older serial round shape for a controlled comparison. The promotion barrier and checkpoints still use the serial path.
+
+## Follower Application Delivery
+
+With `FollowerApplyInOwnTurn = true`, a follower acknowledges an append after its WAL work completes, then delivers the committed entries to `OnReplicationReceived` in maintenance turns. Replication traffic has a higher scheduler class, so the next append waits behind at most one application-delivery turn instead of every callback from the previous commit.
+
+This changes scheduling, not consistency. Entries are still delivered exactly once and in log order. The follower's applied cursor advances only after delivery, so `ConfirmLocalApplicationAsync` and linearizable read waits still wait for the application state. Partition `0` always applies inline.
+
+`FollowerApplyTurnTime` bounds the normal wall-clock duration of one turn and `FollowerApplyTurnBudget` bounds its normal entry count. When the backlog grows beyond eight entry budgets, Kommander delivers more work in a turn so a consumer slower than the commit stream slows the follower instead of growing memory without a bound.
+
 ## Crash Recovery Behavior
 
 With either `WalSingleFsyncCommit` mode, a crash can leave a proposed entry on disk while its committed marker is not durable yet. Followers learn committed markers asynchronously, so the on-disk log type is not the full source of truth for the latest committed tail after a crash.
@@ -92,9 +119,15 @@ Kommander handles that case conservatively:
 
 One invariant for the operator does not change. A write that the system acknowledges to the client reached quorum durability.
 
+`IRaft.GetCommitIndex(partitionId)` reports the local published commit frontier, not an optimistic in-memory frontier. Kommander advances that published value only after the relevant WAL writes are durable on the local node. If a local write fails after an internal frontier moved forward, the protocol repair path can lower its private frontier so the leader re-ships the range, but external observers do not see that failed value as committed.
+
+Follower durable-progress reports follow the same rule. A follower reports a committed index as durable only when both the log row and its committed resolution are known to be on disk. A lazy committed marker that has not ridden a later sync yet does not let the follower claim that index as durable. This keeps leaders from compacting through history that a follower would still need after a crash.
+
 Kommander also persists Raft hard state for each partition: the current term and the endpoint voted for in that term. Election code records that state before it solicits votes or sends a granted vote. If the WAL cannot persist the hard state, the election attempt is abandoned and retried later instead of acting on a vote the node might forget after a crash.
 
 The RocksDB backend opens with `TolerateCorruptedTailRecords`. If a process or host dies with a torn RocksDB WAL tail, RocksDB can discard the corrupt tail record and reopen. Kommander then rebuilds the committed frontier conservatively and uses Raft catch-up to resupply anything needed from the current leader.
+
+Durable WAL adapters also persist the partition's HLC floor. During restore, the node merges that floor into its hybrid logical clock before new proposal timestamps are created. That keeps proposal tickets monotonic across restarts, compaction, and narrowed replay.
 
 ## Application Durability Floor
 
@@ -131,6 +164,10 @@ Return `-1` for "no opinion". That value keeps the behavior that the checkpoint 
 | Property | Default | Description |
 | --- | ---: | --- |
 | `WalSingleFsyncCommit` | `true` | Enables the single-fsync fast path for auto-commit. The client acknowledgement occurs when the proposed entry is durable on a quorum. The runtime writes the committed marker lazily. |
+| `FanOutBeforeLocalWrite` | `true` | Sends proposals to followers while the leader's local write is queued. The quorum still waits for leader-local durability. |
+| `FollowerApplyInOwnTurn` | `true` | Acknowledges follower appends before application delivery and performs delivery in separate maintenance turns. |
+| `FollowerApplyTurnTime` | `100 us` | Normal time budget for one follower application-delivery turn. |
+| `FollowerApplyTurnBudget` | `1024` | Normal entry budget for one follower application-delivery turn. |
 | `WalGroupCommitLingerMs` | `0` | The bounded adaptive wait, in milliseconds, that a WAL worker uses to gather more ready partitions into one group commit. `0` disables the linger and keeps the opportunistic batches. |
 | `MaxWalGroupBatchPartitions` | `64` | The maximum number of ready partitions that the scheduler coalesces into one group write. |
 | `MaxWalBatchSize` | `256` | The maximum number of WAL operations that the scheduler drains from one partition into one batch. |
@@ -150,6 +187,7 @@ These signals are useful:
 - `raft.wal.operations_total`
 - `raft.wal.batch_size`
 - `raft.wal.queue_depth`
+- `raft.round.stage_ms`
 - `IRaft.GetPartitionWalQueueDepth`
 - `IRaft.GetPartitionCommitWaitMs`
 
@@ -163,10 +201,13 @@ Those counters separate the storage write calls from the true sync batches. With
 
 For the group commit linger, compare the average batch density before and after you enable it. The linger does useful work if `TotalPartitionsBatched / TotalBatchesWritten` rises while the latency stays acceptable.
 
+`raft.round.stage_ms` is an opt-in histogram for round-stage timing. Enable it with `KOMMANDER_ROUND_STAGES=1` or by using `Kommander.Benchmark --stages`. It uses the `stage` tag to split leader queueing, proposing, WAL wait, fan-out, follower append, transport dispatch, and caller resume time. Stage means can be added to explain the average round; percentiles should be read stage by stage rather than summed.
+
 ## Practical Guidance
 
 - Keep the defaults for your first deployment on durable storage.
 - Keep `WalSingleFsyncCommit` enabled when the second commit sync dominates the write latency.
+- Keep `FanOutBeforeLocalWrite` enabled unless you are comparing against the older serial round or isolating a storage failure path.
 - Disable `WalSingleFsyncCommit` only when you need the older behavior. In that behavior, the committed markers on the disk alone identify the complete committed frontier immediately after a local restart.
 - Configure `ApplicationDurabilityProvider` when the application applies the committed entries to its storage asynchronously.
 - Use small values for `WalGroupCommitLingerMs` first. A large value can add avoidable latency.

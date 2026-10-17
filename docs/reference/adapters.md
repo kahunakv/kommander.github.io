@@ -1,6 +1,19 @@
 # Adapters
 
-Kommander keeps persistence, transport, and discovery pluggable.
+An adapter connects Kommander to one part of your environment. Kommander uses three kinds of adapter:
+
+- A **WAL adapter** stores the Raft log. The WAL is the write-ahead log.
+- A **communication adapter** carries Raft messages between the nodes.
+- A **discovery adapter** tells a node where to find the other nodes.
+
+You pick one of each when you [create a node](../guides/creating-a-node.md). Kommander keeps persistence, transport, and discovery pluggable, so you can use the storage and the network stack that your service already has. You can also write your own adapter.
+
+Common choices:
+
+| Situation | WAL | Communication | Discovery |
+| --- | --- | --- | --- |
+| Networked cluster | `RocksDbWAL` or `SqliteWAL` | `GrpcCommunication` or `RestCommunication` | `StaticDiscovery` |
+| Tests and simulations | `InMemoryWAL` | `InMemoryCommunication` | `StaticDiscovery` or `DynamicDiscovery` |
 
 ## WAL Adapters
 
@@ -42,6 +55,38 @@ The bundle contains one shared RocksDB block cache and one shared write-buffer m
 There is no `RaftConfiguration` flag for this. Sharing is configured by passing `sharedResources` to the `RocksDbWAL` constructor and wiring the same cache/write-buffer manager into the host application's own RocksDB options before opening that database.
 
 See [Shared RocksDB Memory](../operations/shared-rocksdb-memory.md) for sizing, ownership, and observability guidance.
+
+### RocksDB WAL Tuning
+
+`RocksDbWAL` also accepts a `RocksDbWalTuning` object for deployments with unusual log rates, many hot partitions, or a tight shared RocksDB memory budget:
+
+```csharp
+IWAL rocks = new RocksDbWAL(
+    path: "./data",
+    revision: "node-1",
+    logger: logger,
+    syncWrites: true,
+    tuning: RocksDbWalTuning.Default
+);
+```
+
+The defaults are designed for append-heavy Raft logs whose dead prefix is deleted logically and then reclaimed as whole SST files.
+
+| Property | Default | Description |
+| --- | ---: | --- |
+| `ShardWriteBufferSizeBytes` | `64 MiB` | Size of one Raft-log shard column-family memtable. |
+| `ShardMinWriteBufferNumberToMerge` | `2` | Immutable memtables merged into one flush. This widens the window where short-lived log rows and their tombstones can die before reaching disk. |
+| `ShardMaxWriteBufferNumber` | `4` | Maximum mutable plus immutable memtables per shard column family. Must be greater than `ShardMinWriteBufferNumberToMerge`. |
+| `ShardLevel0FileNumCompactionTrigger` | `8` | L0 file count that triggers movement toward the base level. Under the floor layout, non-overlapping partition files usually move without rewriting rows. |
+| `ShardLevel0SlowdownWritesTrigger` | `28` | L0 file count where RocksDB begins slowing writers. |
+| `ShardLevel0StopWritesTrigger` | `44` | L0 file count where RocksDB stops writers. |
+| `MaxTotalWalSizeFlushUnits` | `2` | Bound for live RocksDB `.log` files, measured in shard flush units. Keeps idle or trickle-write column families from pinning an unbounded WAL replay tail. `0` leaves RocksDB's default. |
+| `ShardMaxBytesForLevelBase` | `0` | Optional RocksDB `max_bytes_for_level_base` override for shard column families. `0` leaves the RocksDB default. |
+| `ShardUniversalCompaction` | `false` | Uses universal compaction for shard column families instead of the shipped leveled layout. |
+
+When you share a `WriteBufferManager`, size its budget for at least the Raft WAL flush unit plus the host database's own memtables. The flush unit is `ShardWriteBufferSizeBytes * ShardMinWriteBufferNumberToMerge`; the writer also needs one additional mutable memtable of headroom. If the shared budget is too small, RocksDB flushes early and write amplification rises even though safety is unchanged.
+
+`MaxTotalWalSizeFlushUnits` applies to the RocksDB engine's own write-ahead `.log` files, not to Raft log entries. RocksDB can only delete a `.log` file after every column family with data in that file has flushed. The cap lets RocksDB flush the small pinning column families before restart replay grows without bound, while busy shard column families continue to flush on their normal Raft-log cadence.
 
 `SqliteWAL` uses a fixed pool of SQLite shard databases. Partitions map to shards with `partitionId mod shardCount`, so `FairWalScheduler` group batches can be committed as one transaction per shard instead of one transaction per partition.
 
@@ -88,6 +133,8 @@ public interface IWAL : IDisposable
     bool SetMetaData(string key, string value);
     bool PersistHardState(int partitionId, long currentTerm, string? votedFor);
     bool TryGetHardState(int partitionId, out long currentTerm, out string? votedFor);
+    bool PersistHlcFloor(int partitionId, long floorL);
+    long GetHlcFloor(int partitionId);
     (RaftOperationStatus Status, int Removed) CompactLogsOlderThan(
         int partitionId,
         long lastCheckpoint,
@@ -112,6 +159,7 @@ Several methods have default implementations in the source interface to keep sim
 - `Write(..., sync)` can delegate to `Write(...)`; durable adapters should honor `sync: false` for commit-marker batches used by the single-fsync fast path.
 - `GetTermAt` can use `ReadLogsRange`, but durable adapters should implement a scalar lookup so log-matching checks do not read payloads.
 - `PersistHardState` and `TryGetHardState` use metadata keys by default. Durable adapters must make `SetMetaData` return `false` on storage failure instead of throwing, because election code will not solicit votes or grant a vote that it could not record.
+- `PersistHlcFloor` and `GetHlcFloor` use metadata keys by default. Durable adapters should persist this floor with the same crash-safety expectations as hard state metadata. On restore, Kommander merges the floor into the local hybrid logical clock before it can mint new proposal timestamps.
 
 The counting methods are useful for tests, diagnostics, and compaction visibility:
 
@@ -128,6 +176,10 @@ The counting methods are useful for tests, diagnostics, and compaction visibilit
 
 Outbound Raft transport messages can be batched through `BatchRequests`. That includes append traffic and control traffic such as step-down notices and leadership-transfer requests.
 
+`RestCommunication` uses source-generated `System.Text.Json` metadata for its Raft request and response bodies. This keeps the REST wire shape stable while supporting trimmed hosts that disable reflection-based JSON. If you build a custom REST host or add new REST message types, make sure every request and response type is present in the generated JSON context; one missing type can make the host fail when ASP.NET Core builds the endpoints.
+
+The browser/thread-free build keeps the REST client, but leaves out server transports and the gRPC client. See [Thread-Free Embedded Mode](../guides/thread-free-embedded-mode.md) for the browser target limits.
+
 Custom transports implement `ICommunication`.
 
 At minimum, production transports should cover:
@@ -140,6 +192,17 @@ At minimum, production transports should cover:
 - join failure notification: `NotifyJoinBlocked`.
 
 Some methods have default no-op or failure-returning implementations, but relying on those defaults disables the corresponding runtime behavior.
+
+`InMemoryCommunication` includes fault-injection controls for tests and simulations:
+
+- `PartitionNode(endpoint)` drops all traffic to and from one endpoint
+- `HealPartition(endpoint)` restores traffic for a node partition
+- `BlockLink(from, to)` drops only one directed link
+- `UnblockLink(from, to)` restores one directed link
+- `BlockLinkBothWays(a, b)` and `UnblockLinkBothWays(a, b)` model a pairwise network cut
+- `HealAll()` removes every node and link filter.
+
+Directional link blocks are useful for testing asymmetric networks. A request can reach a peer while the reply is lost, which models failures such as a snapshot install that succeeds on the receiver while the sender observes a failed transfer.
 
 ### Dynamic Membership Support
 

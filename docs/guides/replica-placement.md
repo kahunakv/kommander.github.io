@@ -41,6 +41,8 @@ The cluster can have fewer voters than the configured RF. Kommander then uses al
 
 Partition `0`, the system partition, always replicates fully across the committed roster. Replica placement changes the user partitions only.
 
+RF 1 is supported. A range with one committed voter can elect and commit by self-quorum even while learner or removing replicas exist beside it. Learners do not vote, cannot become leader, and do not raise the quorum size.
+
 ## Replica Roles
 
 Each `RaftPartitionRange` can include a `Replicas` list. Each replica records an endpoint, a node id, a role, and the generation of that role assignment.
@@ -53,6 +55,10 @@ Each `RaftPartitionRange` can include a `Replicas` list. Each replica records an
 
 An empty `Replicas` list means legacy full replication. Every voter in the committed roster hosts the range.
 
+When a replication factor applies to an existing range with an empty list, `EnablePlacementRebalancer = true` converts it safely. The first committed change records every current roster voter as the explicit replica set, so quorum and data ownership do not change during conversion. Later passes trim or expand that set toward the target RF.
+
+With the rebalancer disabled, the range stays fully replicated and every voter that joins adds another copy. Use `GetPartitionsAwaitingPlacement()` to list active ranges in this state. The system-partition leader also exposes the count as `raft.placement.ranges_awaiting_initial` and logs one warning per leadership term while ranges are waiting.
+
 ## Routing With Placement
 
 Any node can still read the committed partition map. It can still route a key to a partition id. With placement enabled, that node can host no copy of the selected partition.
@@ -62,6 +68,7 @@ Use these APIs when you build a routing cache:
 ```csharp
 IReadOnlyList<RaftPartitionRange> map = raft.GetPartitionMap();
 IReadOnlyList<RaftReplica> replicas = raft.GetPartitionReplicas(partitionId);
+IReadOnlyList<int> awaitingPlacement = raft.GetPartitionsAwaitingPlacement();
 long generation = raft.GetPartitionGeneration(partitionId);
 ```
 
@@ -125,7 +132,9 @@ Dynamic membership also composes with placement:
 - A member removal makes each range with a replica on that node under-replicated.
 - The planner repairs the under-replicated ranges before the ordinary balance moves.
 
-For a partition that you create dynamically, Kommander selects the committed voter nodes with the lowest load. This applies when `ReplicationFactor > 0`. The voter count can be less than the RF target or equal to it. The new range then keeps the empty representation of the replica set. That representation means full replication across every committed voter.
+For a partition that you create dynamically, Kommander selects committed voter nodes with the lowest load and prefers voters whose SWIM liveness is `Alive`. This applies when `ReplicationFactor > 0` and the committed voter count is greater than the RF target. If fewer live voters exist than the target RF, Kommander backfills the founding replica set with non-alive voters and logs a warning. That preserves the target replica count while making the healthiest available placement first.
+
+When the committed voter count is less than or equal to the RF target, the new range keeps the empty representation of the replica set. That representation means full replication across every committed voter.
 
 Kommander can remove a replica that leads a partition now. It first tries a transfer of the leadership to another voter replica. It then discounts the old leader from the quorum. The transfer is a best effort, because a normal election still recovers after a failed handoff. The transfer prevents an unnecessary loss of availability during a planned removal.
 
@@ -148,6 +157,7 @@ Only one member can drain at a time. A drain can exceed `DecommissionDrainTimeou
 | `Zone` | `null` | An optional locality hint for the local node. The planner prefers replicas in distinct zones when the hints exist. |
 | `LearnerPromotionLag` | `10` | The maximum lag of a learner replica that Kommander still treats as caught up. |
 | `LearnerPromotionStableWindow` | `3 s` | The time that a learner replica must stay inside the lag threshold before its promotion. |
+| `LearnerPromotionStallWarningAfter` | `30 s` | The diagnostic threshold before a not-promotable learner produces a warning. It does not alter promotion. |
 
 ## Practical Guidance
 

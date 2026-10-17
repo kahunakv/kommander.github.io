@@ -48,6 +48,7 @@ Counters:
 Histogram:
 
 - `raft.executor.operation_duration_ms`
+- `raft.round.stage_ms`, when round-stage instrumentation is enabled
 
 The tags are:
 
@@ -63,6 +64,30 @@ The tags are:
 
 Examine these signals first when an operation feels slow. A rise in `Client` latency with healthy `Control` and `Replication` latency shows that the system keeps the Raft priority correctly. A rise in control-plane latency usually shows deeper scheduler pressure or storage pressure.
 
+`raft.round.stage_ms` is an opt-in diagnostic histogram for breaking one replication round into named stages. Enable it with the `KOMMANDER_ROUND_STAGES=1` environment variable or by enabling `RoundStageInstrumentation` in an embedded host. Each measurement has a `stage` tag.
+
+Useful stages include:
+
+- `leader.queue`
+- `leader.propose`
+- `leader.wal`
+- `leader.wal_completion`
+- `leader.fanout`
+- `leader.replication`
+- `leader.ack_queue`
+- `leader.ack`
+- `leader.resume`
+- `leader.round`
+- `leader.commit_wal`
+- `follower.queue`
+- `follower.append`
+- `follower.wal`
+- `follower.wal_completion`
+- `follower.ack`
+- `transport.dispatch`
+
+Use this histogram when a proposal is slow but the broad queue and WAL metrics do not isolate the delay. Stage means can be added to approximate average round cost. Percentiles from different stages should not be added, because each percentile can come from a different request. `Kommander.Benchmark` can enable the same instrumentation with `--stages`; it is useful for comparing `--fan-out-before-local-write true` and `false` under the same workload.
+
 ## WAL Batch Metrics And Throughput
 
 The WAL is the write-ahead log. It is the durable store for Raft log entries.
@@ -72,6 +97,7 @@ Counters:
 - `raft.wal.batches_total`
 - `raft.wal.operations_total`
 - `raft.wal.engine_reopens_total`
+- `raft.leader.wal_stall_step_downs_total`
 - `raft.wal.compaction_passes_total`
 - `raft.wal.compaction_blocked_by_durability_floor_total`
 - `raft.wal.restore_narrowed_by_soft_floor_total`
@@ -79,14 +105,31 @@ Counters:
 Histogram:
 
 - `raft.wal.batch_size`
+- `raft.wal.write_duration_ms`
 - `raft.wal.durability_floor_lag`
 - `raft.wal.compaction_live_replica_hold_entries`
+- `raft.wal.compaction_live_replica_budget_entries`
 
 Observable gauge:
 
 - `raft.wal.queue_depth`, with the tag `partition_id`
+- `raft.wal.delayed_write_rate`
+- `raft.wal.write_stalled`
+- `raft.wal.shard_live_sst_bytes`
+- `raft.wal.shard_l0_files`
+- `raft.wal.shard_l6_files`
+- `raft.wal.alive_log_bytes`
+- `raft.wal.table_readers_memory`
+- `raft.wal.memtable_memory`
+- `raft.wal.block_cache_usage`
+- `raft.wal.block_cache_pinned_usage`
+- `raft.wal.oldest_pending_write_age_ms`, with the tag `partition_id`
 
 `raft.wal.queue_depth` reports the pending or in-flight WAL operations for each partition. A constant rise with flat replicated-log throughput shows WAL saturation or fsync saturation. An fsync is a durable flush to disk. `IRaft.GetPartitionWalQueueDepth` gives the same advisory value.
+
+`raft.wal.oldest_pending_write_age_ms` reports the oldest WAL operation accepted for a partition but not yet completed by storage. A rising value is the direct durable-write stall signal. `raft.wal.write_duration_ms` records completed group-write duration, so it shows the tail of writes that eventually return.
+
+`raft.leader.wal_stall_step_downs_total` increments when a leader steps down because its local WAL write stayed pending past `WalStallStepDownTimeout`.
 
 `raft.wal.batches_total` increments one time for each scheduler group write. One group write can cover more than one partition.
 
@@ -111,10 +154,26 @@ Compaction metrics tell you why the WAL shrinks or does not shrink:
 - `raft.wal.durability_floor_lag` records the gap between the application durability floor and the last checkpoint. It applies only with a configured `ApplicationDurabilityProvider`.
 - `raft.wal.compaction_blocked_by_durability_floor_total` increments when the application durability floor keeps entries that are otherwise removable.
 - `raft.wal.compaction_live_replica_hold_entries` records entries retained below a checkpoint for a live, acking follower that still needs ordinary backfill.
+- `raft.wal.compaction_live_replica_budget_entries` records the effective count-and-time retention budget used by that pass. Compare it with the held entries to see whether the fixed count, recent write rate, or configured cap is governing retention.
 - `raft.wal.restore_narrowed_by_soft_floor_total` counts restores that could replay from the application's durability floor instead of the older hard checkpoint.
 - `raft.wal.engine_reopens_total` counts RocksDB WAL engine reopens after a latched storage error, tagged by `outcome=success` or `outcome=failed`.
 
 Storage can continue to grow with compaction configured. These metrics then separate three causes: no checkpoint was written, the application durability floor keeps the tail on purpose, or the compaction failed.
+
+For `RocksDbWAL`, the storage-engine gauges show write stalls and physical reclamation:
+
+- `raft.wal.delayed_write_rate` is the current RocksDB throttled write rate in bytes per second. Nonzero means the storage engine is slowing the Raft write path.
+- `raft.wal.write_stalled` is `1` while RocksDB has stopped writes.
+- `raft.wal.shard_live_sst_bytes` is live SST bytes across the Raft-log shard column families.
+- `raft.wal.shard_l0_files` is the L0 file count across Raft-log shards. Growth toward the slowdown or stop trigger is a storage pressure signal.
+- `raft.wal.shard_l6_files` is the bottom-level file count across Raft-log shards.
+- `raft.wal.alive_log_bytes` is live RocksDB `.log` file bytes for the Raft WAL engine. Growth here affects restart replay even when SST reclamation looks healthy.
+- `raft.wal.table_readers_memory` is native memory held by open RocksDB table readers, including index and filter blocks. Without shared resources this can grow with live SST bytes outside a configured cache budget.
+- `raft.wal.memtable_memory` is native memtable memory across the WAL engine's column families. A shared write-buffer manager bounds this value.
+- `raft.wal.block_cache_usage` is the block-cache occupancy backing the WAL engine. With `RocksDbSharedResources`, this reports the whole shared cache, not only Kommander's share.
+- `raft.wal.block_cache_pinned_usage` is block-cache memory that cannot be evicted, such as blocks held by iterators or pinned index/filter blocks.
+
+Use these with `RocksDbWalTuning` and shared-memory sizing. A too-small shared write-buffer budget can force early flushes, increasing write amplification without changing consensus safety. A high `table_readers_memory` value without shared resources usually means index/filter blocks are outside your intended memory budget; a high pinned-cache value means the cache may be unable to evict enough data even when the nominal cache size looks large.
 
 ## Consensus Invariant Checks
 
@@ -132,8 +191,27 @@ Counter:
 
 - `raft.backfill.no_progress_pauses_total`
 - `raft.backfill.no_progress_episodes_total`
+- `raft.backfill.no_progress_escalations_deferred_total`
+- `raft.backfill.wal_stall_pauses_total`
+- `raft.snapshot.transfers_started_total`
 - `raft.snapshot.transfer_failures_total`
+- `raft.snapshot.transfers_deferred_wal_stall_total`
+- `raft.snapshot.installs_refused_wal_stall_total`
 - `raft.snapshot.rescue_breaker_tripped_total`
+- `raft.snapshot.receive_sessions_superseded_total`
+- `raft.snapshot.receive_sessions_spilled_total`
+- `raft.snapshot.receive_sessions_refused_installing_total`
+
+Histogram:
+
+- `raft.snapshot.install_duration_ms`
+
+Observable gauge:
+
+- `raft.snapshot.receive_staged_bytes`
+- `raft.snapshot.receive_installing_bytes`
+- `raft.snapshot.receive_in_memory_bytes`
+- `raft.snapshot.install_peak_heap_bytes`
 
 The backfill counters are tagged by `partition_id`. `raft.snapshot.transfer_failures_total` is tagged by `partition_id` and failure `cause`. A constant snapshot failure rate usually means that a follower is below the compaction floor and the snapshot install cannot complete.
 
@@ -141,7 +219,21 @@ The backfill counters are tagged by `partition_id`. `raft.snapshot.transfer_fail
 
 `raft.backfill.no_progress_episodes_total` increments when a no-progress episode crosses the warning threshold. Pair it with the leader log line that names the peer and the frontier.
 
+`raft.backfill.no_progress_escalations_deferred_total` increments when a follower is still inside the post-snapshot catch-up grace and the no-progress probe would otherwise start another snapshot.
+
+`raft.backfill.wal_stall_pauses_total` increments when the leader skips entry-carrying backfill because the peer reports a durable-write stall.
+
+`raft.snapshot.transfers_deferred_wal_stall_total` increments when a below-floor follower would normally receive a snapshot, but the leader defers transfer because the peer reports a durable-write stall. `raft.snapshot.installs_refused_wal_stall_total` increments on the receiver when it refuses to open a snapshot session because its own WAL is stalled.
+
 `raft.snapshot.rescue_breaker_tripped_total` increments when repeated successful snapshot installs do not bring a follower above the compaction floor. Pair it with `GetSnapshotStatuses(partitionId)` and look for `RescueNotConverging`.
+
+`raft.snapshot.transfers_started_total` has `partition_id` and `trigger` tags. Use the trigger to separate below-floor retention problems, no-progress convergence problems, compacted anchors, and application-requested reseeds.
+
+The receive-session counters are tagged by `partition_id`. A rise in `receive_sessions_spilled_total` is expected when the resident staging budget is smaller than incoming snapshots. Repeated superseded sessions indicate retries or leader changes. Repeated refusals while installing mean another transfer is arriving before the current partition install finishes.
+
+The receive gauges separate total staged data, bytes held by queued or running installs, and the resident subset. With `SnapshotStagingDirectory` configured, `receive_in_memory_bytes` should stay near the configured resident budget even when total staged bytes are much larger. `snapshot.install_peak_heap_bytes` helps size the application's importer because its working set exists on top of staged data.
+
+`raft.snapshot.install_duration_ms` is tagged by `partition_id` and install `outcome`. It includes the wait for the partition executor as well as the import and durable boundary work.
 
 The public API also gives point-in-time diagnostic views:
 
@@ -194,6 +286,17 @@ You can also correlate heartbeat behavior through these sources:
 - `raft.election_delay_ms`
 - slow-dispatch logs
 - latency patterns of proposals and appends.
+
+## Replica Placement
+
+Use these signals while converting full-replication ranges or diagnosing placement convergence:
+
+- `raft.placement.initial_assignments_total`
+- `raft.placement.ranges_awaiting_initial`
+
+`raft.placement.initial_assignments_total` counts ranges converted from an empty legacy replica set to an explicit set containing the current roster voters. `raft.placement.ranges_awaiting_initial` is an observable gauge on the system-partition leader. A nonzero value that does not fall usually means `EnablePlacementRebalancer` is disabled, the roster is not committed yet, or partition `0` cannot commit the conversion.
+
+The public `GetPartitionsAwaitingPlacement()` API provides the exact partition ids behind the gauge.
 
 ## Leader Balancing
 

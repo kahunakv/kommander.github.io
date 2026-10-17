@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import {useEffect, useState} from 'react';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import useBaseUrl from '@docusaurus/useBaseUrl';
@@ -95,6 +96,15 @@ function SectionHeading({eyebrow, title, subtitle}) {
 
 function HomepageHeader() {
   const logoUrl = useBaseUrl('/img/logo-compressed.png');
+  const [commitIndex, setCommitIndex] = useState(8421964);
+
+  useEffect(() => {
+    const commitTimer = window.setInterval(() => {
+      setCommitIndex((currentIndex) => currentIndex + 1);
+    }, 1400);
+
+    return () => window.clearInterval(commitTimer);
+  }, []);
 
   return (
     <header className={clsx('hero', styles.heroBanner)}>
@@ -135,8 +145,47 @@ function HomepageHeader() {
               <span className={styles.panelState}>● HEALTHY</span>
             </div>
             <div className={styles.clusterMap}>
-              <span className={styles.linkLine} />
-              <span className={styles.linkLineSecond} />
+              <svg
+                className={styles.linkLine}
+                focusable="false"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none">
+                <line className={styles.linkTrack} x1="0" y1="100" x2="100" y2="0" />
+                <line className={styles.flowPacket} x1="0" y1="100" x2="12" y2="88">
+                  <animate attributeName="x1" from="0" to="88" dur="1.4s" repeatCount="indefinite" />
+                  <animate attributeName="y1" from="100" to="12" dur="1.4s" repeatCount="indefinite" />
+                  <animate attributeName="x2" from="12" to="100" dur="1.4s" repeatCount="indefinite" />
+                  <animate attributeName="y2" from="88" to="0" dur="1.4s" repeatCount="indefinite" />
+                  <animate
+                    attributeName="opacity"
+                    values="0;1;1;0"
+                    keyTimes="0;.12;.82;1"
+                    dur="1.4s"
+                    repeatCount="indefinite"
+                  />
+                </line>
+              </svg>
+              <svg
+                className={styles.linkLineSecond}
+                focusable="false"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none">
+                <line className={styles.linkTrack} x1="0" y1="0" x2="100" y2="100" />
+                <line className={styles.flowPacket} x1="0" y1="0" x2="12" y2="12">
+                  <animate attributeName="x1" from="0" to="88" dur="1.4s" begin=".35s" repeatCount="indefinite" />
+                  <animate attributeName="y1" from="0" to="88" dur="1.4s" begin=".35s" repeatCount="indefinite" />
+                  <animate attributeName="x2" from="12" to="100" dur="1.4s" begin=".35s" repeatCount="indefinite" />
+                  <animate attributeName="y2" from="12" to="100" dur="1.4s" begin=".35s" repeatCount="indefinite" />
+                  <animate
+                    attributeName="opacity"
+                    values="0;1;1;0"
+                    keyTimes="0;.12;.82;1"
+                    dur="1.4s"
+                    begin=".35s"
+                    repeatCount="indefinite"
+                  />
+                </line>
+              </svg>
               <div className={clsx(styles.node, styles.nodeLeader)}>
                 <span>01</span>
                 <strong>LEADER</strong>
@@ -147,7 +196,9 @@ function HomepageHeader() {
             </div>
             <div className={styles.panelFooter}>
               <span>TERM 0187</span>
-              <span>COMMIT INDEX 8,421,964</span>
+              <span key={commitIndex} className={styles.commitIndex}>
+                COMMIT INDEX {commitIndex.toLocaleString('en-US')}
+              </span>
             </div>
           </div>
           <img src={logoUrl} alt="" className={styles.heroLogo} />

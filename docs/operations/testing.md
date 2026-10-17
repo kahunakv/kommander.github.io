@@ -1,5 +1,9 @@
 # Testing
 
+This page is for contributors. Run the Kommander test suite when you change Kommander itself, when you review a pull request, or when you want to reproduce a bug report against the source. The suite checks Raft safety rules, the schedulers, the WAL adapters, and failure scenarios on real in-process clusters.
+
+You do not need this suite to test your own application. Run your nodes in one process with `InMemoryWAL` and `InMemoryCommunication` instead. For the simulation and chaos tools, read [Deterministic Testing](deterministic-testing.md).
+
 Build Kommander from the source repository:
 
 ```shell
