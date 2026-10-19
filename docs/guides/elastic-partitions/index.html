@@ -4,10 +4,11 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Elastic Partitions | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/elastic-partitions/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Elastic Partitions | Kommander"><meta data-rh="true" name="description" content="Elastic partitions let you change the partition layout while the cluster runs. You do not need to know the correct partition count in advance. When one key range gets too hot, you split it. When two ranges go quiet, you merge them."><meta data-rh="true" property="og:description" content="Elastic partitions let you change the partition layout while the cluster runs. You do not need to know the correct partition count in advance. When one key range gets too hot, you split it. When two ranges go quiet, you merge them."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/elastic-partitions/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/elastic-partitions/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/elastic-partitions/" hreflang="x-default"><link data-rh="true" rel="preconnect" href="https://SPBBUBI3JT-dsn.algolia.net" crossorigin="anonymous"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Elastic Partitions","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/elastic-partitions"}]}</script><link rel="search" type="application/opensearchdescription+xml" title="Kommander" href="/kommander.github.io/opensearch.xml">
+
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.7b6c51ed.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f6cc3585.js" defer="defer"></script>
-<script src="/kommander.github.io/assets/js/main.82869f00.js" defer="defer"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.d7bcb4b2.css">
+<script src="/kommander.github.io/assets/js/runtime~main.e8dd88e7.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/main.1ae8b050.js" defer="defer"></script>
 </head>
 <body>
 <svg style="display: none;"><defs>
@@ -136,6 +137,7 @@
 <li class=""><code>Draining</code></li>
 <li class=""><code>Removed</code></li>
 </ul>
+<!-- -->
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="event-for-a-change-of-the-partition-map">Event For A Change Of The Partition Map<a href="#event-for-a-change-of-the-partition-map" class="hash-link" aria-label="Direct link to Event For A Change Of The Partition Map" title="Direct link to Event For A Change Of The Partition Map" translate="no">​</a></h2>
 <p>An application can subscribe to this event:</p>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(230, 1%, 98%);--prism-color:hsl(230, 8%, 24%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="background-color:hsl(230, 1%, 98%);color:hsl(230, 8%, 24%)"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">raft</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token plain">OnPartitionMapChanged </span><span class="token operator" style="color:hsl(221, 87%, 60%)">+=</span><span class="token plain"> ranges </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=&gt;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain"></span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">    </span><span class="token keyword" style="color:hsl(301, 63%, 40%)">return</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain"></span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">}</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><br></div></code></pre></div></div>
@@ -165,6 +167,7 @@
 <li class="">Route the key again.</li>
 <li class="">Retry against the current owner.</li>
 </ol>
+<!-- -->
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="state-transfer-during-a-split">State Transfer During A Split<a href="#state-transfer-during-a-split" class="hash-link" aria-label="Direct link to State Transfer During A Split" title="Direct link to State Transfer During A Split" translate="no">​</a></h2>
 <p>Elastic partitions change the routing map. They do not move your application state. A transfer implementation moves it.</p>
 <p>You can register one implementation:</p>
@@ -176,6 +179,7 @@
 <li class="">It imports the snapshot into the target partition.</li>
 <li class="">It replicates a checkpoint into the target partition.</li>
 </ol>
+<!-- -->
 <p>Without a registered transfer implementation, the coordinator uses the log-shipping behavior. Your application is then responsible for the move of the state before the end of phase 2.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="interaction-with-replica-placement">Interaction With Replica Placement<a href="#interaction-with-replica-placement" class="hash-link" aria-label="Direct link to Interaction With Replica Placement" title="Direct link to Interaction With Replica Placement" translate="no">​</a></h2>
 <p>Elastic partitions and replica placement share the committed partition map.</p>

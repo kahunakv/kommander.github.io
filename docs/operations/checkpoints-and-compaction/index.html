@@ -4,10 +4,11 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Checkpoints And Compaction | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/operations/checkpoints-and-compaction/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Checkpoints And Compaction | Kommander"><meta data-rh="true" name="description" content="Checkpoints and compaction keep the WAL from growing without limit. The WAL is the write-ahead log. Without compaction, each node keeps every log entry of every partition. Disk use then grows for as long as the cluster runs."><meta data-rh="true" property="og:description" content="Checkpoints and compaction keep the WAL from growing without limit. The WAL is the write-ahead log. Without compaction, each node keeps every log entry of every partition. Disk use then grows for as long as the cluster runs."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/operations/checkpoints-and-compaction/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/checkpoints-and-compaction/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/operations/checkpoints-and-compaction/" hreflang="x-default"><link data-rh="true" rel="preconnect" href="https://SPBBUBI3JT-dsn.algolia.net" crossorigin="anonymous"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Checkpoints And Compaction","item":"https://kahunakv.github.io/kommander.github.io/docs/operations/checkpoints-and-compaction"}]}</script><link rel="search" type="application/opensearchdescription+xml" title="Kommander" href="/kommander.github.io/opensearch.xml">
+
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.7b6c51ed.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f6cc3585.js" defer="defer"></script>
-<script src="/kommander.github.io/assets/js/main.82869f00.js" defer="defer"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.d7bcb4b2.css">
+<script src="/kommander.github.io/assets/js/runtime~main.e8dd88e7.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/main.1ae8b050.js" defer="defer"></script>
 </head>
 <body>
 <svg style="display: none;"><defs>
@@ -45,6 +46,7 @@
 <li class="">It repeats in batches until no eligible work remains, or until it reaches the configured limit for one pass.</li>
 </ol>
 <p>Because of the limit, one compaction trigger cannot hold the partition for an unbounded time.</p>
+<!-- -->
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="live-replica-lag-hold">Live Replica Lag Hold<a href="#live-replica-lag-hold" class="hash-link" aria-label="Direct link to Live Replica Lag Hold" title="Direct link to Live Replica Lag Hold" translate="no">​</a></h2>
 <p>Compaction also considers live follower progress. If a follower is alive, still acknowledging the leader, and has not yet replicated entries below the checkpoint, the leader can temporarily hold the compaction floor behind that follower.</p>
 <p><code>CompactionLiveReplicaLagBudget</code> is the minimum number of below-checkpoint entries retained for this purpose. The default is <code>1000000</code>. Kommander also sizes retention from the entries committed during <code>CompactionLiveReplicaLagWindow</code>, capped by <code>CompactionLiveReplicaLagCap</code>. The effective budget is:</p>
@@ -72,6 +74,8 @@
 <li class="">The holds are in memory. You must acquire them again after a restart.</li>
 </ul>
 <p><code>SetMinRetainIndex</code> is useful for one owner that publishes a local snapshot boundary continuously. <code>AcquireRetentionHold</code> is safer for short work such as a point-in-time recovery capture, a backup export, or concurrent consumers. Those consumers must not overwrite the floor of each other.</p>
+<p>Each floor on this page bounds the same compaction pass. The pass removes only the entries below the lowest floor.</p>
+<!-- -->
 <p>See <a class="" href="/kommander.github.io/docs/guides/system-partition-state-snapshots/">System Partition State Snapshots</a> for the delta pattern on partition <code>0</code>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="snapshot-boundaries">Snapshot Boundaries<a href="#snapshot-boundaries" class="hash-link" aria-label="Direct link to Snapshot Boundaries" title="Direct link to Snapshot Boundaries" translate="no">​</a></h2>
 <p>A follower installs a snapshot. Kommander then writes a durable <code>CommittedCheckpoint</code> at the snapshot index. That checkpoint says that the snapshot covers every committed entry up to that index and includes it.</p>

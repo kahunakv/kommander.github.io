@@ -4,10 +4,11 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.10.1">
 <title data-rh="true">Checkpointing And Recovery | Kommander</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" name="twitter:image" content="https://kahunakv.github.io/kommander.github.io/img/logo.svg"><meta data-rh="true" property="og:url" content="https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery/"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="Checkpointing And Recovery | Kommander"><meta data-rh="true" name="description" content="A checkpoint gives your application a durable safe point inside the log of a partition."><meta data-rh="true" property="og:description" content="A checkpoint gives your application a durable safe point inside the log of a partition."><link data-rh="true" rel="icon" href="/kommander.github.io/img/logo.svg"><link data-rh="true" rel="canonical" href="https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery/"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery/" hreflang="en"><link data-rh="true" rel="alternate" href="https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery/" hreflang="x-default"><link data-rh="true" rel="preconnect" href="https://SPBBUBI3JT-dsn.algolia.net" crossorigin="anonymous"><script data-rh="true" type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Checkpointing And Recovery","item":"https://kahunakv.github.io/kommander.github.io/docs/guides/checkpointing-and-recovery"}]}</script><link rel="search" type="application/opensearchdescription+xml" title="Kommander" href="/kommander.github.io/opensearch.xml">
+
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.7b6c51ed.css">
-<script src="/kommander.github.io/assets/js/runtime~main.f6cc3585.js" defer="defer"></script>
-<script src="/kommander.github.io/assets/js/main.82869f00.js" defer="defer"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.d7bcb4b2.css">
+<script src="/kommander.github.io/assets/js/runtime~main.e8dd88e7.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/main.1ae8b050.js" defer="defer"></script>
 </head>
 <body>
 <svg style="display: none;"><defs>
@@ -56,6 +57,7 @@
 <p><code>ReplicateCheckpoint</code> uses the same quorum path as a regular replication. Therefore, it still needs the partition leader and the follower acknowledgements before the commit.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-occurs-during-a-restore">What Occurs During A Restore<a href="#what-occurs-during-a-restore" class="hash-link" aria-label="Direct link to What Occurs During A Restore" title="Direct link to What Occurs During A Restore" translate="no">​</a></h2>
 <p>At a restore, Kommander replays the WAL forward from the last committed checkpoint boundary.</p>
+<!-- -->
 <p>For the application, the result is simple:</p>
 <ul>
 <li class="">A newer checkpoint reduces the history that the node can replay.</li>
@@ -77,6 +79,7 @@
 <li class="">It removes the entries that are older than that checkpoint, in batches.</li>
 <li class="">It stops when no eligible work remains, or when it reaches the limit of the pass.</li>
 </ol>
+<!-- -->
 <p>Therefore, the checkpoints control <strong>how much</strong> old WAL data the system can remove. The compaction settings control <strong>how fast</strong> the system removes it.</p>
 <p>Compaction has a cost for a node that is far behind. After compaction, that node cannot catch up from the log of the leader. It needs a snapshot of your application state. Register a transfer hook on every node for this case. See <a class="" href="/kommander.github.io/docs/operations/snapshot-installation/#implement-the-partition-state-transfer">Snapshot Installation</a>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="a-practical-strategy">A Practical Strategy<a href="#a-practical-strategy" class="hash-link" aria-label="Direct link to A Practical Strategy" title="Direct link to A Practical Strategy" translate="no">​</a></h2>
