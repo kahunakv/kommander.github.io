@@ -7,7 +7,7 @@
 
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.69f5b818.css">
-<script src="/kommander.github.io/assets/js/runtime~main.342c9b5d.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.df136cb8.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.ffc08ffb.js" defer="defer"></script>
 </head>
 <body>
@@ -39,7 +39,8 @@
 <ul>
 <li class=""><code>EnableQuiescence</code> is <code>true</code>.</li>
 <li class="">The partition is not already quiesced.</li>
-<li class="">There are no active proposals.</li>
+<li class="">There are no unresolved proposals. Completed proposals retained for ticket lookup do not keep the partition active.</li>
+<li class="">Every peer is at the leader&#x27;s committed frontier.</li>
 <li class="">The idle time of the partition is more than <code>QuiesceAfter</code>.</li>
 </ul>
 <p>The leader then sends an <code>AppendLogs</code> message with <code>Quiesce = true</code>. Each follower sets its local quiesced flag for that partition.</p>
@@ -81,7 +82,7 @@
 <li class=""><code>StartElectionTimeout = 2000 ms</code>.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="configuration">Configuration<a href="#configuration" class="hash-link" aria-label="Direct link to Configuration" title="Direct link to Configuration" translate="no">​</a></h2>
-<table><thead><tr><th>Property</th><th style="text-align:right">Default</th><th>Description</th></tr></thead><tbody><tr><td><code>EnableQuiescence</code></td><td style="text-align:right"><code>true</code></td><td>Enables quiescence for idle partitions. Set it to <code>false</code> to keep the classic heartbeat of each partition at every interval.</td></tr><tr><td><code>QuiesceAfter</code></td><td style="text-align:right"><code>1500 ms</code></td><td>The idle time with no active proposals before the leader sends a quiesce marker and stops the heartbeats.</td></tr><tr><td><code>PingInterval</code></td><td style="text-align:right"><code>1 s</code></td><td>The SWIM probe cadence. It must be more than <code>0</code> and less than <code>StartElectionTimeout</code> when quiescence is enabled.</td></tr><tr><td><code>SuspicionTimeout</code></td><td style="text-align:right"><code>5 s</code></td><td>The time from <code>Suspect</code> to <code>Dead</code>. Quiesced failover starts at <code>Suspect</code>. Therefore, this value does not gate the quiesced failover latency directly.</td></tr><tr><td><code>StartElectionTimeout</code></td><td style="text-align:right"><code>2000 ms</code></td><td>The lower bound of the election timeout. <code>PingInterval</code> must be below this value while quiescence is enabled.</td></tr></tbody></table>
+<table><thead><tr><th>Property</th><th style="text-align:right">Default</th><th>Description</th></tr></thead><tbody><tr><td><code>EnableQuiescence</code></td><td style="text-align:right"><code>true</code></td><td>Enables quiescence for idle partitions. Set it to <code>false</code> to keep the classic heartbeat of each partition at every interval.</td></tr><tr><td><code>QuiesceAfter</code></td><td style="text-align:right"><code>1500 ms</code></td><td>The idle time with no unresolved proposals and every peer caught up before the leader sends a quiesce marker and stops the heartbeats.</td></tr><tr><td><code>PingInterval</code></td><td style="text-align:right"><code>1 s</code></td><td>The SWIM probe cadence. It must be more than <code>0</code> and less than <code>StartElectionTimeout</code> when quiescence is enabled.</td></tr><tr><td><code>SuspicionTimeout</code></td><td style="text-align:right"><code>5 s</code></td><td>The time from <code>Suspect</code> to <code>Dead</code>. Quiesced failover starts at <code>Suspect</code>. Therefore, this value does not gate the quiesced failover latency directly.</td></tr><tr><td><code>StartElectionTimeout</code></td><td style="text-align:right"><code>2000 ms</code></td><td>The lower bound of the election timeout. <code>PingInterval</code> must be below this value while quiescence is enabled.</td></tr></tbody></table>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="operational-notes">Operational Notes<a href="#operational-notes" class="hash-link" aria-label="Direct link to Operational Notes" title="Direct link to Operational Notes" translate="no">​</a></h2>
 <ul>
 <li class="">Quiescence is useful when you run many partitions and many of them are idle.</li>
