@@ -1,5 +1,9 @@
 # Log Backfill And Catch-Up
 
+Backfill brings a node that fell behind back up to date, with no manual copy of data. It also lets a new learner catch up before it becomes a voter.
+
+Backfill is automatic and on by default (`BackfillEnabled = true`). You do not call it, and you usually do not tune it. Read this page when a follower or a new learner stays behind the leader, when a join takes a long time, or before you change the backfill settings. If compaction already removed the entries that a follower needs, backfill cannot help. Kommander then uses [Snapshot Installation](../operations/snapshot-installation.md).
+
 Backfill is how a leader catches a lagging follower up without creating gaps in the follower's log.
 
 Followers can fall behind when they are slow, paused, briefly disconnected, or newly joined as learners. Normal live replication handles small delays. Backfill handles larger gaps.
@@ -17,6 +21,26 @@ Backfill fills the missing range in bounded chunks:
 3. it sends that slice with a log-matching anchor
 4. the follower accepts only if the anchor matches
 5. the process repeats until the follower is close enough for normal live replication.
+
+```mermaid
+sequenceDiagram
+  participant L as Leader
+  participant W as Leader WAL
+  participant F as Follower
+  Note over L: follower lag exceeds BackfillThreshold
+  loop until the follower is close enough for live replication
+    L->>W: read a slice of missing committed entries
+    W-->>L: up to MaxBackfillEntriesPerRound and MaxBackfillBytesPerRound
+    L->>F: batch with PrevLogIndex, PrevLogTerm, entries
+    alt anchor matches
+      F->>F: append, replace any divergent uncommitted tail
+      F-->>L: success ack with ProtocolFrontier and DurableFrontier
+    else anchor missing
+      F-->>L: LogMismatch
+      Note over L: back up and retry from an earlier point
+    end
+  end
+```
 
 ## Live Replication vs Backfill
 
@@ -145,11 +169,27 @@ If a follower asks for entries below the floor but the leader's retained log sti
 
 If a follower needs entries that the leader no longer has, the runtime falls through to snapshot installation when the relevant transfer hook is registered. If snapshot transfer cannot proceed or keeps failing, inspect `GetSnapshotStatuses(partitionId)`.
 
+```mermaid
+flowchart TD
+  behind(["Follower needs repair"]) --> retained{"Leader still has the committed entries that make the follower contiguous?"}
+  retained -- yes --> backfill["Anchored backfill from the retained log"]
+  retained -- no --> hook{"Transfer hook registered?"}
+  hook -- yes --> snapshot["Snapshot installation"]
+  hook -- no --> stuck["Follower stays behind, inspect GetSnapshotStatuses"]
+  snapshot -- "close the new gap" --> backfill
+```
+
 A successful snapshot can leave the follower behind by everything committed while the snapshot was exported, transferred, and imported. The follower closes that new gap from the retained log. During this period its reported frontiers can appear stationary, so `BackfillSeededCatchUpGraceCap` delays only the no-progress probe's decision to start another snapshot. A backfill that is genuinely below the compaction floor still escalates immediately, and an application-requested reseed is never delayed by this grace.
 
 Kommander does not escalate to a snapshot just because one repair batch was anchored below the retained floor. If the follower's own reports already show that it is committed and durable through the leader's last checkpoint, a snapshot would only resend state the follower already covers. The leader keeps repairing from retained log entries above the checkpoint instead.
 
-This matters for dynamic membership: a brand-new learner joining a heavily compacted cluster may need `IRaftSystemStateTransfer` for partition `0` state or `IRaftStateMachineTransfer` for user-partition range state.
+This matters for dynamic membership and for replica placement. A new learner in a heavily compacted cluster can need a snapshot, and each snapshot needs a transfer hook:
+
+- `IRaftSystemStateTransfer` for the application state on partition `0`.
+- `IRaftPartitionStateTransfer` for the whole state of a user partition. This is the preferred hook for catch-up.
+- `IRaftStateMachineTransfer` as the fallback for a user partition when `IRaftPartitionStateTransfer` is not registered.
+
+See [Snapshot Installation](../operations/snapshot-installation.md#implement-the-partition-state-transfer) for the contract of each hook.
 
 ## Durable-Write Stalls
 
@@ -191,6 +231,23 @@ raft.SetCandidacyWithheld(partitionId, withheld: false);
 ```
 
 The reseed hold is bounded by `ReseedRequestTimeout`. If the leader cannot commit and ship the fresh snapshot before the timeout, the follower resumes local delivery and may request reseed again.
+
+```mermaid
+sequenceDiagram
+  participant App as Application
+  participant R as Replica that needs repair
+  participant L as Partition leader
+  App->>R: SetCandidacyWithheld(partitionId, true)
+  App->>R: RequestReseedAsync(partitionId)
+  Note over R: holds committed application delivery
+  R->>L: reseed request
+  R-->>App: Success, request sent
+  L->>L: commit a checkpoint newer than the request
+  L->>R: forced snapshot
+  Note over R: imports the snapshot, delivery resumes above its boundary
+  App->>App: confirm the imported state is healthy
+  App->>R: SetCandidacyWithheld(partitionId, false)
+```
 
 ## Configuration
 

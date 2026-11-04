@@ -36,6 +36,17 @@ Before reading the code, keep these roles in mind:
 - `GrpcCommunication` sends Raft messages to other nodes.
 - `OnReplicationReceived` is where your application applies committed entries.
 
+```mermaid
+flowchart LR
+    Config["RaftConfiguration"] --> RM["RaftManager"]:::leader
+    RM -->|"find peers"| Disc["StaticDiscovery"]
+    RM -->|"store log entries"| WAL[("RocksDbWAL")]
+    RM -->|"send Raft messages"| Comm["GrpcCommunication"]
+    RM -->|"committed entries"| CB["OnReplicationReceived"]
+    CB --> State[("Your state machine")]
+    classDef leader fill:#008f63,color:#ffffff,stroke:#04241b
+```
+
 ```csharp
 using System.Text;
 using Kommander;
@@ -116,6 +127,33 @@ if (await raft.AmILeader(1, timeout.Token))
 // LeaveCluster stops timers, partition executors, transport dispatch, and
 // fair WAL schedulers. Passing dispose also disposes owned resources.
 await raft.LeaveCluster(dispose: true);
+```
+
+When this node is the leader for partition `1`, the sample runs this sequence:
+
+```mermaid
+sequenceDiagram
+    participant App as Your code
+    participant R as RaftManager (leader)
+    participant W as RocksDbWAL
+    participant F as Followers (8002, 8003)
+    App->>R: JoinCluster
+    Note over R: Restore WAL, initialize partitions, elect leaders
+    App->>R: AmILeader(1)
+    R-->>App: true
+    App->>R: ReplicateLogs(1, "Greeting", data)
+    R->>W: Write proposed entry
+    R->>F: Replicate entry
+    F-->>R: Stored (quorum reached)
+    Note over R: autoCommit is true, so the entry commits
+    par
+        R-->>App: RaftReplicationResult
+    and
+        R-)App: OnReplicationReceived(1, log)
+    and
+        R-)F: Commit, followers apply the entry
+    end
+    App->>R: LeaveCluster(dispose: true)
 ```
 
 If this node is not the leader for partition `1`, the sample does not replicate anything. In a real service, you can call `WaitForLeader` to find the leader endpoint and route the client request there, or let clients retry against another node.

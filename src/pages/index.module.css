@@ -116,6 +116,7 @@
 }
 
 .cardGrid, .calloutRow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; border: 1px solid #303235; background: #303235; }
+.testingGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; border: 1px solid #303235; background: #303235; }
 
 .advantageCard, .fitCard, .calloutCard { min-height: 15rem; padding: 1.5rem; background: #1f2124; }
 .advantageCard:first-child { background: #002923; }
@@ -229,6 +230,7 @@
   .cardGrid,
   .fitGrid,
   .usedByGrid,
+  .testingGrid,
   .calloutRow {
     grid-template-columns: 1fr;
   }

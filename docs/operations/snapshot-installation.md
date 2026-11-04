@@ -1,5 +1,15 @@
 # Snapshot Installation
 
+Snapshot installation repairs a node that is too far behind to catch up from the log. Without it, a node that was offline during a compaction cannot catch up. A new node that joins after a compaction also cannot catch up.
+
+Kommander starts snapshot installation automatically. But Kommander does not know the format of your application state, so your application must supply the export and the import. Register a transfer hook on every node, before `JoinCluster`:
+
+- `RegisterPartitionStateTransfer` repairs a lagging replica of a user partition. If it is not registered, Kommander falls back to the range hook below.
+- `RegisterStateMachineTransfer` moves a key range during a split or a merge.
+- `RegisterSystemStateTransfer` repairs the application state on partition `0`.
+
+If no suitable hook is registered, a follower below the compaction floor stays stuck. `GetSnapshotStatuses` on the leader then reports `Unproducible = true` for that follower. Read this page to implement the hooks correctly, and to size the memory and the timeouts of a transfer.
+
 Kommander uses snapshot installation when ordinary log backfill cannot repair a node that lags behind. Backfill is the transfer of missing committed log entries from the leader.
 
 Backfill works while the leader still holds the missing committed log entries. Compaction removes those entries. A follower or a learner then needs a compact snapshot of the application state instead of the individual log records.
@@ -20,10 +30,43 @@ Kommander selects the snapshot kind from the partition and the registered transf
 
 | Snapshot kind | Used for | Required hook |
 | --- | --- | --- |
-| `Range` | The move of a user-partition range for a split or a merge. | `IRaftStateMachineTransfer` |
+| `Range` | The move of a user-partition range for a split or a merge. It is also the fallback for the catch-up of a user partition when `IRaftPartitionStateTransfer` is not registered. | `IRaftStateMachineTransfer` |
+| `PartitionState` | The whole application state of a user partition, for the catch-up of a lagging replica. | `IRaftPartitionStateTransfer` |
 | `SystemState` | The whole application state on partition `0`. | `IRaftSystemStateTransfer` |
 
 Partition `0` stays reserved for system-wide state. An application write there must use its own log type. It must never use `_RaftSystem`.
+
+## Implement The Partition State Transfer
+
+Implement `IRaftPartitionStateTransfer` when your application keeps state for user partitions and the cluster compacts its WAL. This hook is the primary way to seed a replica under [replica placement](../guides/replica-placement.md). A new replica of a range whose WAL is already compacted can catch up only this way.
+
+```csharp
+public interface IRaftPartitionStateTransfer
+{
+    Task<Stream> ExportPartitionState(int partitionId, long upToIndex, CancellationToken ct);
+    Task ImportPartitionState(int partitionId, Stream snapshot, CancellationToken ct);
+}
+```
+
+Register it on every node that can host or lead a user partition. The leader needs the export, and the follower needs the import. The registration is not replicated:
+
+```csharp
+raft.RegisterPartitionStateTransfer(new OrderStoreTransfer(store));
+```
+
+The implementation must follow these rules:
+
+- `ExportPartitionState` must include at least every entry applied up to `upToIndex`. It can include newer state, for example from an MVCC snapshot. It must never include less, because that loses data.
+- The receiver replays the retained entries above `upToIndex` onto the imported state. An entry that the snapshot already contains must therefore have no effect when it is applied again.
+- `ImportPartitionState` must replace the state of the partition atomically. A crash during the import must leave the old state intact.
+- Kommander can call `ImportPartitionState` more than once for the same snapshot. A repeated import must give the same result.
+- Both methods run on background tasks. If one instance serves several partitions, it must be thread-safe.
+
+Kommander reads the exported stream in chunks, and then disposes it.
+
+:::warning Mixed-version clusters
+A node that runs an older Kommander version does not know the `PartitionState` snapshot kind. That node gives the snapshot to `IRaftStateMachineTransfer.ImportRange` instead, so your application receives data in the wrong format. During a rolling upgrade, do not register the partition-state transfer until every node runs a version that supports it.
+:::
 
 ## Receive Contract
 
@@ -86,6 +129,30 @@ Snapshot chunk acknowledgements carry a typed `SnapshotInstallOutcome`:
 
 The terminal chunk starts installation on the partition executor and returns `InstallPending` as soon as the snapshot is staged and verified. The leader then sends status queries until the receiver reports `Installed`, `SkippedAlreadyCovered`, or a failure. A slow import is therefore not misclassified as a failed chunk.
 
+```mermaid
+sequenceDiagram
+    participant L as Leader
+    participant R as Follower receiver
+    participant X as Follower partition executor
+    participant A as Application import hook
+    loop each non-terminal chunk, in order
+        L->>R: chunk with session metadata
+        R-->>L: ChunkAccepted
+    end
+    L->>R: terminal chunk
+    R->>X: queue the install
+    R-->>L: InstallPending
+    Note over X: reject a stale leader, adopt a higher term
+    X->>A: import the snapshot
+    A-->>X: import done
+    Note over X: durable CommittedCheckpoint at SnapshotIndex
+    Note over X: seed commit and apply frontiers
+    loop until a terminal outcome
+        L->>R: install status query
+        R-->>L: InstallPending, Installed, SkippedAlreadyCovered, or Rejected
+    end
+```
+
 Only one install per partition can be queued or running. While it runs, the receiver does not stage another snapshot for that partition. A retry or a new leader discovers the existing install and waits for its outcome instead of exporting and buffering a duplicate.
 
 This distinction matters operationally. A terminal success means the receiver's boundary covers the snapshot index, but `Installed` and `SkippedAlreadyCovered` tell you whether the receiver actually imported state during this attempt. A missing outcome is treated as `Rejected`, not as a silent success.
@@ -111,6 +178,23 @@ If a follower reports a durable-write stall, the leader defers snapshot transfer
 `IRaft.RequestReseedAsync(partitionId)` lets a replica request a fresh whole-partition snapshot from the current leader even when normal Raft catch-up does not require one. Use this when the local application projection is incomplete or untrusted while the replica's Raft log may still look caught up.
 
 The request is made on the replica that needs repair. That replica holds committed application delivery for the partition, sends a reseed request to the leader, and waits for a fresh checkpoint. The leader commits a checkpoint newer than the request and ships a forced snapshot. The receiver imports that snapshot even when its existing boundary already covers the snapshot index, because the goal is to repair application state rather than to advance the Raft log boundary.
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant F as Replica
+    participant L as Leader
+    App->>F: RequestReseedAsync(partitionId)
+    Note over F: hold committed application delivery
+    F->>L: reseed request
+    Note over L: commit a checkpoint newer than the request
+    alt snapshot arrives within ReseedRequestTimeout
+        L->>F: forced snapshot
+        Note over F: import even if the boundary already covers the index
+    else ReseedRequestTimeout expires
+        Note over F: release held applies, reseed can be requested again
+    end
+```
 
 The same import and durability rules still apply:
 

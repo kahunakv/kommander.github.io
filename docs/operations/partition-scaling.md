@@ -1,5 +1,7 @@
 # Partition Scaling
 
+Read this page when one node hosts many partitions, for example thousands, and most of them are idle at any moment. Without care, each partition costs a thread and frequent timer work, even when it does nothing. Kommander removes most of that idle cost. The thread use and the CPU use then follow the active partitions, not the total partition count.
+
 Kommander supports clusters with many partitions, where only a smaller set is active at one moment.
 
 Two runtime features make that practical:
@@ -9,17 +11,15 @@ Two runtime features make that practical:
 
 The hot set is the group of partitions that are active now.
 
+Both features are on by default. `EnableSharedExecutorPool = true` enables the pool and the hot-set checks. An idle partition leaves the hot set when it quiesces, and `EnableQuiescence` is also `true` by default. For most clusters, you do not need to change anything. Tune `PartitionExecutorPoolSize` only when the operation latency rises while the CPU is not saturated. See [How To Size The Pool](#how-to-size-the-pool).
+
 These features are separate from the elastic partition APIs. Elastic partitions change the partition map. Partition scaling controls the CPU cost and the thread cost of many resident partitions.
 
-## Why This Matters
+## Shared Executor Pool
 
-Each user partition is a serial Raft state machine. The work for one partition must run one operation at a time and in order.
-
-The simple implementation gives one thread to each partition. That implementation becomes expensive quickly. A cluster with thousands of mostly idle partitions must not need thousands of parked threads. It must also not need thousands of timer wakeups every few hundred milliseconds.
+Each user partition is a serial Raft state machine. The work for one partition must run one operation at a time and in order. The simple implementation gives one thread to each partition. A cluster with thousands of mostly idle partitions then needs thousands of parked threads, and thousands of timer wakeups every few hundred milliseconds.
 
 With the shared executor pool, idle partitions keep their state, but they own no dedicated worker threads. An active partition signals that it has work. A bounded pool then drains a slice of that work. The worker then moves to another ready partition.
-
-## Shared Executor Pool
 
 `RaftPartitionExecutor` still owns the queues and the serial execution for one partition. The difference is the way that the runtime drains the queued work.
 
@@ -30,6 +30,23 @@ With `EnableSharedExecutorPool = true`, all partition executors share a fixed po
 3. One pool worker acquires the run-lock of that partition.
 4. The worker drains a bounded quantum of control, replication, client, and maintenance work.
 5. The runtime requeues the partition if more work remains.
+
+```mermaid
+sequenceDiagram
+    participant P as Producer
+    participant E as RaftPartitionExecutor
+    participant Q as Global ready queue
+    participant W as Pool worker
+    P->>E: post work
+    E->>Q: mark runnable, enqueue
+    Q->>W: next ready partition
+    W->>E: acquire the run-lock
+    Note over W,E: drain a bounded quantum of control, replication, client, and maintenance work
+    opt more work remains
+        W->>Q: requeue the partition
+    end
+    Note over W: move to another ready partition
+```
 
 One guarantee does not change: two workers never drain the same partition at the same time. That single-owner rule keeps the Raft state machine serial. It also prevents concurrency surprises inside one partition that the application can see.
 
@@ -59,6 +76,22 @@ Partition scaling and partition quiescence solve different parts of the same pro
 SWIM is the failure detector of Kommander. It tracks the liveness of each node.
 
 The hot-set membership follows the quiescence state. A partition leaves the hot set when it quiesces. It returns to the hot set when a write, an append, a vote, or a relevant failure signal wakes it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Hot
+    Hot --> Quiesced: idle for QuiesceAfter
+    Quiesced --> Hot: write, append, or vote
+    Quiesced --> Hot: SWIM marks the leader Suspect or Dead
+    Hot --> [*]: partition stopped or removed
+    note right of Hot
+        CheckLeader every CheckLeaderInterval
+    end note
+    note right of Quiesced
+        checked only by the full sweep
+        every UpdateNodesInterval
+    end note
+```
 
 See [Partition Quiescence](../guides/partition-quiescence.md) for the network side.
 

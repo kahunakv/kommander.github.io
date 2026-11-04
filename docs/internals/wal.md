@@ -1,6 +1,10 @@
 # WAL Internals
 
-The write-ahead log, or WAL, is how Kommander remembers Raft log entries across restarts.
+The write-ahead log, or WAL, is how Kommander remembers Raft log entries across restarts. After a restart, a node reads its WAL to rebuild the Raft state of each partition.
+
+Read this page when you debug a restore, investigate WAL latency, or write or review a WAL adapter. It explains the log entry types, the recovery steps, and the write paths for leaders and followers. You do not call these parts directly. Your application sees only the results, through `OnLogRestored` and `OnReplicationReceived`.
+
+To tune durability and latency, read [WAL Commit Durability](../operations/wal-commit-durability.md) and [WAL Diagnostics](../operations/wal-diagnostics.md). To choose a WAL adapter, read [Adapters](../reference/adapters.md).
 
 `RaftWriteAhead` is the internal facade between the partition state machine and the configured `IWAL` adapter.
 
@@ -33,6 +37,31 @@ Recovery:
 6. invokes `OnLogRestored` for committed application logs
 7. invokes system restore callbacks for committed system logs
 8. marks restore complete for the partition.
+
+```mermaid
+sequenceDiagram
+    participant E as RaftPartitionExecutor
+    participant W as RaftWriteAhead
+    participant DP as ApplicationDurabilityProvider
+    participant RS as FairReadScheduler
+    participant L as IWAL adapter
+    participant App as Application
+    participant SC as System coordinator
+
+    E->>W: start restore
+    opt provider configured
+        W->>DP: GetDurablyAppliedIndex
+        DP-->>W: durable floor
+    end
+    W->>RS: enqueue read
+    RS->>L: read partition logs
+    L-->>W: logs
+    W-->>E: logs loaded (replayed on the executor)
+    Note over W: rebuild contiguous and committed frontiers, advance propose and commit indexes, merge HLC floor
+    W->>App: OnLogRestored (committed application logs)
+    W->>SC: system restore callbacks (committed system logs)
+    W-->>E: restore complete
+```
 
 If there are no logs, the commit index starts after the adapter's current max log id.
 
@@ -90,6 +119,16 @@ Kommander tracks two different high-water marks:
 | --- | --- |
 | Raw max log id | Highest log id physically present in the backend. |
 | Contiguous present index | Highest log id durably present with no missing id below it, across any WAL entry type. |
+
+For example, a log that holds ids 1 to 5 and 7, but not 6:
+
+```mermaid
+flowchart LR
+    I1["1"] --- I2["2"] --- I3["3"] --- I4["4"] --- I5["5: contiguous present index"]:::leader
+    I5 -. "gap" .- I6["6 missing"]
+    I6 -. "gap" .- I7["7: raw max log id"]
+    classDef leader fill:#008f63,color:#ffffff,stroke:#04241b
+```
 
 Raft election freshness uses the contiguous present index and its term, not the raw max id. This matters after reordered appends, crashes, lazy committed markers, or partial catch-up. A node with a single high log entry above a gap must not advertise itself as fresher than a node with a complete prefix.
 
@@ -167,6 +206,17 @@ After the application import hook succeeds, `RaftWriteAhead.InstallSnapshotBound
 | --- | --- |
 | Boundary entry has the same term as the snapshot's `LastIncludedTerm`. | Keep entries above the snapshot index. |
 | Boundary entry is missing or has a different term. | Truncate entries above the snapshot index. |
+
+```mermaid
+flowchart TD
+    IMP(["Application import hook succeeds"]) --> INS["RaftWriteAhead.InstallSnapshotBoundaryAsync"]
+    INS --> Q{"Entry at snapshot index has term LastIncludedTerm?"}
+    Q -->|yes| KEEP["Keep entries above the snapshot index"]
+    Q -->|"missing or different term"| TRUNC["Truncate entries above the snapshot index"]
+    KEEP --> CK[("Durable CommittedCheckpoint at snapshot index")]
+    TRUNC --> CK
+    CK --> SEED["Seed commit and propose frontiers from the snapshot index"]
+```
 
 `RocksDbWAL` performs the suffix delete and checkpoint put in one `WriteBatch`. `SqliteWAL` performs the term probe, suffix delete, and checkpoint upsert in one transaction under the shard lock. `InMemoryWAL` applies the same rule under its partition guard.
 

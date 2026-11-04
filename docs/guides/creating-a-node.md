@@ -31,6 +31,25 @@ Use a unique `NodeId` when you can. Kommander derives one from `NodeName` if `No
 | Partition executors | Run the state machine of each partition serially. The Raft state then has one owner. |
 | `ReadScheduler` / `WalScheduler` | Run the synchronous WAL reads and writes on fair worker queues. The queues are partition-aware. |
 
+Kommander includes RocksDB, SQLite, and in-memory WAL adapters. The external [Solarium WAL](../operations/solarium-wal.md) is another durable `IWAL` option and is passed to the same `RaftManager` constructor.
+
+<ArchDiagram
+  group="One Kommander node"
+  sources={[
+    {label: 'RaftConfiguration', icon: 'chip'},
+    {label: 'IDiscovery', icon: 'server'},
+    {label: 'IWAL', icon: 'database'},
+    {label: 'ICommunication', icon: 'server'},
+    {label: 'HybridLogicalClock', icon: 'chip'},
+  ]}
+  hub={{label: 'RaftManager', icon: 'layers'}}
+  targets={[
+    {label: 'Partition executors', sub: 'One serial owner for each partition', icon: 'log'},
+    {label: 'ReadScheduler / WalScheduler', sub: 'Fair, partition-aware WAL I/O queues', icon: 'database'},
+  ]}
+  title="The RaftManager constructor combines RaftConfiguration, IDiscovery, IWAL, ICommunication, and a HybridLogicalClock. The RaftManager then runs the partition executors and the ReadScheduler and WalScheduler."
+/>
+
 ## Lifecycle
 
 Subscribe to the restore callback and the replication callback first. Then call `JoinCluster`:

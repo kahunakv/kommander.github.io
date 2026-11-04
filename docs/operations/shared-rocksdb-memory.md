@@ -6,6 +6,23 @@ Without coordination, those two databases use separate RocksDB memory resources.
 
 `RocksDbSharedResources` lets the host create one shared bundle of RocksDB memory. The host passes the bundle to the `RocksDbWAL` of Kommander and to its own RocksDB database. This reduces the duplicate memory overhead. It does not merge the databases. It does not change the WAL format.
 
+<ArchDiagram
+  group="One host process"
+  sources={[{label: 'Kommander RocksDbWAL', icon: 'log'}, {label: 'Host RocksDB database', icon: 'database'}]}
+  hub={{label: 'RocksDbSharedResources', icon: 'layers'}}
+  targets={[{label: 'Block cache', sub: '(one LRU cache of totalBytes)', icon: 'chip'}, {label: 'Write-buffer manager', sub: '(memtableBudgetBytes)', icon: 'chip'}]}
+  title="The Kommander RocksDbWAL and the host RocksDB database in one process both borrow RocksDbSharedResources, which holds one LRU block cache and one write-buffer manager. Their on-disk files stay separate."
+/>
+
+The feature is opt-in. `RocksDbWAL` behaves as before if you pass no shared resources. Use the feature when all of these conditions are true:
+
+- Your process runs the `RocksDbWAL` of Kommander.
+- The same process also opens another RocksDB database.
+- The total memory usage matters.
+- You want one bounded budget for the cache and the memtables instead of independent RocksDB budgets.
+
+It does not apply to `SqliteWAL`, to `InMemoryWAL`, or to a process with only one RocksDB database. Do not use this feature to share data between the databases. It covers the in-process RocksDB memory objects only.
+
 ## What It Shares
 
 | Resource | Shared | Notes |
@@ -16,19 +33,6 @@ Without coordination, those two databases use separate RocksDB memory resources.
 | RocksDB background environment | Already shared | The default process environment of RocksDB is already common in the process. |
 | On-disk data | No | The Kommander WAL files and the host database files stay separate. |
 | Raft behavior | No | The replication, the recovery, the snapshots, and the wire behavior do not change. |
-
-This feature is opt-in. `RocksDbWAL` behaves as before if you pass no shared resources.
-
-## When To Use It
-
-Use shared RocksDB memory in these conditions:
-
-- Your process runs the `RocksDbWAL` of Kommander.
-- The same process also opens another RocksDB database.
-- The total memory usage matters.
-- You want one bounded budget for the cache and the memtables instead of independent RocksDB budgets.
-
-Do not use this feature to share data between the databases. It covers the in-process RocksDB memory objects only.
 
 ## Basic Usage
 
@@ -88,6 +92,21 @@ Obey these rules:
 3. Pass its cache and its write-buffer manager to each host RocksDB database before that database opens.
 4. Dispose every database that borrowed the bundle first.
 5. Dispose `RocksDbSharedResources` last.
+
+```mermaid
+sequenceDiagram
+    participant H as Host
+    participant S as RocksDbSharedResources
+    participant W as RocksDbWAL
+    participant D as Host RocksDB database
+    H->>S: CreateWithUnifiedBudget
+    H->>W: construct with sharedResources
+    H->>D: open with BlockCache and WriteBufferManagerHandle
+    Note over W,D: both draw from the shared budget
+    H->>W: Dispose
+    H->>D: Dispose
+    H->>S: Dispose last
+```
 
 `RocksDbWAL` borrows the bundle. It does not dispose it.
 

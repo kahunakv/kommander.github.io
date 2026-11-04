@@ -77,6 +77,33 @@ Important outcomes:
 
 While the handoff is pending, proposals are answered `NodeIsNotLeader` only after the leader change is published. If the target fails to catch up, the parked proposals are re-admitted in order.
 
+```mermaid
+sequenceDiagram
+    participant C as Caller
+    participant L as Leader
+    participant T as Target follower
+    C->>L: TransferLeadershipAsync(partitionId, targetEndpoint)
+    alt local node is not the leader
+        L-->>C: NodeIsNotLeader
+    else local node leads the partition
+        opt target is behind the last log index
+            Note over L: pause proposal admission
+            L->>T: keep replicating
+            T-->>L: append acknowledgements
+        end
+        alt target reaches the last index within one election timeout
+            Note over L: step down, publish the leader change
+            Note over L: parked proposals answered NodeIsNotLeader
+            L->>T: hand over leadership
+            Note over T: campaigns in the next term
+            L-->>C: Success, or Pending if not confirmed in the settle window
+        else wait expires
+            Note over L: resume serving, re-admit parked proposals in order
+            L-->>C: TargetNotCaughtUp
+        end
+    end
+```
+
 ## Heartbeat Suspension
 
 Two additional hooks exist for fault-injection tests:

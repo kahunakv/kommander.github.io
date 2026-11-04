@@ -36,6 +36,22 @@ That model is valuable when:
 
 You construct `RaftManager`, choose its adapters, subscribe to committed-log callbacks, and decide how each command changes your application state.
 
+<ArchDiagram
+  group="Kommander, embedded in your process"
+  sources={[
+    {label: 'Your API', icon: 'user'},
+    {label: 'Your state machine', icon: 'chip'},
+    {label: 'Leader-aware workers', icon: 'server'},
+  ]}
+  hub={{label: 'RaftManager', icon: 'layers'}}
+  targets={[
+    {label: 'IWAL', sub: 'RocksDB, SQLite, Solarium, in-memory', icon: 'database'},
+    {label: 'ICommunication', sub: 'gRPC, REST, in-memory', icon: 'server'},
+    {label: 'IDiscovery', sub: 'Static, dynamic, multicast', icon: 'chip'},
+  ]}
+  title="Your API, your state machine, and your leader-aware workers call into a RaftManager that runs inside your own .NET process. The RaftManager uses the adapters you choose: IWAL for durable log storage, ICommunication for node-to-node transport, and IDiscovery for finding peers."
+/>
+
 ## What You Get
 
 ### Raft Consensus
@@ -48,6 +64,30 @@ You do not have to implement election timers, term handling, vote rules, log mat
 
 Each user partition has its own Raft group and leader. Different nodes can lead different partitions, allowing independent workloads to make progress without sending every decision through one cluster-wide leader.
 
+```mermaid
+flowchart LR
+    subgraph N1["Node 1"]
+        direction TB
+        N1P1["Partition 1<br/>leader"]:::leader
+        N1P2["Partition 2<br/>follower"]
+        N1P3["Partition 3<br/>follower"]
+    end
+    subgraph N2["Node 2"]
+        direction TB
+        N2P1["Partition 1<br/>follower"]
+        N2P2["Partition 2<br/>leader"]:::leader
+        N2P3["Partition 3<br/>follower"]
+    end
+    subgraph N3["Node 3"]
+        direction TB
+        N3P1["Partition 1<br/>follower"]
+        N3P2["Partition 2<br/>follower"]
+        N3P3["Partition 3<br/>leader"]:::leader
+    end
+    N1 ~~~ N2 ~~~ N3
+    classDef leader fill:#008f63,color:#ffffff,stroke:#04241b
+```
+
 Partition `0` is reserved for Kommander's system state. Application partitions start at `1`.
 
 By default, every user partition is replicated to every committed voter. For larger clusters, `ReplicationFactor` lets each user partition use a fixed-size replica set, so storage, heartbeats, and quorum width do not have to grow with the total cluster size.
@@ -58,7 +98,7 @@ Choose the components that fit your deployment:
 
 | Concern | Built-in choices |
 | --- | --- |
-| Durable WAL | RocksDB or SQLite |
+| Durable WAL | RocksDB, SQLite, or external Solarium adapter |
 | Test WAL | In-memory |
 | Network transport | gRPC or REST/JSON |
 | Test transport | In-memory |

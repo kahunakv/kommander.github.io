@@ -47,6 +47,17 @@ On a leader, `WalStallStepDownTimeout` turns that local durable-write stall into
 
 `WalStallWarnThreshold` controls warning logs and peer protection. Followers include their oldest pending WAL write age in append acknowledgements. While a peer reports a stall at or above that threshold, the leader pauses entry-carrying backfill and does not start snapshot transfer to that peer; neither can complete on a stalled disk. The leader also holds WAL retention at the peer's reported durable frontier within `CompactionLiveReplicaLagBudget`, so the follower can catch up from the log when its disk answers.
 
+```mermaid
+flowchart TD
+    A["Oldest pending WAL write age"] --> B{"Where is the stall?"}
+    B -- "leader, age over WalStallStepDownTimeout" --> C["Step down, fail waiting proposals"]
+    C --> D["No campaign until its own write completes"]
+    C --> CM["raft.leader.wal_stall_step_downs_total"]
+    B -- "follower, age at or above WalStallWarnThreshold" --> E["Age reported in append acknowledgements"]
+    E --> F["Leader pauses entry-carrying backfill and snapshot transfer"]
+    E --> G["Leader holds retention at the reported durable frontier"]
+```
+
 ## Count The Persisted Logs And The Removable Logs
 
 `IWAL` gives two helpful count methods:

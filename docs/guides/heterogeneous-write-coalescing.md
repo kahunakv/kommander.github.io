@@ -1,5 +1,7 @@
 # Heterogeneous Write Coalescing
 
+Use `ReplicateEntries` when one request in your service produces several records of different kinds for the same partition. You write them all with one call. Kommander can put the entries into fewer proposals and fewer replication round trips than separate `ReplicateLogs` calls. You still get one result for each entry. You do not need to configure anything.
+
 `ReplicateEntries` lets an application send a batch of entries with different types to one partition in one call.
 
 Use it when your service makes several independent records at one time. Examples are:
@@ -32,8 +34,6 @@ RaftBatchReplicationResult result = await raft.ReplicateEntries(
     cancellationToken: cancellationToken
 );
 ```
-
-Kommander can change that list into fewer proposals and fewer replication round trips. It still returns one result for each input entry.
 
 ## Batch Shape
 
@@ -118,6 +118,22 @@ RaftBatchReplicationResult result = await raft.ReplicateEntries(
 
 The auto prefix commits first. Kommander proposes the manual suffix after that. The manual suffix then stays pending.
 
+```mermaid
+sequenceDiagram
+  participant App as Application
+  participant L as Partition leader
+  participant F as Followers
+  App->>L: ReplicateEntries(kv, lock, prepare)
+  L->>F: proposal 1, auto prefix
+  F-->>L: quorum
+  Note over L: kv and lock commit, Status = Success
+  L->>F: proposal 2, manual suffix
+  F-->>L: quorum
+  Note over L: prepare stays Pending with the shared ticket
+  L-->>App: RaftBatchReplicationResult with TicketId
+  App->>L: CommitLogs or RollbackLogs with the ticket
+```
+
 A manual entry reports these values:
 
 - `Status = Pending`
@@ -165,6 +181,19 @@ The generation behavior is:
 - The other entries can still commit.
 
 The fence can reject every entry. Kommander then appends nothing. The overall result reports `PartitionMoved`.
+
+```mermaid
+flowchart TD
+  entry["Each RaftProposalEntry"] --> zero{"ExpectedGeneration = 0?"}
+  zero -- yes --> admit["Admitted"]
+  zero -- no --> match{"Matches the partition generation?"}
+  match -- yes --> admit
+  match -- no --> moved["Slot is PartitionMoved, LogIndex = -1"]
+  admit --> any{"Any entry admitted?"}
+  moved --> any
+  any -- yes --> append["Append the admitted entries, overall Success"]
+  any -- no --> none["Append nothing, overall PartitionMoved"]
+```
 
 This behavior is useful with elastic partitions, because a key range can move after a split or a merge. A caller can examine the result of each entry. It can then refresh the partition map for the stale entries. It can retry only the entries that moved.
 

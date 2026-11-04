@@ -1,8 +1,10 @@
 # Security And Authentication
 
-Kommander supports transport-level security settings for the node-to-node REST traffic and gRPC traffic. You configure them through `RaftConfiguration.TransportSecurity`.
+Kommander nodes send Raft messages to each other: votes, heartbeats, and log entries. Transport security makes sure that only members of your cluster can send these messages to a node, and that the traffic uses TLS.
 
-This page tells you three things. It gives the supported authentication modes. It tells you how Kommander enforces TLS. It tells you how to configure mutual TLS when each node needs its own transport identity.
+Authentication is off by default (`NodeAuthenticationMode = Disabled`). A node then accepts node-to-node requests without a check of the sender. This is acceptable for local development and in-memory tests. For a production cluster on a network, turn on authentication before the cluster carries real data.
+
+The settings apply to the node-to-node REST traffic and gRPC traffic. You configure them through `RaftConfiguration.TransportSecurity`. This page gives the supported authentication modes, how Kommander enforces TLS, and how to configure mutual TLS when each node needs its own transport identity. For a quick choice, see [Recommended Setups](#recommended-setups).
 
 ## The Primary Configuration Object
 
@@ -149,6 +151,26 @@ This gives the runtime basic protection against:
 - a request with a clock skew
 - a request that an attacker replays.
 
+`RaftTransportAuthenticator` runs the checks in this order and stops at the first failure:
+
+```mermaid
+flowchart TD
+    req(["Signed request"]) --> tls{"TLS present, or RequireTls off?"}
+    tls -->|No| e1["TlsRequired"]
+    tls -->|Yes| fields{"Signature, sender, timestamp, and nonce present?"}
+    fields -->|No| e2["MissingFields"]
+    fields -->|Yes| parse{"Fields well formed?"}
+    parse -->|No| e3["MalformedFields"]
+    parse -->|Yes| skew{"Timestamp within AllowedClockSkew?"}
+    skew -->|No| e4["TimestampSkewExceeded"]
+    skew -->|Yes| sig{"Signature matches?"}
+    sig -->|No| e5["InvalidSignature"]
+    sig -->|Yes| nonce{"Nonce not seen before?"}
+    nonce -->|No| e6["ReplayDetected"]
+    nonce -->|Yes| ok(["Success"]):::leader
+    classDef leader fill:#008f63,color:#ffffff,stroke:#04241b
+```
+
 For REST, `MaxPreAuthRequestBodyBytes` bounds how much request body data Kommander will read and digest before the shared-secret signature is proven. The default is `32 MiB`. Larger unauthenticated request bodies are refused before they reach the Raft handler. This matters most when the host's own request-size limit has been raised, or when REST snapshot chunks are large enough that their base64-encoded body approaches the limit.
 
 REST shared-secret signatures are computed over the exact UTF-8 request bytes that Kommander sends. The transport serializes once, signs those bytes, and sends the same bytes on the wire. This keeps authentication deterministic across peers and avoids extra per-request serialization work.
@@ -190,6 +212,29 @@ With `SharedSecret` authentication enabled:
 3. It reads the sender node header, the timestamp header, and the nonce header.
 4. `RaftTransportAuthenticator` validates the request.
 5. An unauthenticated request receives `401 Unauthorized`.
+
+```mermaid
+sequenceDiagram
+    participant S as Sending node
+    participant M as REST middleware
+    participant A as RaftTransportAuthenticator
+    participant H as Raft handler
+    S->>M: POST /v1/raft/* with signature headers
+    Note over M: Buffer and digest the body, read the headers
+    alt Body over MaxPreAuthRequestBodyBytes
+        M-->>S: 413 Payload Too Large
+    else Body within the limit
+        M->>A: Validate
+        alt Success
+            A-->>M: Success
+            M->>H: Forward the request
+            H-->>S: Raft response
+        else Any failure status
+            A-->>M: Failure status
+            M-->>S: 401 Unauthorized
+        end
+    end
+```
 
 With `MutualTls` authentication enabled, the REST middleware validates the client certificate from the TLS connection instead. Therefore, the host layer enforces the REST authentication. Each endpoint handler does not enforce it manually.
 

@@ -46,6 +46,15 @@ A compaction pass does these steps:
 
 Because of the limit, one compaction trigger cannot hold the partition for an unbounded time.
 
+```mermaid
+flowchart TD
+    T(["Every CompactEveryOperations committed operations"]) --> R["Read the last committed checkpoint"]
+    R --> D["Remove up to CompactNumberEntries older entries"]
+    D --> Q{"Eligible work left and under MaxEntriesPerCompaction?"}
+    Q -- yes --> D
+    Q -- no --> Y(["Yield until the next trigger"])
+```
+
 ## Live Replica Lag Hold
 
 Compaction also considers live follower progress. If a follower is alive, still acknowledging the leader, and has not yet replicated entries below the checkpoint, the leader can temporarily hold the compaction floor behind that follower.
@@ -102,6 +111,19 @@ Retention holds compose safely:
 - The holds are in memory. You must acquire them again after a restart.
 
 `SetMinRetainIndex` is useful for one owner that publishes a local snapshot boundary continuously. `AcquireRetentionHold` is safer for short work such as a point-in-time recovery capture, a backup export, or concurrent consumers. Those consumers must not overwrite the floor of each other.
+
+Each floor on this page bounds the same compaction pass. The pass removes only the entries below the lowest floor.
+
+```mermaid
+flowchart LR
+    CP["Last committed checkpoint"] --> MIN
+    AD["ApplicationDurabilityProvider floor"] --> MIN
+    RH["Lowest active AcquireRetentionHold"] --> MIN
+    MR["SetMinRetainIndex floor"] --> MIN
+    LR["Live replica lag hold"] --> MIN
+    MIN{"Lowest floor"} --> E["Effective compaction floor"]
+    E --> X["Entries below it can be removed"]
+```
 
 See [System Partition State Snapshots](../guides/system-partition-state-snapshots.md) for the delta pattern on partition `0`.
 

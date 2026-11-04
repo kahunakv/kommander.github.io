@@ -4,6 +4,19 @@ Raft nodes send messages to each other all the time: vote requests, heartbeats, 
 
 If a node does not map the routes, the other nodes cannot reach it. The node then receives no vote requests, no heartbeats, and no log entries.
 
+```mermaid
+flowchart LR
+    subgraph A["Node A process"]
+        direction TB
+        RA["RaftManager"] --> CA["GrpcCommunication or RestCommunication"]
+    end
+    subgraph B["Node B ASP.NET Core host"]
+        direction TB
+        RB["MapGrpcRaftRoutes or MapRestRaftRoutes"] --> MB["RaftManager"]
+    end
+    CA -->|"Votes, heartbeats, log entries"| RB
+```
+
 Choose one transport and use it on every node. Map its routes in each process, as this page shows. For tests that run all the nodes in one process, use the in-memory transport. It needs no routes.
 
 ## gRPC
@@ -11,10 +24,14 @@ Choose one transport and use it on every node. Map its routes in each process, a
 ```csharp
 using Kommander.Communication.Grpc;
 
+builder.Services.AddKommanderGrpc();
+
 WebApplication app = builder.Build();
 app.MapGrpcRaftRoutes();
 app.Run();
 ```
+
+Use both helpers. `AddKommanderGrpc()` configures the server and applies `GrpcMaxMessageBytes` when the registered `IRaft` is available. `MapGrpcRaftRoutes()` maps the service and verifies its receive limit before the endpoint is built. If a host uses plain `AddGrpc()`, route mapping raises the Raft service limit when possible and logs a warning. If custom service wiring leaves the effective limit below `GrpcMaxMessageBytes`, Kommander logs an error; full batch frames can otherwise fail with gRPC `ResourceExhausted` and force replication streams to reconnect.
 
 Use `GrpcCommunication` on the `RaftManager`:
 

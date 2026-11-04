@@ -9,6 +9,10 @@ Typical signals are:
 - The leader of one partition is much hotter than the other leaders.
 - The latency of one key range grows while the other partitions stay healthy.
 
+A split spreads the work of one hot range over two partitions. Each partition is its own Raft group with its own leader, so the two halves can be led by different nodes.
+
+Kommander never splits a partition by itself. You decide when to split, and you call `SplitPartitionAsync` on the leader of the source partition. If your application keeps state for each partition, register an `IRaftStateMachineTransfer` on every node first, so the new partition receives its state.
+
 This guide gives the operational flow of a split. For the full API, see [Elastic Partitions](./elastic-partitions.md).
 
 Kommander gives `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, and `GetPartitionCommitWaitMs`. They help you separate a busy partition from a saturated partition. Read [Partition Load Signals](./partition-load-signals.md) before you build an automatic split trigger.
@@ -22,6 +26,21 @@ In simple terms:
 - The source partition keeps one part of the keyspace.
 - The target partition receives the other part.
 - New writes must use the updated partition map.
+
+```mermaid
+flowchart LR
+    subgraph before["Before the split"]
+        S0["Partition 2<br/>[start, end]"]
+    end
+    subgraph after["After the split"]
+        direction TB
+        S1["Partition 2<br/>[start, boundary - 1]"]
+        T1["New target partition<br/>[boundary, end]"]
+        S1 ~~~ T1
+    end
+    S0 -->|"keeps the lower part"| S1
+    S0 -->|"boundary = HashBoundary or midpoint"| T1
+```
 
 Kommander can assign the id of the target partition. Pass `0` for that behavior.
 
@@ -77,6 +96,18 @@ IReadOnlyList<RaftPartitionRange> map = raft.GetPartitionMap();
 
 Pass `expectedGeneration` on your writes. A stale caller then fails safely. It does not write to an old partition layout without a warning.
 
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant Old as Leader of the cached partition
+    participant New as Leader of the owning partition
+    App->>Old: ReplicateLogs with a stale expectedGeneration
+    Old-->>App: PartitionMoved
+    Note over App: GetPartitionMap, then update the routing cache
+    App->>New: ReplicateLogs with the current generation
+    New-->>App: Success
+```
+
 ## State Transfer Is Important
 
 Your state machine can keep local domain state for each partition. A split is then more than a routing event. Some data can need a move from the state of the old partition to the state of the new partition.
@@ -88,6 +119,25 @@ raft.RegisterStateMachineTransfer(new MyStateMachineTransfer());
 ```
 
 Without a state transfer, a split changes the routing. The new partition can then have no application state.
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant SL as Source partition leader
+    participant Sys as System coordinator, partition 0
+    participant X as IRaftStateMachineTransfer
+    App->>SL: SplitPartitionAsync
+    SL->>Sys: Split request
+    Note over Sys: Phase 1 commits the map. Source and target are Splitting
+    opt Transfer registered
+        Sys->>X: ExportRange(plan, upToIndex)
+        X-->>Sys: Snapshot stream
+        Sys->>X: ImportRange(targetPartitionId, snapshot)
+    end
+    Note over Sys: Phase 2 commits the map. Both are Active with a new generation
+    Sys-->>SL: Status and generation
+    SL-->>App: RaftPartitionLifecycleResult
+```
 
 ## A Simple Operating Pattern
 

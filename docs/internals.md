@@ -38,4 +38,54 @@ A typical application write follows this path:
 9. After quorum completion, the proposal is committed or left for manual commit depending on `autoCommit`.
 10. Committed entries reach the application through `OnReplicationReceived`.
 
+```mermaid
+sequenceDiagram
+    participant C as Caller
+    participant M as RaftManager
+    participant P as RaftPartition
+    participant E as RaftPartitionExecutor
+    participant S as State machine + RaftWriteAhead
+    participant W as FairWalScheduler + IWAL
+    participant F as Followers
+    participant A as OnReplicationReceived
+
+    C->>M: IRaft.ReplicateLogs
+    M->>P: route to target partition
+    Note over P: local node must lead the partition
+    P->>E: post client operation
+    E->>S: run proposal
+    par local write
+        S->>W: persist proposed entries
+        W-->>E: WAL completion
+    and fan-out
+        S->>F: AppendLogs
+        F-->>E: append acks
+    end
+    Note over S: quorum reached (leader write included)
+    alt autoCommit true
+        S->>W: committed marker
+        S-->>C: committed result
+    else autoCommit false
+        S-->>C: result with TicketId for CommitLogs or RollbackLogs
+    end
+    S-)A: committed entries
+```
+
 The important point: network messages, timers, storage completions, and client calls all become partition operations. They do not mutate the partition state from random threads.
+
+<ArchDiagram
+  group="One partition"
+  sources={[
+    {label: 'Client calls', icon: 'user'},
+    {label: 'Transport messages', icon: 'server'},
+    {label: 'Timer ticks', icon: 'chip'},
+    {label: 'WAL completions', icon: 'log'},
+  ]}
+  hub={{label: 'Partition executor', icon: 'layers'}}
+  targets={[
+    {label: 'RaftWriteAhead', sub: '(fair read and WAL schedulers, then IWAL)', icon: 'database'},
+    {label: 'RaftTransportDispatcher', sub: '(outbound protocol messages)', icon: 'server'},
+  ]}
+  title="Client calls, transport messages, timer ticks, and WAL completions all enter the single partition executor, which alone mutates partition state and hands storage work to RaftWriteAhead and outbound messages to RaftTransportDispatcher."
+/>
+

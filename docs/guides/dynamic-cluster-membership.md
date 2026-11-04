@@ -1,17 +1,16 @@
 # Dynamic Cluster Membership
 
-Kommander can change the cluster roster at runtime.
+Use dynamic membership to grow, shrink, or repair a cluster while it runs. You can add a node for more capacity, remove a node for maintenance, or replace a node that failed. The other nodes keep running, and the quorum stays safe during each change.
 
-A node can do these operations:
+Membership changes are always available. You do not enable them. A new node calls `JoinCluster` with seed endpoints or with discovery. A node that leaves calls `LeaveCluster` or `RequestLeaveAsync`. Kommander does the rest:
 
-- join an existing cluster
-- start as a non-voting learner
-- catch up
-- receive an automatic promotion to a voter
-- leave gracefully
-- receive an eviction later, if the failure detection is enabled and the transport supports it.
+- A new node starts as a non-voting learner. It does not count toward the quorum.
+- The learner receives the data that it is missing and catches up.
+- The leader promotes the learner to a voter after its lag stays small.
+- A node can leave gracefully. Kommander commits its removal from the roster.
+- Kommander evicts a node that stays dead. The failure detector is on by default, and all the built-in transports support it. The system-partition leader removes a `Dead` member after `DeadMemberEvictionGrace` (default 2 minutes).
 
-This page gives the behavior that a user can see.
+Read this page before you add or remove nodes in production, or when a new node stays a learner. This page gives the behavior that a user can see.
 
 ## The Core Idea
 
@@ -40,7 +39,18 @@ Each member has one of these roles:
 
 The typical lifecycle is:
 
-`Learner -> Voter -> Leaving -> removed`
+```mermaid
+stateDiagram-v2
+  state "Removed (NotMember)" as Removed
+  [*] --> Learner : AddMember commits
+  Learner --> Voter : lag within LearnerPromotionLag for LearnerPromotionStableWindow
+  Voter --> Leaving : drain-first RequestLeaveAsync
+  Leaving --> Voter : DrainTimedOut
+  Leaving --> Removed : RemoveMember commits
+  Voter --> Removed : RemoveMember commits (leave or Dead eviction)
+  Learner --> Removed : failed join cleanup
+  Removed --> Learner : EnableAutoRejoin
+```
 
 ## Public API
 
@@ -118,6 +128,22 @@ The sequence is:
 3. The leader replicates the state to it.
 4. The leader promotes it to `Voter` after its catch-up stays sufficient.
 
+```mermaid
+sequenceDiagram
+  participant N as New node
+  participant S as System-partition leader
+  participant L as Partition leaders
+  N->>S: JoinCluster (seeds or discovery)
+  S->>S: commit AddMember on partition 0
+  Note over N: Learner, no vote
+  L->>N: backfill or snapshot installation
+  N-->>L: acknowledgements, lag shrinks
+  Note over S: lag within LearnerPromotionLag for LearnerPromotionStableWindow
+  S->>S: commit promotion to Voter
+  S-->>N: committed roster names N as Voter
+  Note over N: JoinCluster returns
+```
+
 `JoinCluster(...)` does not return when the cluster only knows the node. It waits for the node to become a committed voter.
 
 Two configuration deadlines cover different failure modes:
@@ -167,6 +193,27 @@ if (result.Left)
 4. Kommander removes the replicas on the leaving node.
 5. The final `RemoveMember` commits when no active range names the leaving node.
 
+```mermaid
+sequenceDiagram
+  participant N as Leaving node
+  participant S as System-partition leader
+  participant R as Remaining nodes
+  N->>S: RequestLeaveAsync
+  S->>S: commit role Leaving
+  Note over N: stops campaigns, stays a replication source
+  S->>R: placement pass adds replacement learners
+  N-)R: replication during the drain
+  alt drain finishes
+    S->>S: promote the caught-up learners
+    S->>N: remove the replicas on the leaving node
+    S->>S: commit RemoveMember, no active range names N
+    S-->>N: Committed, Drained = true
+  else DecommissionDrainTimeout expires
+    S->>S: role returns to Voter
+    S-->>N: DrainTimedOut
+  end
+```
+
 This sequence keeps the durability of each partition during a planned removal. The leaving node stays available as a replication source during the drain. Kommander stops its campaigns while its committed role is `Leaving`.
 
 The important results are:
@@ -179,8 +226,11 @@ The important results are:
 - `NoLeader`: Kommander could not resolve the system-partition leader.
 - `Timeout`: The cancellation token or the deadline of the caller bounded the request.
 - `DrainTimedOut`: The evacuation did not finish before `DecommissionDrainTimeout`. The role returned to `Voter`.
+- `Evicted`: SWIM evicted the node while the decommission was in progress. The replicas were not fully evacuated, so the node must not be stopped as if the decommission completed.
 
-`LeaveClusterResult.Left` is true for `Committed` and for `NotAMember`. `LeaveClusterResult.Drained` tells you if the evacuation moved every replica that named the node before the removal. After a refused request or a failed request, the node stays a normal participant, or it becomes one again. After a committed removal, it stops its campaigns. Shut it down, or restart it through the normal join path.
+`LeaveClusterResult.Left` is true for `Committed` and for `NotAMember`. It is false for `Evicted`. `LeaveClusterResult.Drained` tells you if the evacuation moved every replica that named the node before the removal. After a refused request or a failed request, the node stays a normal participant, or it becomes one again. After a committed removal, it stops its campaigns. Shut it down, or restart it through the normal join path.
+
+An eviction and a requested removal look identical in the member list because the endpoint is absent in both cases. Kommander now records the reason in the committed roster's bounded `Departures` history. A removal requested by the node remains final. An eviction voids the decommission attempt: the request returns `Evicted`, the leave suppression is released, and `EnableAutoRejoin` can admit the still-running node as a learner before promoting it to voter again. Retry the decommission only after the node has rejoined.
 
 When a timed-out drain is confirmed rolled back to `Voter`, Kommander also releases the leave suppression state. The node can campaign normally and, if it is evicted later for an unrelated failure, `EnableAutoRejoin` works as it does for any other voter. If rollback cannot be confirmed, the suppression remains because the original removal can still finish; the warning in that path requires operator attention.
 
@@ -209,7 +259,8 @@ In practical terms:
 
 - A learner catches up from the retained committed log history first.
 - `IRaftSystemStateTransfer` can repair the application deltas on partition `0`.
-- `IRaftStateMachineTransfer` moves the state of a user partition.
+- `IRaftPartitionStateTransfer` repairs the whole state of a user partition. It is the preferred hook for the catch-up of a learner.
+- `IRaftStateMachineTransfer` moves a key range during a split or a merge. For catch-up, Kommander uses it only when `IRaftPartitionStateTransfer` is not registered.
 - A heavily compacted cluster can still block a promotion when the necessary transfer hook is missing.
 - A join timeout can mean two things. The learner could not catch up from the retained WAL. The learner could not install a snapshot.
 
@@ -275,7 +326,7 @@ The eviction of a dead member is conservative on purpose.
 
 This prevents the eviction of a node that entered the `Dead` state for a short time during a slow restart. That node becomes reachable again before the commit of the removal.
 
-A node that runs can find that Kommander removed it from the committed roster. With `EnableAutoRejoin = true`, the node runs the join flow again automatically. It enters as a learner. It returns to the voter role after a normal catch-up. Kommander suppresses the auto-rejoin during a graceful leave. It also suppresses it before the first successful join of the node.
+A node that runs can find that Kommander removed it from the committed roster. With `EnableAutoRejoin = true`, the node runs the join flow again automatically. It enters as a learner. It returns to the voter role after a normal catch-up. Kommander suppresses the auto-rejoin during a requested graceful leave and before the first successful join of the node. If SWIM evicts the node while `RequestLeaveAsync` is active, the committed `Evicted` departure reason cancels that suppression because the requested drain did not complete.
 
 Disable the auto-rejoin only for one operational model. In that model, you remove a live node remotely on purpose. You expect that process to stay outside the cluster while it runs.
 

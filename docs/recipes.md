@@ -40,4 +40,17 @@ Most Kommander-backed recipes follow the same flow:
 4. Apply the committed command in `OnReplicationReceived`.
 5. Rebuild state from committed logs in `OnLogRestored`.
 
+```mermaid
+flowchart LR
+    Key(["Application key"]) --> Route["GetPartitionKey or GetPrefixPartitionKey"]
+    Route --> IsLeader{"AmILeader?"}
+    IsLeader -- yes --> Rep["ReplicateLogs"]
+    IsLeader -- no --> Fwd["Route to the leader"]
+    Rep --> Log[("Committed log")]
+    Log --> Apply["OnReplicationReceived"]
+    Log -. "on restart" .-> Restore["OnLogRestored"]
+    Apply --> State[("Application state")]
+    Restore --> State
+```
+
 Partition `0` is reserved for Kommander system configuration. Recipes and application code should use partitions `1` and above.

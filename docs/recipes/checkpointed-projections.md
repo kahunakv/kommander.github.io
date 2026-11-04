@@ -53,6 +53,19 @@ if (shouldCheckpoint)
 
 The checkpoint becomes a durable boundary. Later, automatic compaction can remove WAL entries older than the last committed checkpoint.
 
+```mermaid
+flowchart LR
+    subgraph WAL["Partition WAL"]
+        direction LR
+        Old["Entries older than the checkpoint"] --> CP["Committed checkpoint"]:::leader
+        CP --> New["Retained entries after the checkpoint"]
+    end
+    Compact["Automatic compaction"] -. "removes" .-> Old
+    New -->|"replayed on restart"| Restore["OnLogRestored"]
+    Restore --> Proj[("quotaProjection")]
+    classDef leader fill:#008f63,color:#ffffff,stroke:#04241b
+```
+
 ## Applying State
 
 Your callbacks stay the same. The important part is that they remain deterministic and replayable.
@@ -83,4 +96,5 @@ Kommander records the checkpoint entry. Your application still owns:
 - Do not checkpoint after every command unless you have measured a real need.
 - Good checkpoint moments are batch boundaries, closed workflow stages, or periodic milestones.
 - If you never write checkpoints, compaction cannot reclaim much history.
+- After compaction, a new or lagging replica can catch up only from a snapshot. Register an `IRaftPartitionStateTransfer` that exports and imports your projection. See [Snapshot Installation](../operations/snapshot-installation.md#implement-the-partition-state-transfer).
 - Checkpointing helps restore and storage behavior, but it does not replace correct replay logic.

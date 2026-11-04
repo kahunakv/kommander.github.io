@@ -1,5 +1,9 @@
 # WAL Commit Durability
 
+Read this page when the write latency on durable storage is too high, or when you must know exactly when a write is safe after a crash. On RocksDB or SQLite, the disk sync can be the largest part of the write latency. Kommander has settings that reduce that cost without weakening the Raft durability rule.
+
+For the common case, you do not need to act. `WalSingleFsyncCommit` and `FanOutBeforeLocalWrite` are on by default. `WalGroupCommitLingerMs` is off by default (`0`). Enable it only after you measure small WAL batches. If your application applies the committed entries to its own storage asynchronously, configure `ApplicationDurabilityProvider`. See [Application Durability Floor](#application-durability-floor).
+
 Kommander persists the Raft log entries through the configured write-ahead log (WAL).
 
 For a durable backend such as RocksDB or SQLite, Kommander keeps the Raft durability invariant. It also avoids an unnecessary sync that the client can see on the common auto-commit path. A sync is an fsync, which is a durable flush to disk.
@@ -32,12 +36,21 @@ The second marker makes the restart recovery cheaper, because the WAL describes 
 
 With `WalSingleFsyncCommit = false`:
 
-```text
-leader proposed entry -> fsync
-followers proposed entry -> fsync
-quorum reached
-leader committed marker -> fsync
-client acknowledged
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant L as Leader
+    participant F as Followers
+    C->>L: auto-commit write
+    Note over L: write Proposed entry, fsync
+    L->>F: AppendLogs with the Proposed entry
+    Note over F: write Proposed entry, fsync
+    F-->>L: append acknowledgement
+    Note over L: quorum reached
+    Note over L: write Committed marker, fsync
+    L-->>C: client acknowledged
+    L-)F: Committed marker
+    Note over F: write Committed marker, fsync
 ```
 
 Each follower also receives a committed marker and syncs it.
@@ -47,6 +60,14 @@ Therefore, one auto-commit write can wait for two serial syncs on the leader pat
 ## Group Commit Linger
 
 `FairWalScheduler` already batches the ready WAL work across partitions. A worker can drain a maximum of `MaxWalGroupBatchPartitions` ready partitions. It then makes one `IWAL.Write` call.
+
+<ArchDiagram
+  group="Up to MaxWalGroupBatchPartitions ready partitions"
+  sources={[{label: 'Partition 1', icon: 'log'}, {label: 'Partition 2', icon: 'log'}, '…', {label: 'Partition N', icon: 'log'}]}
+  hub={{label: 'FairWalScheduler worker', icon: 'layers'}}
+  targets={[{label: 'One IWAL.Write', sub: '(one shared storage sync)', icon: 'database'}]}
+  title="Ready WAL work from many partitions is drained by one FairWalScheduler worker into a single IWAL.Write call that shares one storage sync."
+/>
 
 `WalGroupCommitLingerMs` adds a short adaptive wait after the worker finds the first ready partition. That wait gives more partitions a chance to arrive and share the same storage sync.
 
@@ -69,11 +90,21 @@ The linger window is adaptive. The worker does not wait for the full window if n
 
 The setting is enabled by default. An `autoCommit` write then acknowledges the client as soon as the proposed entry is durable on a quorum. The runtime still writes the committed marker of each entry afterward. It writes the marker lazily, so the marker can ride a later sync.
 
-```text
-proposed entry -> fsync
-quorum reached
-client acknowledged
-committed marker written lazily
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant L as Leader
+    participant F as Followers
+    C->>L: auto-commit write
+    Note over L: write Proposed entry, fsync
+    L->>F: AppendLogs with the Proposed entry
+    Note over F: write Proposed entry, fsync
+    F-->>L: append acknowledgement
+    Note over L: quorum reached
+    L-->>C: client acknowledged
+    Note over L: Committed marker written lazily, rides a later sync
+    L-)F: Committed marker
+    Note over F: marker written lazily, rides a later sync
 ```
 
 This is a latency optimization. It removes one serial sync from the path that the client can see. It applies to the common single-round auto-commit write.
@@ -86,10 +117,25 @@ The lazy marker path applies only when the node already holds the entry durably 
 
 `FanOutBeforeLocalWrite` is enabled by default. The leader sends a new proposal to followers as soon as its own `Proposed` write is queued, rather than waiting for that local write to become durable first. The leader's WAL write and the followers' WAL writes can then run at the same time.
 
-```text
-serial:      leader propose fsync -> send -> follower append fsync -> ack -> quorum
-overlapped:  leader propose fsync ---------+
-             send -> follower append fsync +-> quorum
+```mermaid
+sequenceDiagram
+    participant L as Leader
+    participant F as Follower
+    Note over L,F: Serial round, FanOutBeforeLocalWrite = false
+    Note over L: Proposed write, fsync
+    L->>F: send AppendLogs
+    Note over F: append, fsync
+    F-->>L: ack
+    Note over L: quorum
+    Note over L,F: Overlapped round, FanOutBeforeLocalWrite = true
+    par Leader local write
+        Note over L: Proposed write, fsync
+    and Follower append
+        L->>F: send AppendLogs as soon as the write is queued
+        Note over F: append, fsync
+        F-->>L: ack
+    end
+    Note over L: quorum, only after the leader write is durable too
 ```
 
 The meaning of an acknowledgement does not change. A proposal is not treated as quorum-complete until the leader's own write is durable too. Followers can answer first, but `RaftProposalQuorum` keeps the proposal short of quorum until the leader's local durability is recorded.

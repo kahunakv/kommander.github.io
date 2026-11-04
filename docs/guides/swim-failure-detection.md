@@ -1,5 +1,9 @@
 # SWIM Failure Detection
 
+The failure detector finds nodes that stopped answering. Kommander needs it for two automatic actions: the eviction of a dead member from the roster, and the failover of an idle partition that sends no heartbeats.
+
+The detector is on by default. All the built-in transports support it, and you do not need to configure it. It probes one random peer every second (`PingInterval`). Read this page to tune the timing, or to understand why a node shows as `Suspect` or `Dead`. If you set `PingInterval` to zero to turn the detector off, also set `EnableQuiescence = false`.
+
 Kommander uses a failure detector in the SWIM style. The detector tracks the apparent liveness of each cluster node.
 
 SWIM gives node-level liveness. It answers questions of this type:
@@ -36,6 +40,28 @@ The normal flow is:
 
 An indirect probe reduces the false positives that one bad network path between two nodes causes.
 
+```mermaid
+sequenceDiagram
+    participant A as Probing node
+    participant R as Relay peers
+    participant T as Target node
+    A->>T: Ping
+    alt Ack within PingTimeout
+        T-->>A: Ack
+        Note over A: Target stays Alive
+    else Direct ping times out
+        A->>R: PingReq to IndirectPingFanout relays
+        R->>T: Ping
+        alt A relay receives an ack
+            T-->>R: Ack
+            R-->>A: Ack
+            Note over A: Target stays Alive
+        else All probes fail
+            Note over A: Mark target Suspect
+        end
+    end
+```
+
 ## Liveness States
 
 | State | Meaning |
@@ -43,6 +69,18 @@ An indirect probe reduces the false positives that one bad network path between 
 | `Alive` | The node responded recently, or it refuted the suspicion. |
 | `Suspect` | The probes failed, but the node still has time to refute the suspicion. |
 | `Dead` | The node stayed unreachable after the suspicion window. |
+
+```mermaid
+stateDiagram-v2
+    state "Removed from roster" as Removed
+    [*] --> Alive
+    Alive --> Suspect: Direct and indirect probes fail
+    Suspect --> Alive: Ack or a newer Alive incarnation
+    Suspect --> Dead: Still Suspect after SuspicionTimeout
+    Dead --> Alive: Last-chance direct probe answers
+    Dead --> Removed: RemoveMember commits after DeadMemberEvictionGrace
+    Removed --> [*]
+```
 
 A quiesced partition reacts as soon as the leader node is no longer `Alive`. Therefore, the failover starts at `Suspect`. It does not wait for `Dead`.
 

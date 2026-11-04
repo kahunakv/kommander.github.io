@@ -17,7 +17,9 @@ const config = {
   deploymentBranch: 'gh-pages',
 
   onBrokenLinks: 'throw',
+  themes: ['@docusaurus/theme-mermaid'],
   markdown: {
+    mermaid: true,
     hooks: {
       onBrokenMarkdownLinks: 'warn',
     },
@@ -27,6 +29,10 @@ const config = {
     defaultLocale: 'en',
     locales: ['en'],
   },
+
+  stylesheets: [
+    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap',
+  ],
 
   headTags: [
     {
@@ -127,11 +133,33 @@ const config = {
             ],
           },
         ],
-        copyright: 'Copyright © 2026 Kommander.',
+        copyright: 'Copyright © 2024-2026 Kommander.',
+      },
+      // Colors per color mode live in src/theme/Mermaid/index.js.
+      mermaid: {
+        theme: {light: 'base', dark: 'base'},
+        options: {
+          // Flat boxes without the drop shadows of Mermaid 12's default 'neo' look.
+          look: 'classic',
+          // Mermaid 12 wraps node labels at 120px; keep short labels on one line.
+          // Space above subgraph titles so they do not crowd the top border.
+          flowchart: {padding: 16, wrappingWidth: 220, subGraphTitleMargin: {top: 14, bottom: 6}},
+          // Narrow, wrapped sequence diagrams keep their text legible when
+          // scaled to the content column.
+          sequence: {
+            wrap: true,
+            width: 130,
+            actorMargin: 40,
+            mirrorActors: false,
+            actorFontSize: 15,
+            messageFontSize: 15,
+            noteFontSize: 14,
+          },
+        },
       },
       prism: {
-        theme: prismThemes.github,
-        darkTheme: prismThemes.dracula,
+        theme: prismThemes.oneLight,
+        darkTheme: prismThemes.oneDark,
         additionalLanguages: ['csharp', 'bash', 'powershell'],
       },
     }),

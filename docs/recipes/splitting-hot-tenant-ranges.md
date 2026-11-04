@@ -45,6 +45,20 @@ RaftPartitionLifecycleResult split = await raft.SplitPartitionAsync(
 
 Passing `targetPartitionId: 0` tells Kommander to assign a new user partition id automatically. Partition `0` itself remains reserved for the system partition.
 
+```mermaid
+flowchart LR
+    subgraph Before["Before split"]
+        P2["Partition 2: full hash range"]
+    end
+    subgraph After["After split"]
+        direction TB
+        L2["Partition 2: left half"]
+        RN["Partition N: right half"]
+    end
+    P2 -->|"SplitPartitionAsync"| L2
+    P2 -->|"new id assigned"| RN
+```
+
 ## Applying State
 
 Once the split finishes, your application should:
@@ -53,6 +67,19 @@ Once the split finishes, your application should:
 2. update any cached routing decisions
 3. retry stale writes that fail with `PartitionMoved`
 4. move or rebuild local state for the new partition if needed.
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant K as Kommander
+    App->>K: ReplicateLogs(2, ..., expectedGeneration: old)
+    K-->>App: PartitionMoved
+    App->>K: GetPartitionMap
+    K-->>App: Current ranges and generations
+    Note over App: Route the key again
+    App->>K: ReplicateLogs(current partition, ..., expectedGeneration: current)
+    K-->>App: Success
+```
 
 ```csharp
 raft.OnPartitionMapChanged += ranges =>

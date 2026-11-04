@@ -14,7 +14,6 @@ const sidebars = {
         'guides/replicating-logs',
         'guides/heterogeneous-write-coalescing',
         'guides/hosting-endpoints',
-        'guides/thread-free-embedded-mode',
         'operations/sample-server',
         'guides/advanced-replicated-simpledb',
         'guides/security-and-authentication',
@@ -25,6 +24,7 @@ const sidebars = {
         'guides/merging-idle-partitions',
         'guides/dynamic-cluster-membership',
         'guides/system-partition-state-snapshots',
+        'guides/thread-free-embedded-mode',
       ],
     },
     {
@@ -57,6 +57,7 @@ const sidebars = {
         'operations/wal-diagnostics',
         'operations/wal-commit-durability',
         'operations/shared-rocksdb-memory',
+        'operations/solarium-wal',
       ],
     },
     {

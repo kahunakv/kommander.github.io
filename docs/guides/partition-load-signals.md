@@ -1,5 +1,11 @@
 # Partition Load Signals
 
+Use these signals to find a partition that is hot or that cannot keep up, before you split it. A request count in your own code is not enough. When the disk reaches its limit, the rate stays flat while the work waits in a queue. These signals show that difference.
+
+Kommander always measures the signals. You read them through `IRaft` on any node. To read the values of a partition that another node leads, the nodes must exchange load reports. See [Local And Remote Values](#local-and-remote-values).
+
+Kommander never splits a partition on its own. Your code decides, for example with a [conservative split trigger](#build-a-conservative-split-trigger). The optional [leader balancer](../operations/leader-balancing.md) uses a load score from the same rate and queue depth to rank its leadership moves.
+
 Kommander gives three advisory signals. The signals tell you if the replicated log of a partition is busy or saturated. The WAL is the write-ahead log. It is the durable store for log entries.
 
 | Signal | Meaning | Idle behavior |
@@ -8,7 +14,7 @@ Kommander gives three advisory signals. The signals tell you if the replicated l
 | `WalQueueDepth` | Pending or in-flight WAL writes for the partition | Drains to `0` |
 | `CommitWaitMs` | Smoothed enqueue-to-durable latency for WAL writes | Holds its last observed value |
 
-These signals are measurements only. They do not split partitions. They do not transfer leaders. They do not take part in consensus.
+These signals are measurements only. They do not split partitions. They do not take part in consensus.
 
 ## Why Rate Is Not Enough
 
@@ -50,12 +56,21 @@ When another node leads the partition, the accessor reads the latest load report
 ```csharp
 RaftConfiguration configuration = new()
 {
-    EnableLeaderBalancer = true,
+    EnableLoadReports = true,
     GossipFanout = 2
 };
 ```
 
-`EnableLeaderBalancer` controls the automatic balance passes. It also controls the publication of the load report that carries these signals. If you disable it, local leader reads continue to work. Remote reads then usually return `0`.
+`EnableLoadReports` controls the publication of the load report that carries these signals. `EnableLeaderBalancer`, `EnablePlacementRebalancer`, and a global `ReplicationFactor` above `0` also turn the reports on. If none of these settings is on, local leader reads continue to work. Remote reads then usually return `0`.
+
+```mermaid
+flowchart LR
+  call(["GetPartitionLogOpsPerSecond and the other accessors"]) --> local{"Local node leads the partition?"}
+  local -- yes --> inproc["In-process measurement"]
+  local -- no --> report{"Usable load report from the leader?"}
+  report -- yes --> gossip["Latest gossiped load report"]
+  report -- no --> zero["Returns 0"]
+```
 
 Remote values can lag behind reality. The lag is approximately `LeaderBalancerReportInterval` plus the gossip propagation time. The default report interval is five seconds. The rate is also smoothed. Therefore, act on a constant window. Do not expect immediate changes.
 
@@ -81,6 +96,17 @@ bool splitCandidate =
 ```
 
 Your application must test that condition across several samples. The samples must cover a minimum of one report-and-gossip window. Add a cooldown after a split. The cooldown gives the route changes and the new leadership time to become stable.
+
+```mermaid
+flowchart TD
+  sample(["Sample the signals"]) --> hot{"LogOpsPerSecond and WalQueueDepth above thresholds?"}
+  hot -- "no, or 0" --> sample
+  hot -- yes --> sustained{"Held across samples covering one report-and-gossip window?"}
+  sustained -- no --> sample
+  sustained -- yes --> split["Split the partition"]
+  split --> cooldown["Cooldown while routes and leadership settle"]
+  cooldown --> sample
+```
 
 Start with `WalQueueDepth` as the saturation signal, because it clears when the backlog drains. Add `CommitWaitMs` only if the batches drain the queues too fast for reliable depth samples.
 

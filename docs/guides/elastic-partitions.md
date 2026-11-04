@@ -1,15 +1,17 @@
 # Elastic Partitions
 
-Kommander can change the layout of the user partitions at runtime.
+Elastic partitions let you change the partition layout while the cluster runs. You do not need to know the correct partition count in advance. When one key range gets too hot, you split it. When two ranges go quiet, you merge them.
 
 An application can do these operations:
 
-- create a new partition
-- split a hot partition into two partitions
-- merge two partitions with a light load
-- remove a partition that it no longer needs.
+- create a new partition, for example when a new workload segment needs its own partition
+- split a hot partition into two partitions, when one tenant or key range becomes much hotter than the others
+- merge two partitions that are mostly idle
+- remove a partition that it no longer needs, such as an unrouted partition that the application manages.
 
-This page gives the APIs for the user. It also gives the application behavior that you must plan for.
+Kommander never changes the layout on its own. Your application decides when to act and calls the APIs. [Partition Load Signals](./partition-load-signals.md) help you decide.
+
+This page gives the APIs for the user. It also gives the application behavior that you must plan for, such as the routing changes and the transfer of state during a split.
 
 Partition `0` stays reserved for the system configuration of Kommander. The elastic partition APIs apply to user partition `1` and above.
 
@@ -17,17 +19,6 @@ Read these pages if you want a task-oriented procedure instead of the full API:
 
 - [Splitting A Hot Partition](./splitting-a-hot-partition.md)
 - [Merging Idle Partitions](./merging-idle-partitions.md)
-
-## Why To Use This
-
-Elastic partitions are useful when you do not know the correct partition count in advance.
-
-Typical cases are:
-
-- One tenant or key range becomes much hotter than the others.
-- A new workload segment needs its own partition.
-- Two partitions are mostly idle. You can merge them.
-- An unrouted partition that the application manages is no longer necessary.
 
 ## Routing Modes
 
@@ -99,6 +90,7 @@ The important behavior is:
 - The leader only can make this call.
 - The call is idempotent when the partition exists in the `Active` state.
 - The call rejects a `HashRange` range that overlaps another range.
+- When the cluster is at `MaxPartitions`, a new partition returns `PartitionLimitReached` without changing the map or consuming the requested id.
 
 Use `GetNextAvailablePartitionId()` as the start point when your application allocates the partition ids dynamically:
 
@@ -151,6 +143,7 @@ The key points are:
 - `targetPartitionId = 0` means the assignment of the next available id.
 - `HashBoundary = null` means a split at the midpoint.
 - The new partition inherits the routing mode, or it uses the requested mode.
+- A split adds a data partition, so it returns `PartitionLimitReached` when the cluster is at `MaxPartitions`.
 
 For a `HashRange` partition:
 
@@ -199,6 +192,24 @@ In practice:
 - `Status` explains the failure condition or the success condition.
 - `Generation` is the committed generation of the partition entry after the change.
 
+## Bound The Partition Count
+
+Every live partition has a resource cost: it owns Raft state, WAL data, election and heartbeat work, checkpoints, snapshots, and file handles on each replica that hosts it. Set `MaxPartitions` when application behavior or automatic splitting must not grow that cost without a bound:
+
+```csharp
+RaftConfiguration configuration = new()
+{
+    InitialPartitions = 16,
+    MaxPartitions = 256
+};
+```
+
+The default is `0`, which means no limit. The count excludes the system partition (`0`) and removed tombstones. Partitions in `Splitting` or `Draining` still count because they still consume resources.
+
+At the limit, `CreatePartitionAsync` and `SplitPartitionAsync` return `RaftOperationStatus.PartitionLimitReached`. The refusal happens before a proposal changes the partition map: the map version does not advance and the target id is not consumed. A create for an already active id remains idempotent, while a removal or merge frees one slot.
+
+`InitialPartitions` cannot be greater than a nonzero `MaxPartitions`; startup validation rejects that configuration. The system-partition leader enforces the limit, so every node must use the same value. Otherwise, a leader change can change the effective limit.
+
 ## Read The Partition Map
 
 Three methods let an application examine the current partition layout:
@@ -230,6 +241,18 @@ The lifecycle states are:
 - `Splitting`
 - `Draining`
 - `Removed`
+
+```mermaid
+stateDiagram-v2
+  [*] --> Active : CreatePartitionAsync
+  [*] --> Splitting : split target created
+  Active --> Splitting : split phase 1
+  Splitting --> Active : split phase 2
+  Active --> Draining : merge phase 1, source only
+  Draining --> Removed : merge phase 2
+  Active --> Removed : RemovePartitionAsync
+  Removed --> [*]
+```
 
 ## Event For A Change Of The Partition Map
 
@@ -285,6 +308,20 @@ The application must then do these steps:
 2. Route the key again.
 3. Retry against the current owner.
 
+```mermaid
+sequenceDiagram
+  participant App as Application
+  participant K as Kommander node
+  App->>K: GetPartitionGeneration(partitionId)
+  K-->>App: generation 4
+  Note over K: a split or merge commits, generation 5
+  App->>K: ReplicateLogs(expectedGeneration = 4)
+  K-->>App: PartitionMoved
+  App->>K: GetPartitionMap(), route the key again
+  App->>K: ReplicateLogs on the current owner, current generation
+  K-->>App: Success
+```
+
 ## State Transfer During A Split
 
 Elastic partitions change the routing map. They do not move your application state. A transfer implementation moves it.
@@ -302,6 +339,20 @@ With that implementation registered, the coordinator can do these steps:
 1. It exports a snapshot of the source range.
 2. It imports the snapshot into the target partition.
 3. It replicates a checkpoint into the target partition.
+
+```mermaid
+sequenceDiagram
+  participant C as System coordinator
+  participant T as IRaftStateMachineTransfer
+  participant Tgt as Target partition
+  Note over C: phase 1 committed, source and target Splitting
+  C->>T: ExportRange(plan, snapshotIndex)
+  T-->>C: snapshot stream
+  C->>T: ImportRange(targetPartitionId, snapshot)
+  C->>Tgt: ReplicateCheckpoint
+  Note over C,T: an export or import failure falls back to log shipping
+  Note over C: phase 2, source and target Active
+```
 
 Without a registered transfer implementation, the coordinator uses the log-shipping behavior. Your application is then responsible for the move of the state before the end of phase 2.
 

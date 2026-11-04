@@ -9,6 +9,10 @@ Typical reasons are:
 - You want fewer active leaders and less partition overhead.
 - A drained source partition must go back into its neighbor.
 
+A merge removes the fixed cost of a partition that you no longer need: its leader, its log, and its heartbeat and election work.
+
+Kommander never merges partitions by itself. You decide when to merge, and you call `MergePartitionsAsync` on a node that leads both partitions.
+
 This guide gives the merge flow for the application. For the full lifecycle API, see [Elastic Partitions](./elastic-partitions.md).
 
 ## What A Merge Does
@@ -54,6 +58,19 @@ In this example:
 - Partition `2` survives.
 - Kommander drains partition `3`.
 - The final active hash range belongs to partition `2`.
+
+```mermaid
+sequenceDiagram
+  participant App as Application
+  participant N as Node that leads 2 and 3
+  participant P0 as System partition 0
+  App->>N: MergePartitionsAsync(survivor 2, source 3)
+  N->>P0: replicate map, partition 3 Draining
+  N->>P0: replicate map, 2 absorbs the range, 3 Removed
+  Note over N: drain and stop partition 3, delete its WAL
+  N--)App: OnPartitionMapChanged
+  N-->>App: RaftPartitionLifecycleResult
+```
 
 ## What Changes For The Callers
 

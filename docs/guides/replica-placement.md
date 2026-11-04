@@ -1,14 +1,37 @@
 # Replica Placement
 
-Kommander can keep each user partition on a subset of the cluster nodes. It does not replicate every partition to every voter.
+Use replica placement when your cluster grows beyond a few nodes. By default, every voter stores every user partition, so each new node adds work to every partition and widens every quorum. With placement, each partition lives on a fixed number of nodes. A larger cluster then spreads the partitions across more machines, and each write still waits for a small quorum only.
+
+Placement is opt-in. `ReplicationFactor = 0`, the default, keeps full replication on every voter. Full replication is simple, and it is a good fit for a small cluster. To turn placement on, set a replication factor on every node.
+
+With placement, Kommander keeps each user partition on a subset of the cluster nodes. It does not replicate every partition to every voter.
 
 The replication factor (RF) controls this behavior. For example, with `ReplicationFactor = 3`, each user partition range targets three voter replicas. A write to that range commits after a quorum of those replicas stores it. Therefore, the range uses a quorum of 2 from 3, even in a much larger cluster.
 
 Partition `0` is the system partition. It still replicates to all the nodes. Replica placement applies to user partition `1` and above.
 
-## Why It Matters
+The example below shows a five-node cluster with `ReplicationFactor = 3`:
 
-Full replication is simple. Every voter stores every user partition. That is still the default behavior. It is a good fit for a small cluster.
+```mermaid
+flowchart LR
+    P0["Partition 0 · system"]
+    P1["Partition 1 · RF 3"]
+    P2["Partition 2 · RF 3"]
+    subgraph cluster["Five-node cluster"]
+        direction TB
+        N1["Node 1"]
+        N2["Node 2"]
+        N3["Node 3"]
+        N4["Node 4"]
+        N5["Node 5"]
+        N1 ~~~ N2 ~~~ N3 ~~~ N4 ~~~ N5
+    end
+    P0 -.-> N1 & N2 & N3 & N4 & N5
+    P1 --> N1 & N2 & N3
+    P2 --> N3 & N4 & N5
+```
+
+## Why It Matters
 
 Full replication has costs in a large cluster:
 
@@ -54,6 +77,17 @@ Each `RaftPartitionRange` can include a `Replicas` list. Each replica records an
 | `Removing` | No | A replica in removal. It exists until the final committed drop. |
 
 An empty `Replicas` list means legacy full replication. Every voter in the committed roster hosts the range.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Learner: Placement adds a replica
+    Learner --> Voter: Lag within LearnerPromotionLag for LearnerPromotionStableWindow
+    Voter --> Removing: Committed removal mark
+    Learner --> Removing: Committed removal mark
+    Removing --> [*]: Final committed drop
+```
+
+A new replica starts as a `Learner` and catches up from the log of the leader. If compaction already removed part of that log, the learner can catch up only from a snapshot of the whole partition state. Register an [`IRaftPartitionStateTransfer`](../operations/snapshot-installation.md#implement-the-partition-state-transfer) on every node for this case. Without it, Kommander falls back to `IRaftStateMachineTransfer` for the whole range. If neither hook is registered, the learner stays behind, and `GetSnapshotStatuses` on the leader reports `Unproducible = true` for it.
 
 When a replication factor applies to an existing range with an empty list, `EnablePlacementRebalancer = true` converts it safely. The first committed change records every current roster voter as the explicit replica set, so quorum and data ownership do not change during conversion. Later passes trim or expand that set toward the target RF.
 
@@ -139,6 +173,16 @@ When the committed voter count is less than or equal to the RF target, the new r
 Kommander can remove a replica that leads a partition now. It first tries a transfer of the leadership to another voter replica. It then discounts the old leader from the quorum. The transfer is a best effort, because a normal election still recovers after a failed handoff. The transfer prevents an unnecessary loss of availability during a planned removal.
 
 A planned member removal through `RequestLeaveAsync` uses a drain-first decommission. Kommander commits the member as `Leaving` first. The placement passes then move its hosted replicas to the nodes that stay. The final roster removal commits after that. A dead-member eviction is different. That member is already gone, and placement repairs the ranges afterward.
+
+```mermaid
+stateDiagram-v2
+    state "Removed from roster" as Removed
+    Voter --> Leaving: RequestLeaveAsync commits Leaving
+    Leaving --> Leaving: Placement moves hosted replicas
+    Leaving --> Removed: Final roster removal commits
+    Leaving --> Voter: DecommissionDrainTimeout expires
+    Removed --> [*]
+```
 
 Only one member can drain at a time. A drain can exceed `DecommissionDrainTimeout`. Kommander then returns the member to the `Voter` role. The replicas that already moved stay in their new place. Therefore, a retry can continue from the committed map.
 

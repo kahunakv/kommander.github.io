@@ -1,5 +1,9 @@
 # System Partition State Snapshots
 
+Read this page only if your application stores its own cluster-wide state on partition `0` and writes that state as deltas. Most applications keep their data on user partitions and do not need this page.
+
+The feature lets you replicate small changes cheaply and still repair a node that falls behind. Without it, you must write the full state at every change to stay safe after compaction. To use it, implement `IRaftSystemStateTransfer` and register it on every node with `RegisterSystemStateTransfer`. The registration is not replicated. Kommander then calls your transfer when a node needs repair.
+
 Partition `0` is the system partition of Kommander. Kommander uses it for cluster-wide metadata such as the membership and the partition maps.
 
 An application can also replicate its own small cluster-wide control state on partition `0`. It must use its own log type. This is useful for these items:
@@ -214,6 +218,24 @@ Kommander can repair that node with `IRaftSystemStateTransfer` registered:
 5. The normal replication continues after the checkpoint.
 
 The application implements the export and the import. Kommander controls the snapshot trigger, the division into chunks, the transport, and the checkpoint seed.
+
+```mermaid
+sequenceDiagram
+    participant LT as Leader IRaftSystemStateTransfer
+    participant L as Partition 0 leader
+    participant F as Follower below the floor
+    participant FT as Follower IRaftSystemStateTransfer
+    L->>LT: ExportPartitionState(0, checkpointIndex, ct)
+    LT-->>L: Snapshot stream
+    L->>F: Snapshot chunks, SnapshotKind.SystemState
+    Note over F: Buffer chunks in a bounded receive session
+    Note over F: Validate the leader and term on the partition 0 executor
+    F->>FT: ImportPartitionState(0, stream, ct)
+    FT-->>F: Imported
+    Note over F: Write the CommittedCheckpoint and advance the frontiers
+    F-->>L: Install result
+    L-)F: Normal replication after the checkpoint
+```
 
 ## Install Semantics
 

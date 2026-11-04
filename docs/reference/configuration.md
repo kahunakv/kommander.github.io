@@ -13,6 +13,7 @@ Change another setting when a guide or a metric tells you to. The guide for each
 | `Host` | `null` | Host advertised as part of the node endpoint. |
 | `Port` | `0` | Port advertised as part of the node endpoint. |
 | `InitialPartitions` | `1` | Number of initial user partitions. Partition `0` is reserved; application partitions start at `1`. |
+| `MaxPartitions` | `0` | Optional cluster-wide limit on live data partitions. `0` means no limit. Configure the same value on every node. |
 | `HttpScheme` | `https://` | Scheme used by `RestCommunication`. |
 | `GrpcScheme` | `https://` | Scheme prepended to peer endpoints when opening gRPC channels. Use `http://` only for cleartext HTTP/2 test environments. |
 | `TransportSecurity` | new options object | Transport security and node authentication settings for network transports. |
@@ -67,7 +68,7 @@ Change another setting when a guide or a metric tells you to. The guide for each
 | `EnableSharedExecutorPool` | `true` | Lets user partitions share a bounded executor pool instead of each partition owning a dedicated OS thread. Also enables hot-set `CheckLeader` ticks. |
 | `PartitionExecutorPoolSize` | `0` | Worker count for the shared partition executor pool. `0` resolves to `Environment.ProcessorCount`; values below `0` are clamped to `1`. |
 | `EnableQuiescence` | `true` | Allows idle partitions to suppress per-partition heartbeats and rely on SWIM node liveness until new work arrives. |
-| `QuiesceAfter` | `1500 ms` | Idle duration before a leader quiesces a partition. Requires no active proposals. |
+| `QuiesceAfter` | `1500 ms` | Idle duration before a leader quiesces a partition. Requires no unresolved proposal and every peer at the committed frontier. Settled tickets kept for lookup do not prevent quiescence. |
 | `LeadershipBarrierTimeout` | `10 s` | Maximum time a newly elected leader waits for its internal promotion barrier to commit before reverting to follower. Must be positive. |
 | `ProposalTimeout` | `10 s` | Maximum time a caller waits for `ReplicateLogs` or `ReplicateCheckpoint` to reach a terminal status. The proposal is not cancelled when this fires; the result is indeterminate and is reported as `ProposalTimeout`. Must be positive. |
 | `WalStallStepDownTimeout` | `3 s` | How long a leader's local WAL write may remain unanswered before it steps down and refuses to campaign again until the write completes. `TimeSpan.Zero` disables the watchdog and candidacy gate. |
@@ -425,7 +426,7 @@ Quiescence suppresses per-partition heartbeat traffic for idle partitions. A lea
 | Property | Default | Description |
 | --- | ---: | --- |
 | `EnableQuiescence` | `true` | Enables quiescence for idle partitions. Set to `false` to keep sending per-partition heartbeats on every heartbeat interval. |
-| `QuiesceAfter` | `1500 ms` | How long a partition must be idle, with no active proposals, before it quiesces. |
+| `QuiesceAfter` | `1500 ms` | How long a partition must be idle, with no unresolved proposal and every peer at the committed frontier, before it quiesces. Settled tickets kept for lookup do not extend the wait. |
 | `PingInterval` | `1 s` | SWIM probe cadence used by quiesced followers to detect leader-node failure. Must be greater than `0` and lower than `StartElectionTimeout` when quiescence is enabled. |
 | `SuspicionTimeout` | `5 s` | Time from `Suspect` to `Dead`. Quiesced failover starts on `Suspect`, not `Dead`. |
 | `StartElectionTimeout` | `2000 ms` | Lower election timeout bound. `PingInterval` must be below this while quiescence is enabled. |

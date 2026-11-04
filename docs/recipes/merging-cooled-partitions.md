@@ -43,6 +43,23 @@ RaftPartitionLifecycleResult merged = await raft.MergePartitionsAsync(
 
 The source partition is drained and removed. The survivor remains the active partition for the combined hash range.
 
+```mermaid
+flowchart LR
+    subgraph Before["Before merge"]
+        direction TB
+        S2["Partition 2: survivor"]
+        S3["Partition 3: adjacent range"]
+    end
+    subgraph After["After merge"]
+        direction TB
+        M2["Partition 2: combined range"]
+        R3["Partition 3: Removed"]
+    end
+    S2 -->|"MergePartitionsAsync"| M2
+    S3 -.->|"range absorbed"| M2
+    S3 -->|"Draining, then removed"| R3
+```
+
 ## Applying State
 
 After the merge:

@@ -1,5 +1,9 @@
 # Metrics And Diagnostics
 
+Use metrics and logs to find out why a cluster is slow or unstable. Kommander reports what happens inside each partition: queue depths, operation latency, WAL batches, elections, snapshots, backfill, and leader moves. With this data, you can find the cause of a problem instead of guessing.
+
+To start, subscribe to the meter named `Kommander` in OpenTelemetry or in a `MeterListener`. Kommander always publishes its metrics, so you do not need to turn them on. Only one histogram, `raft.round.stage_ms`, is opt-in. For the logs, pass an `ILogger<IRaft>` when you create the `RaftManager`.
+
 Kommander gives runtime diagnostics through two channels:
 
 - metrics from the `Kommander` .NET `Meter`
@@ -279,6 +283,8 @@ Histogram:
 
 `raft.election_delay_ms` records the time from the last received heartbeat to the start of an election.
 
+After a voter has remained leaderless for several election timeouts, Kommander raises the relevant election messages to `Warning`. The messages identify whether it started a pre-vote, withheld its candidacy, or denied a pre-vote or vote, and include the reason. These warnings make a prolonged leaderless partition diagnosable without enabling debug logs.
+
 You can also correlate heartbeat behavior through these sources:
 
 - `raft.heartbeats_sent_total`
@@ -297,6 +303,16 @@ Use these signals while converting full-replication ranges or diagnosing placeme
 `raft.placement.initial_assignments_total` counts ranges converted from an empty legacy replica set to an explicit set containing the current roster voters. `raft.placement.ranges_awaiting_initial` is an observable gauge on the system-partition leader. A nonzero value that does not fall usually means `EnablePlacementRebalancer` is disabled, the roster is not committed yet, or partition `0` cannot commit the conversion.
 
 The public `GetPartitionsAwaitingPlacement()` API provides the exact partition ids behind the gauge.
+
+## Partition Count Limit
+
+Counter:
+
+- `raft.partitions.create_refused_total`
+
+This counter increments when the system-partition leader refuses a create or split at `MaxPartitions`. Its `path` tag is `create` or `split`. Each refusal occurs before the map changes and before a partition id is consumed.
+
+A steady increase means that a caller or automatic splitter keeps requesting capacity after the cluster reaches its configured partition limit. Remove or merge a partition, raise the limit consistently on every node, or make the caller stop retrying until capacity changes.
 
 ## Leader Balancing
 
@@ -357,6 +373,20 @@ That order usually separates these causes:
 - WAL batch pressure or storage pressure
 - election churn
 - cleanup of stale completions after a change of leader.
+
+The same signals map onto the write path like this:
+
+```mermaid
+flowchart TD
+    C(["Client proposal"]) --> Q["Client queue<br/>raft.executor.client_queue_depth<br/>raft.executor.rejections_total"]
+    Q --> X["Partition executor<br/>raft.executor.operation_duration_ms"]
+    X --> WQ["WAL partition queue<br/>raft.wal.queue_depth<br/>raft.wal.oldest_pending_write_age_ms"]
+    WQ --> G[("Group write<br/>raft.wal.batches_total<br/>raft.wal.batch_size<br/>raft.wal.write_duration_ms")]
+    G -. "completion" .-> SC["Completion check<br/>raft.stale_completions_total"]
+    SC --> X
+    X --> HB["Leader heartbeats<br/>raft.heartbeats_sent_total<br/>raft.heartbeat_delay_ms"]
+    HB --> FO["Follower election timer<br/>raft.elections_started_total<br/>raft.election_delay_ms"]
+```
 
 ## How To Validate Scheduler Fairness
 

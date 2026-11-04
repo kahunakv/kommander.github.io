@@ -33,6 +33,17 @@ The usual flow is:
 3. Commit that transition through Kommander.
 4. Let workers perform any follow-up activity after the transition is committed.
 
+```mermaid
+flowchart LR
+    Proj[("workflowProjection")] --> Decide["Decide next valid transition"]
+    Decide --> Commit["ReplicateLogs WorkflowTransition"]
+    Commit --> Apply["OnReplicationReceived: ApplyTransition"]
+    Apply --> Proj
+    Commit -. "after commit" .-> Work["Workers run follow-up activity"]
+    Restart(["Process restart"]) --> Restore["OnLogRestored replays transitions"]
+    Restore --> Proj
+```
+
 ```csharp
 record WorkflowTransition(
     string WorkflowId,

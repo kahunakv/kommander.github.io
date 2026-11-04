@@ -1,6 +1,10 @@
 # Leader Election Internals
 
-Each partition elects its own leader.
+Each partition elects its own leader. This page explains how Kommander runs that election: the timeouts, the pre-vote round, and the repair checks that a new leader runs before it serves the application.
+
+Read this page when you debug frequent leader changes, tune the election timeouts, or want to know why a node did not become leader. Elections are automatic. You do not need to start or manage them.
+
+To act on leadership, read other pages. [Leadership Control](../operations/leadership-control.md) shows how to wait for a stable leader. [Leader Balancing](../operations/leader-balancing.md) spreads leaders across the nodes. The timing settings are in [Configuration](../reference/configuration.md).
 
 ## Node States
 
@@ -11,6 +15,23 @@ A partition state machine can be in one of the usual Raft roles:
 | Follower | Accepts leader messages and votes for candidates. |
 | Candidate | Requests votes after the leader appears unavailable. |
 | Leader | Accepts proposals and sends heartbeats or append-log messages. |
+
+```mermaid
+stateDiagram-v2
+    state "Pre-vote round (still Follower)" as PreVote
+    [*] --> Follower
+    Follower --> PreVote: election timeout, no fresh leader
+    PreVote --> Follower: no pre-vote quorum
+    PreVote --> Candidate: pre-vote quorum
+    Candidate --> Leader: vote quorum
+    Candidate --> Follower: VotingTimeout without quorum
+    Candidate --> Follower: higher term seen
+    Leader --> Follower: higher term seen
+    note right of Leader
+        Promotion gates run before
+        leadership is published
+    end note
+```
 
 ## Heartbeats
 
@@ -70,6 +91,26 @@ When a follower reaches pre-vote quorum, Kommander promotes it into a real elect
 5. waits for `VotingTimeout`.
 
 If pre-vote does not reach quorum, the node remains a follower and no real election state is mutated.
+
+```mermaid
+sequenceDiagram
+    participant A as Node A (follower)
+    participant B as Node B
+    participant C as Node C
+
+    Note over A: election timeout elapsed, term T
+    A->>B: RequestVotes PreVote=true, term T+1
+    A->>C: RequestVotes PreVote=true, term T+1
+    B-->>A: pre-vote granted
+    C-->>A: pre-vote granted
+    Note over A: pre-vote quorum, becomes Candidate, term T+1, votes for itself
+    A->>B: RequestVotes term T+1
+    A->>C: RequestVotes term T+1
+    B-->>A: vote granted
+    Note over A: quorum, promotion gates, then Leader
+    A->>B: heartbeat (empty AppendLogs)
+    A->>C: heartbeat (empty AppendLogs)
+```
 
 ## Becoming Leader
 

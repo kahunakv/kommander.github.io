@@ -26,6 +26,19 @@ Avoid storing large files, secrets, or high-churn metrics directly in the log. F
 
 Represent each configuration change as an append-only command. The leader commits the command, and every replica applies it in the same order.
 
+```mermaid
+flowchart LR
+    Op(["Admin API or operator"]) -->|"SetConfigValue"| L["Config partition leader"]:::leader
+    L --> Log[("Ordered config log")]
+    Log --> A1["Node 1: OnReplicationReceived"]
+    Log --> A2["Node 2: OnReplicationReceived"]
+    Log -. "on startup" .-> A3["Restarted node: OnLogRestored"]
+    A1 --> S1[("configurationStore")]
+    A2 --> S2[("configurationStore")]
+    A3 --> S3[("configurationStore")]
+    classDef leader fill:#008f63,color:#ffffff,stroke:#04241b
+```
+
 The command should describe the change, not just the final in-memory object. This makes startup recovery simpler because a node can replay the committed changes to rebuild its local configuration cache.
 
 ```csharp

@@ -1,6 +1,10 @@
 # Scheduler Internals
 
-Kommander separates state-machine execution from blocking storage work.
+Kommander separates state-machine execution from blocking storage work. Storage calls then do not block the Raft state machine of a partition, and one busy partition cannot starve the others.
+
+Read this page when you tune WAL batching, investigate latency under load, or check how Kommander shares work between partitions. The schedulers run automatically. Their worker counts and batch sizes have defaults in [Configuration](../reference/configuration.md).
+
+To change the WAL commit behavior, read [WAL Commit Durability](../operations/wal-commit-durability.md). To learn how overload reaches callers, read [Backpressure And Admission Control](backpressure-and-admission-control.md).
 
 The partition executor owns Raft state. The read and WAL schedulers own synchronous storage calls.
 
@@ -16,6 +20,22 @@ The partition executor owns Raft state. The read and WAL schedulers own synchron
 | Maintenance | `1` | restore, drain barriers, maintenance work |
 
 The executor drains these queues in weighted-fair order. Control traffic gets more turns than client traffic so client proposals cannot starve heartbeats and elections.
+
+```mermaid
+flowchart LR
+    subgraph E["RaftPartitionExecutor (one partition)"]
+        direction TB
+        QC["Control queue"] ~~~ QR["Replication queue"] ~~~ QK["Client queue"] ~~~ QM["Maintenance queue"]
+    end
+    D["Drain cycle"]
+    SM["RaftPartitionStateMachine"]
+    QC -->|"1st: up to 8"| D
+    QR -->|"2nd: up to 4"| D
+    QK -->|"3rd: up to 2"| D
+    QM -->|"4th: up to 1"| D
+    D -->|"serial, on the executor"| SM
+    D -. "repeat while work remains" .-> D
+```
 
 The executor starts by restoring the WAL. If restore fails, it stops instead of accepting normal Raft operations against incomplete state.
 
@@ -36,6 +56,24 @@ Its goals are:
 Each partition has its own pending queue. A global ready queue contains partition ids, not individual writes. A partition appears at most once in the ready queue, so workers rotate across active partitions instead of being monopolized by one partition.
 
 When several partitions are ready at the same time, one worker can drain up to `MaxWalGroupBatchPartitions` partition queues and issue one `IWAL.Write` call that spans all of them. Within each partition, it drains up to `MaxWalBatchSize` operations and preserves FIFO order.
+
+```mermaid
+flowchart LR
+    subgraph PQ["Per-partition pending queues (FIFO)"]
+        direction TB
+        P1["Partition 1"] ~~~ P2["Partition 2"] ~~~ P3["Partition 3"]
+    end
+    RQ["Ready queue (partition ids, each at most once)"]
+    W["Write worker"]
+    G["Group batch: up to MaxWalGroupBatchPartitions partitions, up to MaxWalBatchSize ops each"]
+    IW[("One IWAL.Write")]
+    EX["Owning partition executors"]
+    P1 --> RQ
+    P2 --> RQ
+    P3 --> RQ
+    RQ --> W --> G --> IW
+    IW -. "completions" .-> EX
+```
 
 This is a group-commit optimization. For RocksDB, the grouped call becomes one `WriteBatch` and one `db.Write` / fsync even when many partitions are included.
 

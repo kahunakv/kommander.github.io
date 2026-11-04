@@ -63,6 +63,24 @@ raft.OnReplicationReceived += (partitionId, log) =>
 };
 ```
 
+```mermaid
+sequenceDiagram
+    participant C as Coordinator (node-a)
+    participant K as Kommander partition
+    participant S as workerState
+    participant W as Worker
+    participant X as External API
+    C->>K: AmILeader(partitionId)
+    K-->>C: true
+    C->>K: ReplicateLogs WorkerTick
+    K-->>C: Committed
+    K-)S: OnReplicationReceived, ApplyTick
+    W->>S: Is tenant-42 ready?
+    S-->>W: Ready
+    W->>X: Poll with idempotency key
+    Note over C,K: If node-a fails, node-b becomes leader and continues from committed state
+```
+
 ## What Your Application Owns
 
 Kommander decides which commands are committed and in what order. Your application still owns the worker implementation, retry policy, side-effect idempotency, rate limits, and any business rules about what work should happen next.

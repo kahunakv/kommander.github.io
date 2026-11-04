@@ -56,6 +56,20 @@ The thread-free build changes the default scheduler settings:
 
 The host pump runs repeated non-blocking passes. A pass drains ready partition work, writes pending WAL batches, and flushes outbound transport work. When there is no work, it backs off briefly and wakes again when new work arrives.
 
+```mermaid
+flowchart TD
+    subgraph sched["Ambient scheduler, such as the browser event loop"]
+        direction TB
+        pass(["Pump pass"]) --> drain["Start drains for ready partition executors"]
+        drain --> wal["Write pending WAL batches"]
+        wal --> flush["Flush outbound transport work"]
+        flush --> moved{"Did any work move?"}
+        moved -->|Yes| pass
+        moved -->|No| idle["Back off briefly"]
+        idle -->|"New work or timeout"| pass
+    end
+```
+
 Leave `EnableHostPumpedScheduling` enabled unless another driver explicitly pumps the node. With both internal threads and the host pump disabled, nothing advances.
 
 ## Available Components

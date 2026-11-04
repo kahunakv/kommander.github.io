@@ -20,6 +20,27 @@ Use this pattern when work can be retried, but duplicate side effects would be h
 
 The key idea is to separate "record the intent" from "do the side effect". First commit that the job started. Then perform the external work with an idempotency key. Finally commit whether the job completed or failed.
 
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant K as Kommander
+    participant J as jobState projection
+    participant X as External system
+    W->>J: Check committed job state
+    W->>K: ReplicateLogs JobStarted
+    K-->>W: Success
+    K-)J: OnReplicationReceived, ApplyStarted
+    W->>X: Side effect with idempotency key
+    X-->>W: Result
+    alt side effect succeeded
+        W->>K: ReplicateLogs JobCompleted
+        K-)J: ApplyCompleted
+    else side effect failed
+        W->>K: ReplicateLogs JobFailed
+        K-)J: ApplyFailed
+    end
+```
+
 ## Kommander Pattern
 
 Replicate job state transitions as commands. Workers consult the committed state before doing work.

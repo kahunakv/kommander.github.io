@@ -11,8 +11,8 @@ const proofPoints = [
   'Partitioned Raft',
   'Elastic partitions',
   'Dynamic membership',
-  'RocksDB and SQLite',
-  'Jepsen tested',
+  'RocksDB, SQLite, Solarium',
+  'Jepsen, DST, TLA+',
   'MIT licensed',
 ];
 
@@ -35,7 +35,9 @@ const advantageCards = [
   {
     title: 'Choose storage and transport',
     description:
-      'Use RocksDB or SQLite for durable storage, in-memory adapters for tests, and gRPC or REST between nodes.',
+      'Use RocksDB, SQLite, or Solarium adapter for a durable WAL. Use in-memory adapters for tests and gRPC or REST between nodes.',
+    linkLabel: 'Explore Solarium WAL',
+    to: '/docs/operations/solarium-wal',
   },
   {
     title: 'Change the cluster while it runs',
@@ -45,7 +47,38 @@ const advantageCards = [
   {
     title: 'Built for real failures',
     description:
-      'Jepsen tests, metrics, structured logs, and simulation tools help you trust and understand the system under stress.',
+      'Thousands of unit tests, Jepsen, deterministic simulation, and TLA+ models check the system under stress.',
+  },
+];
+
+const testingCards = [
+  {
+    title: 'Thousands of unit tests',
+    description:
+      'More than 3,000 unit and cluster tests check Raft safety rules, the schedulers, the WAL adapters, and failure scenarios on real in-process clusters.',
+    linkLabel: 'Run the test suite',
+    to: '/docs/operations/testing',
+  },
+  {
+    title: 'Jepsen',
+    description:
+      'A real five-node cluster runs under network partitions, process kills, pauses, membership changes, and clock skew. A checker verifies the full history of client operations.',
+    linkLabel: 'See the Jepsen suite',
+    href: 'https://github.com/kahunakv/kommander-jepsen',
+  },
+  {
+    title: 'Deterministic simulation testing',
+    description:
+      'Real three-node clusters run in one process with simulated time, network, and disk. A seeded search looks for states that break Raft on every push and every night.',
+    linkLabel: 'Read about DST',
+    to: '/docs/operations/deterministic-testing',
+  },
+  {
+    title: 'TLA+ models',
+    description:
+      'A formal model of the commit and durability path. The TLC model checker explores every reachable state, and trace validation ties the model to the real code.',
+    linkLabel: 'See the models',
+    href: 'https://github.com/kahunakv/kommander/tree/main/formal',
   },
 ];
 
@@ -120,7 +153,7 @@ function HomepageHeader() {
             keeping your own APIs and data model.
           </p>
           <div className={styles.buttons}>
-            <Link className={styles.primaryButton} to="/docs/getting-started">
+            <Link className={styles.primaryButton} to="/docs/intro/">
               Get started
             </Link>
             <Link className={styles.secondaryButton} to="/book">
@@ -230,6 +263,11 @@ export default function Home() {
                     {card.title}
                   </Heading>
                   <p className={styles.cardDescription}>{card.description}</p>
+                  {card.to ? (
+                    <Link className={styles.inlineLink} to={card.to}>
+                      {card.linkLabel}
+                    </Link>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -256,6 +294,35 @@ export default function Home() {
                   </Heading>
                   <p className={styles.cardDescription}>{project.description}</p>
                 </a>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.primarySection}>
+          <div className="container">
+            <SectionHeading
+              eyebrow="How it is tested"
+              title="Tested beyond the happy path"
+              subtitle="Unit tests check the paths we expect. Jepsen, DST, and TLA+ search for the paths we do not expect, and each one found real defects that the others missed."
+            />
+            <div className={styles.testingGrid}>
+              {testingCards.map((card) => (
+                <div key={card.title} className={styles.calloutCard}>
+                  <Heading as="h3" className={styles.cardTitle}>
+                    {card.title}
+                  </Heading>
+                  <p className={styles.cardDescription}>{card.description}</p>
+                  {card.href ? (
+                    <a className={styles.inlineLink} href={card.href} target="_blank" rel="noreferrer">
+                      {card.linkLabel}
+                    </a>
+                  ) : (
+                    <Link className={styles.inlineLink} to={card.to}>
+                      {card.linkLabel}
+                    </Link>
+                  )}
+                </div>
               ))}
             </div>
           </div>

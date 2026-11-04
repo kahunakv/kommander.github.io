@@ -1,6 +1,10 @@
 # Compaction Internals
 
-Compaction removes old WAL entries that are older than a checkpoint.
+Compaction removes old WAL entries that are older than a checkpoint. The WAL is the write-ahead log. Compaction keeps the disk use of each node from growing without limit.
+
+Read this page when the WAL keeps growing and you want to know why, or when you must know exactly what compaction can remove. After you read it, you can explain each compaction metric and each retention floor.
+
+Compaction runs automatically, but it removes nothing until your application writes a checkpoint. To set up checkpoints and the compaction settings, read [Checkpoints And Compaction](../operations/checkpoints-and-compaction.md) and [Checkpointing And Recovery](../guides/checkpointing-and-recovery.md).
 
 ## Checkpoints
 
@@ -21,6 +25,20 @@ Checkpoints do not replace application snapshots by themselves. They are markers
 3. calls `IWAL.CompactLogsOlderThan`
 4. asks the adapter to remove up to `CompactNumberEntries` entries older than the checkpoint
 5. repeats adapter calls until there is no more eligible work, the adapter removes fewer than `CompactNumberEntries`, or `MaxEntriesPerCompaction` is reached.
+
+```mermaid
+flowchart TD
+    T(["CompactEveryOperations trigger"]) --> CP["Read last checkpoint via ReadScheduler"]
+    CP --> HAS{"Committed checkpoint exists?"}
+    HAS -->|no| NC["outcome=no_checkpoint"]
+    HAS -->|yes| FL["Effective floor = lowest of checkpoint, SetMinRetainIndex, retention holds, and the application durability floor when configured"]
+    FL --> POS{"Floor above 0?"}
+    POS -->|no| NP["outcome=floor_not_positive"]
+    POS -->|yes| EF["outcome=effective"]
+    EF --> CL["IWAL.CompactLogsOlderThan"]
+    CL -->|"batches of CompactNumberEntries, up to MaxEntriesPerCompaction"| CL
+    CL -. "exception" .-> FA["outcome=failed"]
+```
 
 The relevant configuration values are:
 

@@ -15,6 +15,7 @@ The table groups the members by area.
 | Replication | `ReplicateLogs`, `ReplicateEntries`, `ReplicateCheckpoint`, `CommitLogs`, `RollbackLogs`, `RequestReseedAsync` |
 | Elastic partitions | `CreatePartitionAsync`, `RemovePartitionAsync`, `SplitPartitionAsync`, `MergePartitionsAsync`, `GetNextAvailablePartitionId`, `GetPartitionGeneration`, `GetPartitionMap`, `GetPartitionReplicas`, `GetEffectiveReplicationFactor`, `SetReplicationFactorAsync`, `RegisterStateMachineTransfer` |
 | System partition state | `RegisterSystemStateTransfer`, `SetMinRetainIndex`, `AcquireRetentionHold` |
+| User partition state | `RegisterPartitionStateTransfer` |
 | Partition load | `GetPartitionLogOpsPerSecond`, `GetPartitionWalQueueDepth`, `GetPartitionCommitWaitMs` |
 | Diagnostics | `GetStaleProposedSkippedCount`, `GetSnapshotStatuses`, `GetBackfillStatuses` |
 | Partition routing | `GetPartitionKey`, `GetPrefixPartitionKey` |
@@ -167,6 +168,22 @@ See [Partition Load Signals](../guides/partition-load-signals.md) for signal sem
 ## Replication APIs
 
 Use `ReplicateLogs` when every payload in the call shares one type, one `autoCommit` value, and one generation fence.
+
+With `autoCommit: false`, the returned `TicketId` decides the outcome of the proposal through `CommitLogs` or `RollbackLogs`:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Proposed: ReplicateLogs
+    Proposed --> mode: quorum stored the entries
+    state mode <<choice>>
+    mode --> Committed: autoCommit true
+    mode --> Waiting: autoCommit false, caller holds TicketId
+    state "Proposed, waiting for the caller" as Waiting
+    Waiting --> Committed: CommitLogs(partitionId, TicketId)
+    Waiting --> RolledBack: RollbackLogs(partitionId, TicketId)
+    Committed --> [*]: delivered to OnReplicationReceived
+    RolledBack --> [*]: never delivered
+```
 
 `ReplicateLogs` also accepts `expectedTerm`. This is a local-leadership term fence for callers that made a decision based on this node's current term. If the term no longer matches, Kommander refuses the write before appending anything and returns `RaftOperationStatus.TermMismatch`. Re-read `GetPartitionTerm(partitionId)` and decide again instead of blindly retrying the same command on another replica.
 
@@ -333,6 +350,18 @@ These are intended for deterministic tests and fault-injection scenarios, not or
 
 `HoldConsumerAppliesForTesting(partitionId)` pauses delivery of committed entries to the local consumer while replication, acknowledgements, elections, and the commit frontier continue. It holds the applied cursor honestly, so read-index confirmation, compaction fences, and backfill progress do not claim consumer progress that did not happen. `ResumeConsumerAppliesForTesting(partitionId)` drains the pending committed entries in log order. These hooks are useful for deterministic replay and crash-window tests.
 
+## User Partition State
+
+Register `IRaftPartitionStateTransfer` on every node that can host or lead a user partition:
+
+```csharp
+raft.RegisterPartitionStateTransfer(new OrderStoreTransfer(store));
+```
+
+The transfer lets Kommander repair a replica of a user partition that is below the compaction floor. The leader exports the whole application state of the partition, and the follower imports it. Without this transfer, Kommander falls back to `IRaftStateMachineTransfer.ExportRange` for the whole range. Registration is local process state and is not replicated. You can register it before `JoinCluster`.
+
+In a mixed-version cluster, do not register it until every node supports the `PartitionState` snapshot kind. See [Snapshot Installation](../operations/snapshot-installation.md#implement-the-partition-state-transfer) for the full contract.
+
 ## System Partition State
 
 Partition `0` can carry application-owned cluster-wide control state under application log types. The `_RaftSystem` log type is reserved for Kommander's own metadata and must not be used by application writes.
@@ -393,6 +422,7 @@ See [System Partition State Snapshots](../guides/system-partition-state-snapshot
 | `TargetNotCaughtUp` | A leadership-transfer target did not catch up to the leader's last index within the bounded wait. The leader resumed serving. The caller may retry later. |
 | `TermMismatch` | A proposal carried an `expectedTerm` fence that does not match this node's current term. The proposal was refused before append. Re-read the term and re-decide. |
 | `LeadershipNotConfirmed` | A replica-set change could not confirm leadership of the affected partition. Retry after that partition has a reachable, confirmed leader. |
+| `PartitionLimitReached` | A create or split would exceed `MaxPartitions`. Nothing was proposed and no partition id was spent. Remove or merge a partition before retrying. |
 
 ## Elastic Partition APIs
 

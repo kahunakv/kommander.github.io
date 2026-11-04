@@ -93,6 +93,29 @@ A rollback uses the same ticket:
     await raft.RollbackLogs(1, proposal.TicketId);
 ```
 
+The two commit modes follow this flow:
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant L as Partition leader
+    participant F as Follower replicas
+    App->>L: ReplicateLogs(partitionId, type, data)
+    L->>F: Append proposed entries
+    F-->>L: Acknowledge
+    Note over L: Quorum stores the proposal
+    alt autoCommit true (default)
+        L-)F: Commit
+        L-->>App: RaftReplicationResult
+    else autoCommit false
+        L-->>App: RaftReplicationResult with TicketId
+        App->>L: CommitLogs or RollbackLogs(partitionId, TicketId)
+        L-)F: Commit or roll back
+        L-->>App: Status and log id
+    end
+    Note over L,F: Every replica delivers committed entries to OnReplicationReceived
+```
+
 ## Checkpoints
 
 Replicate a checkpoint for a user partition:

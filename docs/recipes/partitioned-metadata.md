@@ -46,6 +46,20 @@ await raft.ReplicateLogs(
 );
 ```
 
+`GetPartitionKey` hashes the part of the key before the final `/`, so every resource of one tenant routes to the same partition:
+
+```mermaid
+flowchart LR
+    K1(["tenants/acme/resources/db-1"]) --> H1["Hash of tenants/acme/resources"]
+    K2(["tenants/acme/resources/db-2"]) --> H1
+    K3(["tenants/globex/resources/db-1"]) --> H2["Hash of tenants/globex/resources"]
+    H1 --> PA["Partition A leader"]:::leader
+    H2 --> PB["Partition B leader, may differ from A"]:::leader
+    PA --> MA[("metadataProjection on each replica")]
+    PB --> MB[("metadataProjection on each replica")]
+    classDef leader fill:#008f63,color:#ffffff,stroke:#04241b
+```
+
 ## Applying State
 
 Each node applies committed commands to its own metadata projection.

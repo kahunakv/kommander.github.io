@@ -1,8 +1,16 @@
 # Deterministic Testing
 
-Kommander includes a non-production test toolchain for deterministic and timing-sensitive scenarios.
+Use the deterministic simulation tests when a consensus bug depends on timing and you cannot reproduce it on purpose. A normal multi-process test finds such a bug only by chance. The simulation tests make the failure repeatable: a failing run leaves a plan file, and you can replay that plan, measure how often it fails, and shrink it to a small schedule.
 
-The deterministic simulation tests, often called DST in the test tree, run real in-process clusters under a seeded driver. They are meant to find and replay timing-sensitive consensus states, not to be used as production APIs.
+The simulation tests are often called DST in the test tree. They run real in-process clusters under a seeded driver with virtual time. With them you can:
+
+- check Raft invariants while nodes crash, restart, and lose messages
+- reproduce leadership churn, delayed I/O, and network partitions
+- check pre-vote behavior under isolation
+- catch non-contiguous delivery bugs
+- keep failing plans as regression tests and replay them later.
+
+This page is for contributors and for people who check a Kommander change or a bug report. The toolchain is for tests only. None of it is a production API. For the build commands and the other test areas, see [Testing](testing.md).
 
 ## Simulation Runtime
 
@@ -22,6 +30,16 @@ The source tree includes a deterministic simulation runtime with:
 This is useful when a timing-sensitive failure is hard to reproduce in ordinary multi-process tests.
 
 The random scenario runner records enough information to replay the action plan that a failing seed produced. Replaying the plan is more useful than replaying only the seed: the seed controls the generator, while the plan preserves the actions that were drawn in the failing run. The trace shrinker then reduces the event history to a smaller schedule that still reproduces the problem, which makes consensus bugs easier to diagnose.
+
+```mermaid
+flowchart LR
+    S(["Seed"]) --> R["DSTRandom run"]
+    R -- "check fails" --> P[("plan.txt in dst-artifacts")]
+    P --> RP["Replay the plan, measure the rate"]
+    P --> SH["Shrink to a smaller schedule"]
+    P -- promote --> PR[("regressions corpus")]
+    PR --> E["EveryPromotedPlan_StillHoldsEveryCheck"]
+```
 
 Diagnostic partition views used by the simulation and invariant tooling include `RaftPartitionView.Peers` when the local node is leader. Each `RaftPeerReplicationView` shows the peer endpoint, voter status, known committed frontier, start commit index, and the last `RaftPeerBackfillDecision`. That last decision records why the leader did or did not send catch-up work in the latest heartbeat round, which is useful when a replay stalls on follower repair.
 
@@ -195,7 +213,3 @@ KOMMANDER_DST_SHRINK_BUDGET=700 \
 ```
 
 Use `Category=ChaosRandom`, `Category=Stress`, `Category=DSTRandom`, or `Category=DSTProbe` only when you want the slower randomized or manual fault-injection tier.
-
-## Why It Matters
-
-This tooling makes it easier to verify invariants, reproduce leadership churn, test delayed I/O, validate pre-vote behavior under isolation, catch non-contiguous delivery bugs, preserve regression plans, and replay a failure without trying to rediscover the bug by chance.

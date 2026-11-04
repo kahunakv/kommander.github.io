@@ -2,20 +2,17 @@
 
 Each Kommander user partition is an independent Raft group with its own leader. Each group elects its leader independently. Therefore, one node can lead many more partitions than its peers. The busiest partitions can also collect on one node, even with similar leader counts.
 
-The optional leader balancer moves leadership across the live voting members in small steps. It balances the leader count first. It then examines the measured partition load. This spreads the work of replication, heartbeats, and proposals. It does not move partition data. It does not change partition ranges.
+Read this page when one node is busier than its peers because it leads more partitions, or because it leads the hottest partitions. The signs are:
 
-Leadership can move only among the voter replicas of the partition when you enable [replica placement](../guides/replica-placement.md). Placement selects the nodes that host the range. Leader balancing selects the eligible replica that leads it.
-
-## When To Use It
-
-Leader balancing is useful in these conditions:
-
-- The cluster has several user partitions.
 - One node leads more partitions than its peers at all times.
 - The leader counts look even, but the hot partitions collect on one node.
 - The node-level latency or the queue depth follows the current distribution of leaders.
 
-The balancer is disabled by default. A small cluster with few partitions can get no benefit, because there are too few leaderships to distribute.
+The optional leader balancer moves leadership across the live voting members in small steps. It balances the leader count first. It then examines the measured partition load. This spreads the work of replication, heartbeats, and proposals. It does not move partition data. It does not change partition ranges.
+
+The balancer is disabled by default. To use it, set `EnableLeaderBalancer = true` on every node. A small cluster with few user partitions can get no benefit, because there are too few leaderships to distribute.
+
+Leadership can move only among the voter replicas of the partition when you enable [replica placement](../guides/replica-placement.md). Placement selects the nodes that host the range. Leader balancing selects the eligible replica that leads it.
 
 ## Enable The Balancer
 
@@ -70,6 +67,29 @@ The controller sends suggestions, because only the current leader of a partition
 
 The controller does not block during a transfer. A later report confirms if the target became the leader. The controller clears each suggestion that times out. It can select that partition again after the cooldown.
 
+```mermaid
+sequenceDiagram
+    participant N as Every node
+    participant C as Partition 0 leader
+    participant L as Current partition leader
+    participant T as Target voter
+    loop every LeaderBalancerReportInterval
+        N-)C: leadership and load report through gossip
+    end
+    Note over C: every LeaderBalancerInterval
+    Note over C: build view, reconcile earlier suggestions
+    alt fresh report from a live voter is missing
+        Note over C: skip the pass
+    else view is complete
+        Note over C: plan up to MaxMovesPerPass moves
+        C-)L: TransferLeadershipSuggestionRequest
+        Note over L: still leader, partition eligible, target a live voter
+        L->>T: leadership transfer
+        Note over T: becomes partition leader
+        T-)C: next report confirms the move
+    end
+```
+
 ## Balance Policy
 
 The planner uses three stages. The degraded-node stage is optional and runs before normal balancing.
@@ -84,6 +104,23 @@ When `EnableSlowNodeAvoidance = true`, the controller compares each node's WAL c
 Kommander also requires enough recent samples. A quiet node, a newly restarted node, or a node with stale observations is treated as unknown. Unknown nodes are not drained and are not excluded as transfer targets.
 
 After `SlowNodeEnterPasses` consecutive bad passes, the node is classified as degraded. The balancer then stops choosing it as a target and starts transferring the partition leaderships it already holds to healthy voter replicas. After `SlowNodeExitPasses` consecutive clean passes, the node is released.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Healthy
+    Healthy --> Candidate: bad pass
+    Candidate --> Healthy: clean pass
+    Candidate --> Degraded: SlowNodeEnterPasses consecutive bad passes
+    Degraded --> Healthy: SlowNodeExitPasses consecutive clean passes
+    note right of Candidate
+        bad pass means above SlowNodeFloorMs
+        and at least SlowNodeMultiplier x median
+    end note
+    note right of Degraded
+        not chosen as a target
+        its leaderships drain to healthy voters
+    end note
+```
 
 This is only a leadership drain. The node keeps its replicas, its vote, and its cluster membership. It can still catch up followers and serve as a follower. The goal is to remove leader-side write pressure from a node whose disk path is much slower than its peers.
 

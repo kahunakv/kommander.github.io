@@ -6,6 +6,10 @@ In normal Raft, a leader sends periodic heartbeats to every follower, for every 
 
 Quiescence lets an idle partition become quiet. The partition keeps safe failover.
 
+Quiescence is on by default (`EnableQuiescence = true`). You do not need to do anything to use it. Read this page to understand why an idle partition sends no heartbeats, or to tune when a partition becomes quiet.
+
+Quiescence depends on [SWIM failure detection](./swim-failure-detection.md). If you turn SWIM off (a `PingInterval` of zero or less), you must also set `EnableQuiescence = false`. Otherwise, Kommander rejects the configuration.
+
 ## What Quiescence Does
 
 A partition leader can find that a partition was idle for a sufficient time. The leader then sends one final quiesce marker to the followers. After that, it stops the periodic heartbeats for that partition.
@@ -35,7 +39,8 @@ A leader can quiesce a partition when all of these conditions are true:
 
 - `EnableQuiescence` is `true`.
 - The partition is not already quiesced.
-- There are no active proposals.
+- There are no unresolved proposals. Completed proposals retained for ticket lookup do not keep the partition active.
+- Every peer is at the leader's committed frontier.
 - The idle time of the partition is more than `QuiesceAfter`.
 
 The leader then sends an `AppendLogs` message with `Quiesce = true`. Each follower sets its local quiesced flag for that partition.
@@ -57,6 +62,22 @@ On a follower, any normal append with `Quiesce = false` clears the quiesced stat
 
 The burst of writes ends. The partition can quiesce again when its idle time is more than `QuiesceAfter`.
 
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant L as Partition leader
+  participant F as Followers
+  Note over L: idle for more than QuiesceAfter, no unresolved proposals, peers caught up
+  L->>F: AppendLogs with Quiesce = true
+  Note over F: set the local quiesced flag
+  Note over L,F: no periodic heartbeats for this partition
+  C->>L: proposal
+  Note over L: clear the local quiesced state
+  L->>F: normal append with Quiesce = false
+  Note over F: clear the quiesced state
+  Note over L,F: periodic heartbeats start again
+```
+
 ## Failover While Quiesced
 
 A quiesced follower does not use the election timeout of that partition while the node of the leader is still `Alive`.
@@ -65,6 +86,18 @@ Instead, the follower watches the SWIM node state:
 
 - `Alive`: the follower stays quiet.
 - `Suspect` or `Dead`: the follower leaves the quiesced state and starts the normal pre-vote path and election path.
+
+```mermaid
+stateDiagram-v2
+  state "Following with heartbeats" as Following
+  state "Quiesced follower" as Quiesced
+  state "Pre-vote and election" as Election
+  Following --> Quiesced : quiesce marker
+  Quiesced --> Following : append with Quiesce = false
+  Quiesced --> Quiesced : SWIM says leader node Alive
+  Quiesced --> Election : SWIM says leader node Suspect or Dead
+  Following --> Election : election timeout, no heartbeat
+```
 
 The failover starts at `Suspect`, not at `Dead`. Therefore, it depends on approximately one `PingInterval`. It does not wait for the full `SuspicionTimeout`.
 
@@ -91,7 +124,7 @@ The defaults are valid:
 | Property | Default | Description |
 | --- | ---: | --- |
 | `EnableQuiescence` | `true` | Enables quiescence for idle partitions. Set it to `false` to keep the classic heartbeat of each partition at every interval. |
-| `QuiesceAfter` | `1500 ms` | The idle time with no active proposals before the leader sends a quiesce marker and stops the heartbeats. |
+| `QuiesceAfter` | `1500 ms` | The idle time with no unresolved proposals and every peer caught up before the leader sends a quiesce marker and stops the heartbeats. |
 | `PingInterval` | `1 s` | The SWIM probe cadence. It must be more than `0` and less than `StartElectionTimeout` when quiescence is enabled. |
 | `SuspicionTimeout` | `5 s` | The time from `Suspect` to `Dead`. Quiesced failover starts at `Suspect`. Therefore, this value does not gate the quiesced failover latency directly. |
 | `StartElectionTimeout` | `2000 ms` | The lower bound of the election timeout. `PingInterval` must be below this value while quiescence is enabled. |

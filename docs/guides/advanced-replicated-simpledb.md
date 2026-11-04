@@ -26,20 +26,22 @@ GET /health       Report whether the local Raft node is initialized
 
 Three processes take part in eight user partitions. `raft.GetPartitionKey(key)` maps each key to a partition. Each partition elects its own leader. Therefore, the node that is responsible for one key can be a follower for another key.
 
-```text
-Client
-  |
-  | REST :7001/:7002/:7003
-  v
-SimpleDB node
-  |-- leader routing by key
-  |-- Kommander RaftManager
-  |-- values.db         application materialized state
-  `-- raft/             Kommander SQLite WAL
-          |
-          | gRPC :7101/:7102/:7103
-          v
-      peer nodes
+```mermaid
+flowchart TB
+    client(["Client"])
+    subgraph node["SimpleDB node"]
+        direction TB
+        routing["Leader routing by key"]
+        raft["Kommander RaftManager"]
+        values[("values.db<br/>application materialized state")]
+        wal[("raft/<br/>Kommander SQLite WAL")]
+        routing --> raft
+        routing --> values
+        raft --> wal
+    end
+    peers(["Peer nodes"])
+    client -->|"REST :7001 / :7002 / :7003"| routing
+    raft <-->|"gRPC :7101 / :7102 / :7103"| peers
 ```
 
 ## Prerequisites
@@ -315,6 +317,27 @@ store.Put(key, body.Value);
 
 `ReplicateLogs` returns success after the proposal reaches quorum and commits. Each follower receives the committed entry through `OnReplicationReceived`. The leader that proposes the command applies it explicitly after the success. That is the reason for the final `store.Put` in this example.
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant N as Any SimpleDB node
+    participant L as Partition leader
+    participant F as Followers
+    C->>N: PUT /keys/name
+    Note over N: GetPartitionKey, then AmILeaderQuick
+    N-->>C: 307 to the leader REST endpoint
+    C->>L: PUT /keys/name
+    Note over L: ReplicateLogs with "simpledb.put"
+    L->>F: Append entry
+    F-->>L: Acknowledge
+    Note over L: Quorum commit
+    L-)F: Commit
+    Note over F: OnReplicationReceived, then store.Put
+    Note over L: store.Put after Success
+    L-->>C: 200 OK
+    Note over N,L: No leader within three seconds returns 503
+```
+
 Do not update the application database before `ReplicateLogs` is successful. That update shows state that the cluster did not commit. The cluster can also reject that state later.
 
 ## Serve A GET
@@ -337,11 +360,19 @@ A client can start a request at any SimpleDB REST endpoint. The contacted node c
 
 The client must follow the `307` redirect. It then never reads from an arbitrary follower on purpose. Therefore, all entry points converge on the same committed view of that key. The leader owns that view. During an election or a loss of quorum, the service returns `503`. It does not serve a follower value that can be stale.
 
-```text
-GET node 1 ─┐
-GET node 2 ─┼─► current leader for the key's partition ─► committed local view
-GET node 3 ─┘
-```
+<ArchDiagram
+  group="Partition that owns the key"
+  sources={[
+    {label: 'GET node 1', icon: 'user'},
+    {label: 'GET node 2', icon: 'user'},
+    {label: 'GET node 3', icon: 'user'},
+  ]}
+  hub={{label: 'Current leader', icon: 'server'}}
+  targets={[
+    {label: 'Committed local view', sub: 'values.db on the leader', icon: 'database'},
+  ]}
+  title="A GET sent to node 1, node 2, or node 3 reaches the current leader of the key's partition, which serves the committed local view from its values.db."
+/>
 
 This choice about consistency is important. A simple eventual replicator can accept writes on several nodes independently. It then reconciles them later. During that interval, two endpoints can return different answers. The application must then define the conflict resolution. Kommander makes the opposite tradeoff. A partition accepts ordered writes through one leader. It commits through quorum before it returns success. The cluster can fail to identify or support an authoritative leader. It then fails the request. It does not return a knowingly divergent answer.
 

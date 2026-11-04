@@ -8,11 +8,30 @@ An adapter connects Kommander to one part of your environment. Kommander uses th
 
 You pick one of each when you [create a node](../guides/creating-a-node.md). Kommander keeps persistence, transport, and discovery pluggable, so you can use the storage and the network stack that your service already has. You can also write your own adapter.
 
+```mermaid
+flowchart LR
+    RM["RaftManager"]:::leader
+    RM --> IWAL["IWAL"]
+    RM --> IC["ICommunication"]
+    RM --> ID["IDiscovery"]
+    IWAL --> Rocks[("RocksDbWAL")]
+    IWAL --> Sqlite[("SqliteWAL")]
+    IWAL --> Solarium[("SolariumWAL<br/>external")]
+    IWAL --> MemWal[("InMemoryWAL")]
+    IC --> Grpc["GrpcCommunication"]
+    IC --> Rest["RestCommunication"]
+    IC --> MemComm["InMemoryCommunication"]
+    ID --> Static["StaticDiscovery"]
+    ID --> Dyn["DynamicDiscovery"]
+    ID --> Multi["MulticastDiscovery"]
+    classDef leader fill:#008f63,color:#ffffff,stroke:#04241b
+```
+
 Common choices:
 
 | Situation | WAL | Communication | Discovery |
 | --- | --- | --- | --- |
-| Networked cluster | `RocksDbWAL` or `SqliteWAL` | `GrpcCommunication` or `RestCommunication` | `StaticDiscovery` |
+| Networked cluster | `RocksDbWAL`, `SqliteWAL`, or external `SolariumWAL` | `GrpcCommunication` or `RestCommunication` | `StaticDiscovery` |
 | Tests and simulations | `InMemoryWAL` | `InMemoryCommunication` | `StaticDiscovery` or `DynamicDiscovery` |
 
 ## WAL Adapters
@@ -21,6 +40,7 @@ Common choices:
 | --- | --- |
 | `RocksDbWAL` | Durable production-oriented storage backed by RocksDB. |
 | `SqliteWAL` | Durable embedded storage backed by SQLite. |
+| `SolariumWAL` | External durable adapter supplied by `Solarium.Kommander`. Implemented in .NET without the native RocksDB library. |
 | `InMemoryWAL` | Tests and simulations only. Data is lost when the process exits. |
 
 ```csharp
@@ -28,6 +48,21 @@ IWAL rocks = new RocksDbWAL("./data", "node-1", logger);
 IWAL sqlite = new SqliteWAL("./data", "node-1", logger);
 IWAL memory = new InMemoryWAL(logger);
 ```
+
+`SolariumWAL` is maintained outside the Kommander repository. It implements the same `IWAL` contract and is passed directly to `RaftManager`:
+
+```csharp
+using Solarium.Kommander;
+
+IWAL solarium = new SolariumWAL(
+    "/var/lib/node1/raft",
+    "v1",
+    logger,
+    syncWrites: true
+);
+```
+
+Its data directory is not compatible with a `RocksDbWAL` directory, even though both adapters expose the same logical Raft behavior. See [Solarium WAL](../operations/solarium-wal.md) for setup, durability, metrics, migration cautions, and tuning ownership.
 
 ### RocksDB Shared Memory Resources
 

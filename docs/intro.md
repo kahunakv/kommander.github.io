@@ -19,6 +19,22 @@ Think of Kommander as a shared notebook for important decisions:
 3. After the majority has it, the line is committed.
 4. Every node reads committed lines in the same order and updates its local state.
 
+```mermaid
+sequenceDiagram
+    participant App as Your service
+    participant L as Leader (Node 1)
+    participant F1 as Follower (Node 2)
+    participant F2 as Follower (Node 3)
+    App->>L: Propose the next line
+    L->>F1: Copy the line
+    L->>F2: Copy the line
+    F1-->>L: Stored
+    Note over L,F1: Majority (2 of 3) has the line, so it is committed
+    L-->>App: Committed
+    F2-->>L: Stored
+    Note over L,F2: Every node applies committed lines in the same order
+```
+
 Your application decides what the lines mean. A line might mean "job 123 started", "tenant 42 moved to node A", or "workflow abc advanced to the next step".
 
 ## Basic Terms
@@ -63,7 +79,7 @@ A typical Kommander-backed service works like this:
 
 1. Start one `RaftManager` per process.
 2. Configure how nodes discover each other.
-3. Choose a write-ahead log implementation such as RocksDB, SQLite, or in-memory storage for tests.
+3. Choose a write-ahead log implementation such as RocksDB, SQLite, the external Solarium adapter, or in-memory storage for tests.
 4. Choose a transport such as gRPC, REST/JSON, or in-memory communication.
 5. Subscribe to callbacks that restore and apply committed log entries.
 6. Propose changes through `ReplicateLogs` when the local node is leader for a partition.
@@ -83,6 +99,7 @@ That boundary is intentional. Kommander owns consensus mechanics. Your applicati
 - Optional per-partition replica placement through `ReplicationFactor`.
 - Automatic commit or explicit commit and rollback.
 - RocksDB, SQLite, and in-memory WAL implementations.
+- Compatibility with external `IWAL` implementations such as [SolariumWAL](./operations/solarium-wal.md).
 - gRPC, REST/JSON, and in-memory communication adapters.
 - Static, dynamic, and multicast discovery.
 - Hybrid logical clock proposal tickets.

@@ -17,6 +17,14 @@ Batched transport traffic includes:
 - vote and handshake traffic
 - control-plane messages such as step-down notices and leadership-transfer requests.
 
+<ArchDiagram
+  group="Outbound path to one peer"
+  sources={[{label: 'Append-log traffic', icon: 'log'}, {label: 'Append completions', icon: 'log'}, {label: 'Votes and handshakes', icon: 'lock'}, {label: 'Control-plane messages', icon: 'server'}]}
+  hub={{label: 'BatchRequests', icon: 'layers'}}
+  targets={[{label: 'Peer node', sub: '(one transport request)', icon: 'server'}]}
+  title="Append-log traffic, append completions, votes and handshakes, and control-plane messages for one peer are combined by BatchRequests into a single transport request to that peer."
+/>
+
 This reduces per-message overhead and gives transports one place to send mixed Raft traffic efficiently.
 
 ## Transport Adapters
@@ -48,6 +56,17 @@ The gRPC transport pools short-lived batch request objects and item lists used b
 Each peer has an outbound dispatcher queue between the Raft state machine and the transport. `MaxOutboundQueueBytesPerPeer` bounds the total log-payload bytes that can sit queued for one peer.
 
 When the budget is exceeded, Kommander drops additional entry-carrying `AppendLogs` messages for that peer instead of buffering without limit. This is safe because append traffic is retried by the heartbeat and backfill paths after the queue drains. Control traffic, votes, handshakes, step-down notices, and empty heartbeats are not dropped by this byte budget.
+
+```mermaid
+flowchart TD
+    M(["Outbound message for a peer"]) --> K{"Entry-carrying AppendLogs?"}
+    K -- no --> Q["Queue for the peer"]
+    K -- yes --> B{"Queued log bytes over MaxOutboundQueueBytesPerPeer?"}
+    B -- no --> Q
+    B -- yes --> X["Drop the message"]
+    X -.-> H["Heartbeat and backfill resend it after the queue drains"]
+    Q --> T["BatchRequests to the peer"]
+```
 
 | Property | Default | Description |
 | --- | ---: | --- |

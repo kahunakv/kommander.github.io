@@ -123,6 +123,22 @@ When a partition gets hot, Kommander pushes back in stages:
 3. If the system is doing too much synchronous WAL read work for one partition, the read scheduler can reject more reads for that partition.
 4. If one peer cannot drain outbound replication traffic, the dispatcher drops over-budget entry-carrying appends and retries them later.
 
+```mermaid
+flowchart LR
+    C(["ReplicateLogs"]) --> G1{"Client queue over MaxQueuedClientProposalsPerPartition?"}
+    G1 -->|yes| R1["Reject: ProposalQueueFull"]
+    G1 -->|no| EX["Partition executor"]
+    EX --> G2{"FairWalScheduler queue full?"}
+    G2 -->|yes| R2["BackpressureExceededException, proposal state restored"]
+    G2 -->|no| WAL[("IWAL write")]
+    EX --> G4{"Peer queue over MaxOutboundQueueBytesPerPeer?"}
+    G4 -->|yes| R4["Drop entry-carrying AppendLogs, heartbeat or backfill resends later"]
+    G4 -->|no| PEER(["Peer"])
+    RD(["Restore, range reads, compaction reads"]) --> G3{"FairReadScheduler partition queue full?"}
+    G3 -->|yes| R3["ReadBackpressureExceededException"]
+    G3 -->|no| WALR[("IWAL read")]
+```
+
 This layered design is deliberate. It stops overload near the source when possible, but still protects deeper subsystems if earlier gates are not enough.
 
 ## Operational Guidance

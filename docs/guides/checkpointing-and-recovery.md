@@ -4,7 +4,9 @@ A checkpoint gives your application a durable safe point inside the log of a par
 
 In Kommander, Raft replicates a checkpoint in the same way as a normal write. After the commit, the WAL can compact the entries that are older than that checkpoint. The WAL is the write-ahead log.
 
-This guide tells you three things. It tells you when to write a checkpoint. It tells you what a checkpoint does during a restore. It tells you how a checkpoint relates to compaction.
+Checkpoints give you two gains. A restart replays less history, because the restore starts at the last committed checkpoint. The WAL also stops growing without limit, because compaction can remove the entries before the checkpoint. Kommander never writes a checkpoint by itself, so your application must decide when to write one.
+
+This guide tells you when to write a checkpoint, what a checkpoint does during a restore, and how a checkpoint relates to compaction.
 
 ## What A Checkpoint Means
 
@@ -71,6 +73,16 @@ RaftReplicationResult checkpoint = await raft.ReplicateCheckpoint(
 
 At a restore, Kommander replays the WAL forward from the last committed checkpoint boundary.
 
+```mermaid
+flowchart LR
+  subgraph wal["Partition WAL"]
+    direction LR
+    old["Entries older than the checkpoint"] --> cp["Last committed checkpoint"] --> tail["Committed entries after the checkpoint"]
+  end
+  compaction(["Automatic compaction"]) -. "removes in batches" .-> old
+  restore(["Restore"]) -- "replays forward from here" --> cp
+```
+
 For the application, the result is simple:
 
 - A newer checkpoint reduces the history that the node can replay.
@@ -95,7 +107,20 @@ At each compaction, Kommander does these steps:
 2. It removes the entries that are older than that checkpoint, in batches.
 3. It stops when no eligible work remains, or when it reaches the limit of the pass.
 
+```mermaid
+flowchart TD
+  trigger(["Pass after CompactEveryOperations operations"]) --> find["Find the last committed checkpoint"]
+  find --> found{"Checkpoint found?"}
+  found -- no --> done(["Pass ends"])
+  found -- yes --> batch["Remove up to CompactNumberEntries entries older than the checkpoint"]
+  batch --> more{"Eligible entries left and under MaxEntriesPerCompaction?"}
+  more -- yes --> batch
+  more -- no --> done
+```
+
 Therefore, the checkpoints control **how much** old WAL data the system can remove. The compaction settings control **how fast** the system removes it.
+
+Compaction has a cost for a node that is far behind. After compaction, that node cannot catch up from the log of the leader. It needs a snapshot of your application state. Register a transfer hook on every node for this case. See [Snapshot Installation](../operations/snapshot-installation.md#implement-the-partition-state-transfer).
 
 ## A Practical Strategy
 
