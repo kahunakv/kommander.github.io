@@ -7,7 +7,7 @@
 
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.69f5b818.css">
-<script src="/kommander.github.io/assets/js/runtime~main.df136cb8.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bba20bdb.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.ffc08ffb.js" defer="defer"></script>
 </head>
 <body>
@@ -24,7 +24,8 @@
 <!-- -->
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="heartbeats">Heartbeats<a href="#heartbeats" class="hash-link" aria-label="Direct link to Heartbeats" title="Direct link to Heartbeats" translate="no">​</a></h2>
 <p>Leaders periodically send heartbeats. In Kommander, an empty append-log request acts as the heartbeat path.</p>
-<p>Followers track the last heartbeat using hybrid logical clock timestamps. If the leader is quiet for longer than the election timeout, a follower may begin the election path.</p>
+<p>Followers measure the time since the last leader contact on the monotonic tick source, not with hybrid logical clock timestamps, so a leader whose clock runs ahead cannot delay failover. If the leader is quiet for longer than the election timeout, the follower starts the pre-vote round.</p>
+<p>Quiescence changes this, and it is on by default (<code>EnableQuiescence</code>). An idle quiesced partition sends no heartbeats, so its followers ignore the timeout. They start the pre-vote round when SWIM, the node-level failure detector, reports the leader&#x27;s node as <code>Suspect</code> or <code>Dead</code>, or when the leader has left the partition&#x27;s replica set. See <a class="" href="/kommander.github.io/docs/guides/partition-quiescence/">Partition Quiescence</a>.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="election-timeout">Election Timeout<a href="#election-timeout" class="hash-link" aria-label="Direct link to Election Timeout" title="Direct link to Election Timeout" translate="no">​</a></h2>
 <p>Each partition chooses a randomized election timeout between:</p>
 <ul>
@@ -32,14 +33,10 @@
 <li class=""><code>EndElectionTimeout</code></li>
 </ul>
 <p>Randomized timeouts reduce the chance that many followers become candidates at the same time.</p>
-<p>When <code>ElectionTimeoutSeed</code> is set, each partition derives its random sequence from <code>ElectionTimeoutSeed ^ partitionId</code> instead of <code>Random.Shared</code>. That makes election timing reproducible for tests and simulations while still keeping partitions distinct.</p>
-<p>If an election fails to find quorum, Kommander increases the timeout using:</p>
-<ul>
-<li class=""><code>StartElectionTimeoutIncrement</code></li>
-<li class=""><code>EndElectionTimeoutIncrement</code></li>
-</ul>
+<p>When <code>ElectionTimeoutSeed</code> is set, each node derives its random sequence from the seed, the partition id, and its own node id, instead of <code>Random.Shared</code>. That makes election timing reproducible for tests and simulations. The node id matters: if every node in a partition shared one sequence, they would retry at the same instant and split the vote every time.</p>
+<p>If an election fails to find quorum, the node returns to follower and draws a new random timeout from the same range. There is no backoff, because a growing timeout would push the nodes toward the same upper bound, where they fire together and split the vote again. <code>StartElectionTimeoutIncrement</code> and <code>EndElectionTimeoutIncrement</code> still exist on <code>RaftConfiguration</code>, but no runtime code reads them, so changing them has no effect.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="prevote-phase">PreVote Phase<a href="#prevote-phase" class="hash-link" aria-label="Direct link to PreVote Phase" title="Direct link to PreVote Phase" translate="no">​</a></h2>
-<p>Kommander implements the Raft pre-vote pattern from section 9.6 of the Raft paper.</p>
+<p>Kommander implements the Raft pre-vote pattern.</p>
 <p>Before a follower increments its term or becomes a candidate, it first runs a side-effect-free pre-vote round for <code>currentTerm + 1</code>.</p>
 <p>During this phase the follower:</p>
 <ol>
@@ -55,9 +52,16 @@
 <li class="">the candidate&#x27;s log is at least as up to date as their own.</li>
 </ul>
 <p>Pre-vote requests and replies carry a <code>PreVote</code> flag on the vote RPCs so the transport can distinguish probes from real elections.</p>
-<p>This matters because an isolated or stale node can no longer keep inflating terms and disrupting a healthy leader. If it cannot win a quorum, it never gets promoted into a real election.</p>
+<p>This matters because an isolated or stale node cannot keep inflating terms and disrupting a healthy leader. If it cannot win a quorum, it never gets promoted into a real election.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="becoming-candidate">Becoming Candidate<a href="#becoming-candidate" class="hash-link" aria-label="Direct link to Becoming Candidate" title="Direct link to Becoming Candidate" translate="no">​</a></h2>
-<p>Before becoming a candidate, a node checks whether it appears outdated compared with known commit indexes from other nodes. If it is behind, it does not start leadership and backs off.</p>
+<p>Kommander has no global &quot;am I outdated?&quot; check. Each voter judges the candidate&#x27;s log when it answers a vote request, so a node that is behind fails to reach quorum.</p>
+<p>A node does hold back its own candidacy in three cases:</p>
+<ul>
+<li class="">Its oldest WAL write has been unanswered past <code>WalStallStepDownTimeout</code>. A stalled disk must not win a term.</li>
+<li class="">Your application withheld its candidacy with <code>SetCandidacyWithheld</code>, because its local state is incomplete.</li>
+<li class="">Its log has a gap and it knows a fresher live voter. This deferral stops after 10 rounds, so a peer that never campaigns cannot block the node forever.</li>
+</ul>
+<p>A partition quarantined for lost acknowledged entries neither votes nor campaigns. See <a class="" href="/kommander.github.io/docs/internals/wal/#lost-acknowledged-entries">Lost Acknowledged Entries</a>.</p>
 <p>When a follower reaches pre-vote quorum, Kommander promotes it into a real election. At that point it:</p>
 <ol>
 <li class="">it clears the known leader</li>

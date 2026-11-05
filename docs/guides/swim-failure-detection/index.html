@@ -7,7 +7,7 @@
 
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.69f5b818.css">
-<script src="/kommander.github.io/assets/js/runtime~main.df136cb8.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bba20bdb.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.ffc08ffb.js" defer="defer"></script>
 </head>
 <body>
@@ -55,7 +55,12 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="incarnation-and-refutation">Incarnation And Refutation<a href="#incarnation-and-refutation" class="hash-link" aria-label="Direct link to Incarnation And Refutation" title="Direct link to Incarnation And Refutation" translate="no">​</a></h2>
 <p>SWIM uses an incarnation counter. The counter prevents a stale suspicion that wins forever.</p>
 <p>A healthy node can learn that other nodes marked it <code>Suspect</code>. It then increments its incarnation and gossips a newer <code>Alive</code> record. Gossip is the exchange of membership messages between nodes. The other nodes accept the newer incarnation and clear the stale suspicion.</p>
-<p><code>Dead</code> is terminal for ordinary refutation through gossip. The eviction path still makes one final direct probe before the removal. If the node responds, Kommander restores the liveness entry and skips that eviction pass.</p>
+<p>A rumor cannot downgrade <code>Dead</code>. Two things can clear it, so a restarted node does not stay <code>Dead</code> until eviction:</p>
+<ul>
+<li class="">Any direct probe that gets an answer, in an ordinary probe round or in the last-chance probe before eviction. The prober restores the node to <code>Alive</code> with a higher incarnation.</li>
+<li class="">A higher incarnation from the node itself, after it learns through gossip that others marked it <code>Suspect</code> or <code>Dead</code>.</li>
+</ul>
+<p>The eviction path still makes one final direct probe before the removal. If the node responds, Kommander restores the liveness entry and skips that eviction pass.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="raft-still-controls-eviction">Raft Still Controls Eviction<a href="#raft-still-controls-eviction" class="hash-link" aria-label="Direct link to Raft Still Controls Eviction" title="Direct link to Raft Still Controls Eviction" translate="no">​</a></h2>
 <p>SWIM does not remove a voter by itself.</p>
 <p>The system-partition leader can commit a <code>RemoveMember</code> entry when a voter is <code>Dead</code> for longer than <code>DeadMemberEvictionGrace</code>.</p>
@@ -67,7 +72,7 @@
 <li class="">Quorum changes occur only through Raft.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="configuration">Configuration<a href="#configuration" class="hash-link" aria-label="Direct link to Configuration" title="Direct link to Configuration" translate="no">​</a></h2>
-<table><thead><tr><th>Property</th><th style="text-align:right">Default</th><th>Description</th></tr></thead><tbody><tr><td><code>PingInterval</code></td><td style="text-align:right"><code>1 s</code></td><td>The interval at which a node probes a random peer. Set it to <code>0</code> or lower to disable SWIM.</td></tr><tr><td><code>PingTimeout</code></td><td style="text-align:right"><code>500 ms</code></td><td>The timeout of a direct probe or an indirect probe. A lower value detects a failure faster. It can also cause more false positives on a slow network.</td></tr><tr><td><code>IndirectPingFanout</code></td><td style="text-align:right"><code>2</code></td><td>The number of relay peers used after a direct ping times out.</td></tr><tr><td><code>SuspicionTimeout</code></td><td style="text-align:right"><code>5 s</code></td><td>The time that a node can stay <code>Suspect</code> before it becomes <code>Dead</code>.</td></tr><tr><td><code>DeadMemberEvictionGrace</code></td><td style="text-align:right"><code>2 min</code></td><td>The time that a node must stay <code>Dead</code> before the system-partition leader can evict it.</td></tr><tr><td><code>EnableAutoRejoin</code></td><td style="text-align:right"><code>true</code></td><td>Permits an evicted node that still runs to rejoin automatically through dynamic membership.</td></tr></tbody></table>
+<table><thead><tr><th>Property</th><th style="text-align:right">Default</th><th>Description</th></tr></thead><tbody><tr><td><code>PingInterval</code></td><td style="text-align:right"><code>1 s</code></td><td>The interval at which a node probes a random peer. Set it to <code>0</code> or lower to disable SWIM.</td></tr><tr><td><code>PingTimeout</code></td><td style="text-align:right"><code>500 ms</code></td><td>The timeout of a direct probe or an indirect probe. A lower value detects a failure faster. It can also cause more false positives on a slow network.</td></tr><tr><td><code>IndirectPingFanout</code></td><td style="text-align:right"><code>2</code></td><td>The number of relay peers used after a direct ping times out.</td></tr><tr><td><code>SuspicionTimeout</code></td><td style="text-align:right"><code>5 s</code></td><td>The time that a node can stay <code>Suspect</code> before it becomes <code>Dead</code>.</td></tr><tr><td><code>DeadMemberEvictionGrace</code></td><td style="text-align:right"><code>10 min</code></td><td>The time that a node must stay <code>Dead</code> before the system-partition leader can evict it.</td></tr><tr><td><code>EnableAutoRejoin</code></td><td style="text-align:right"><code>true</code></td><td>Permits an evicted node that still runs to rejoin automatically through dynamic membership.</td></tr></tbody></table>
 <p>When <code>EnableQuiescence = true</code>, <code>PingInterval</code> must also be:</p>
 <ul>
 <li class="">more than <code>0</code></li>
@@ -91,7 +96,7 @@
 <ul>
 <li class="">Use a <code>PingInterval</code> and a <code>PingTimeout</code> that fit the latency of your network.</li>
 <li class="">Increase <code>SuspicionTimeout</code> if a temporary network stall causes a false <code>Dead</code> transition.</li>
-<li class="">Keep <code>DeadMemberEvictionGrace</code> long enough for routine restarts and cold WAL opens. The WAL is the write-ahead log.</li>
+<li class="">Size <code>DeadMemberEvictionGrace</code> to the longest outage the cluster should ride through with its roster intact, not to a routine restart. Eviction is expensive to undo: an evicted member must join again as a learner, and it votes again only after it catches up on every partition. On three voters, eviction gains nothing. The roster shrinks to two voters, so one more failure is an outage either way. Eviction helps on larger clusters with spare nodes, where placement can re-replicate the evicted member&#x27;s ranges. Set the grace to the outage length past which that is better than waiting for the member.</li>
 <li class="">Do not disable SWIM while quiescence is enabled.</li>
 <li class="">Examine the membership changes and the liveness logs together when you diagnose an eviction.</li>
 </ul>

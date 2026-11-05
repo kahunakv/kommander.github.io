@@ -7,7 +7,7 @@
 
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.69f5b818.css">
-<script src="/kommander.github.io/assets/js/runtime~main.df136cb8.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bba20bdb.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.ffc08ffb.js" defer="defer"></script>
 </head>
 <body>
@@ -42,14 +42,15 @@
 </ul>
 <p>If a WebAssembly app targets plain <code>net10.0</code>, it selects the normal assembly and can fail when the runtime reaches thread creation or server-transport dependencies.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="scheduling-model">Scheduling Model<a href="#scheduling-model" class="hash-link" aria-label="Direct link to Scheduling Model" title="Direct link to Scheduling Model" translate="no">​</a></h2>
-<p>The thread-free build changes the default scheduler settings:</p>
-<table><thead><tr><th>Setting</th><th style="text-align:right">Thread-free value</th><th>Why</th></tr></thead><tbody><tr><td><code>EnableInternalSchedulingThreads</code></td><td style="text-align:right"><code>false</code></td><td>The build cannot create worker threads.</td></tr><tr><td><code>EnableHostPumpedScheduling</code></td><td style="text-align:right"><code>true</code></td><td>The node runs from the async host pump.</td></tr><tr><td><code>EnableSharedExecutorPool</code></td><td style="text-align:right"><code>true</code></td><td>Dedicated partition threads are not available.</td></tr></tbody></table>
+<p>The thread-free build uses these scheduler settings:</p>
+<table><thead><tr><th>Setting</th><th style="text-align:right">Thread-free value</th><th>Why</th></tr></thead><tbody><tr><td><code>EnableInternalSchedulingThreads</code></td><td style="text-align:right"><code>false</code></td><td>The build cannot create worker threads.</td></tr><tr><td><code>EnableHostPumpedScheduling</code></td><td style="text-align:right"><code>true</code></td><td>The node runs from the async host pump.</td></tr><tr><td><code>EnableSharedExecutorPool</code></td><td style="text-align:right"><code>true</code></td><td>This is the default in every build. This build requires it, because dedicated partition threads are not available.</td></tr></tbody></table>
 <p>The host pump runs repeated non-blocking passes. A pass drains ready partition work, writes pending WAL batches, and flushes outbound transport work. When there is no work, it backs off briefly and wakes again when new work arrives.</p>
 <!-- -->
 <p>Leave <code>EnableHostPumpedScheduling</code> enabled unless another driver explicitly pumps the node. With both internal threads and the host pump disabled, nothing advances.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="available-components">Available Components<a href="#available-components" class="hash-link" aria-label="Direct link to Available Components" title="Direct link to Available Components" translate="no">​</a></h2>
 <p>The browser targets keep the pieces that can work without OS threads and unsupported native dependencies.</p>
 <table><thead><tr><th>Area</th><th>Browser/thread-free build</th></tr></thead><tbody><tr><td>WAL</td><td><code>InMemoryWAL</code></td></tr><tr><td>Discovery</td><td><code>StaticDiscovery</code> and programmatic discovery</td></tr><tr><td>Client transport</td><td>REST client and in-memory transport</td></tr><tr><td>Server transport</td><td>Not included</td></tr><tr><td>gRPC client</td><td>Not included</td></tr><tr><td>Durable WALs</td><td>RocksDB and SQLite adapters are not included</td></tr><tr><td>Multicast discovery</td><td>Not included</td></tr><tr><td>Certificate-based transport security</td><td>Not supported in the browser build</td></tr></tbody></table>
+<p>With no server transport, the browser build ships no endpoints that accept inbound peer RPCs. The source tree&#x27;s WebAssembly smoke test covers a single-node cluster only.</p>
 <p>The browser performs TLS itself. Configure <code>TransportSecurity.NodeAuthenticationMode</code> as <code>Disabled</code> or <code>SharedSecret</code>; <code>MutualTls</code>, client certificate paths, pinned server thumbprints, and insecure certificate validation are refused by validation in the browser build.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="storage-and-durability">Storage And Durability<a href="#storage-and-durability" class="hash-link" aria-label="Direct link to Storage And Durability" title="Direct link to Storage And Durability" translate="no">​</a></h2>
 <p>Use <code>InMemoryWAL</code> in browser hosts. RocksDB and SQLite require native libraries and file-system behavior that the browser target does not include.</p>

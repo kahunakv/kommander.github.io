@@ -7,7 +7,7 @@
 
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.69f5b818.css">
-<script src="/kommander.github.io/assets/js/runtime~main.df136cb8.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bba20bdb.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.ffc08ffb.js" defer="defer"></script>
 </head>
 <body>
@@ -46,16 +46,7 @@
 <p><code>Disabled</code> means that Kommander does not enforce transport authentication.</p>
 <p>That mode is convenient for local development and in-memory tests. It is not correct for production network traffic.</p>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="sharedsecret">SharedSecret<a href="#sharedsecret" class="hash-link" aria-label="Direct link to SharedSecret" title="Direct link to SharedSecret" translate="no">​</a></h3>
-<p><code>SharedSecret</code> signs the node-to-node requests with a cluster secret. It then validates these items:</p>
-<ul>
-<li class="">the signature</li>
-<li class="">the sender node id</li>
-<li class="">the timestamp</li>
-<li class="">the nonce</li>
-<li class="">the permitted clock skew</li>
-<li class="">the protection against a replay</li>
-<li class="">the presence of TLS, if you configure that requirement.</li>
-</ul>
+<p><code>SharedSecret</code> signs the node-to-node requests with a cluster secret, and the receiver validates each one. See <a href="#what-shared-secret-authentication-checks" class="">What Shared-Secret Authentication Checks</a>.</p>
 <p>This mode authenticates the membership in the cluster. It does not authenticate a specific node identity. Each node with the shared secret can sign as a cluster member. Therefore, rotate the secret as a credential of the full cluster.</p>
 <h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="mutualtls">MutualTls<a href="#mutualtls" class="hash-link" aria-label="Direct link to MutualTls" title="Direct link to MutualTls" translate="no">​</a></h3>
 <p><code>MutualTls</code> authenticates the peers during the TLS handshake.</p>
@@ -71,6 +62,9 @@
 <p>An embedded host that already loaded an <code>X509Certificate2</code> can set <code>ClientCertificate</code> directly. That field has precedence over <code>ClientCertificatePath</code>.</p>
 <p>With the server executable, <code>--client-certificate</code> points to the PKCS#12 certificate for the peers. In <code>MutualTls</code> mode, the server presents <code>--https-certificate</code> if you omit that flag.</p>
 <p>Kommander loads the client certificate one time. It then caches it for the life of the process. To rotate a certificate, add the new thumbprint to the trust list of every node first. Then restart each node with the new certificate.</p>
+<p>An embedded host must also make Kestrel ask for a client certificate during the TLS handshake. Otherwise, every peer call fails with <code>CertificateRequired</code>. The server executable does this for you. <code>AllowCertificate</code> does not work here, because it needs TLS renegotiation and HTTP/2 forbids that:</p>
+<div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(230, 1%, 98%);--prism-color:hsl(230, 8%, 24%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="background-color:hsl(230, 1%, 98%);color:hsl(230, 8%, 24%)"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">builder</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token plain">WebHost</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token function" style="color:hsl(221, 87%, 60%)">ConfigureKestrel</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token plain">kestrel </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=&gt;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain"></span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">    kestrel</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token function" style="color:hsl(221, 87%, 60%)">ListenAnyIP</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token number" style="color:hsl(35, 99%, 36%)">2070</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">,</span><span class="token plain"> listen </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=&gt;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">        listen</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token plain">Protocols </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=</span><span class="token plain"> HttpProtocols</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token plain">Http1AndHttp2</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">        listen</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token function" style="color:hsl(221, 87%, 60%)">UseHttps</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token plain">certificatePath</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">,</span><span class="token plain"> certificatePassword</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">,</span><span class="token plain"> https </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=&gt;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">{</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">            https</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token plain">ClientCertificateMode </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=</span><span class="token plain"> ClientCertificateMode</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token plain">RequireCertificate</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">            </span><span class="token comment" style="color:hsl(230, 4%, 64%)">// Kommander checks TrustedClientCertificateThumbprints after the handshake.</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">            https</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token plain">ClientCertificateValidation </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token plain">_</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">,</span><span class="token plain"> _</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">,</span><span class="token plain"> _</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token plain"> </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=&gt;</span><span class="token plain"> </span><span class="token boolean" style="color:hsl(35, 99%, 36%)">true</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">        </span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">}</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">    </span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">}</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain"></span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">}</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><br></div></code></pre></div></div>
+<p>Every caller on that port must then present a certificate, so keep public API traffic on another port.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="legacy-bearer-token-compatibility">Legacy Bearer Token Compatibility<a href="#legacy-bearer-token-compatibility" class="hash-link" aria-label="Direct link to Legacy Bearer Token Compatibility" title="Direct link to Legacy Bearer Token Compatibility" translate="no">​</a></h2>
 <p><code>HttpAuthBearerToken</code> is still on <code>RaftConfiguration</code>. It is a legacy compatibility setting.</p>
 <p>Internally, <code>GetEffectiveTransportSecurity()</code> uses <code>HttpAuthBearerToken</code> in these conditions:</p>
@@ -87,40 +81,24 @@
 <li class="">the request path or the RPC name</li>
 <li class="">the sender node</li>
 <li class="">the timestamp</li>
-<li class="">the nonce</li>
-<li class="">the bytes of the request body, for REST.</li>
+<li class="">the nonce, a value that the sender uses for one request only</li>
+<li class="">the request body.</li>
 </ul>
-<p>The validation can fail with a status such as:</p>
-<ul>
-<li class=""><code>TlsRequired</code></li>
-<li class=""><code>MissingFields</code></li>
-<li class=""><code>MalformedFields</code></li>
-<li class=""><code>InvalidSignature</code></li>
-<li class=""><code>TimestampSkewExceeded</code></li>
-<li class=""><code>ReplayDetected</code></li>
-</ul>
-<p>This gives the runtime basic protection against:</p>
-<ul>
-<li class="">an unsigned request</li>
-<li class="">a forged signature</li>
-<li class="">authentication data in a bad form</li>
-<li class="">a request with a clock skew</li>
-<li class="">a request that an attacker replays.</li>
-</ul>
+<p>These checks stop an unsigned or forged request, and a replay, where an attacker captures a valid request and sends it again.</p>
 <p><code>RaftTransportAuthenticator</code> runs the checks in this order and stops at the first failure:</p>
 <!-- -->
 <p>For REST, <code>MaxPreAuthRequestBodyBytes</code> bounds how much request body data Kommander will read and digest before the shared-secret signature is proven. The default is <code>32 MiB</code>. Larger unauthenticated request bodies are refused before they reach the Raft handler. This matters most when the host&#x27;s own request-size limit has been raised, or when REST snapshot chunks are large enough that their base64-encoded body approaches the limit.</p>
 <p>REST shared-secret signatures are computed over the exact UTF-8 request bytes that Kommander sends. The transport serializes once, signs those bytes, and sends the same bytes on the wire. This keeps authentication deterministic across peers and avoids extra per-request serialization work.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="tls-requirements">TLS Requirements<a href="#tls-requirements" class="hash-link" aria-label="Direct link to TLS Requirements" title="Direct link to TLS Requirements" translate="no">​</a></h2>
-<p><code>RequireTls</code> controls one rule: authenticated traffic must arrive over TLS.</p>
+<p><code>RequireTls</code> controls one rule: authenticated traffic must arrive over TLS. The default is <code>true</code>.</p>
 <p>With <code>RequireTls = true</code>, Kommander rejects an authenticated request that does not use a secure transport.</p>
 <p>Keep this setting enabled for a production cluster.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="certificate-relaxation-for-development-only">Certificate Relaxation For Development Only<a href="#certificate-relaxation-for-development-only" class="hash-link" aria-label="Direct link to Certificate Relaxation For Development Only" title="Direct link to Certificate Relaxation For Development Only" translate="no">​</a></h2>
 <p><code>AllowInsecureCertificateValidation</code> makes local development and some lab environments easier.</p>
-<p>With this setting enabled on the client side, the creation of a gRPC channel can bypass the normal certificate validation.</p>
+<p>With this setting enabled on the client side, a gRPC channel or a REST handler bypasses the normal certificate validation.</p>
 <p>That behavior is useful for a self-signed development certificate. Do not enable it in production.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="certificate-thumbprint-pinning">Certificate Thumbprint Pinning<a href="#certificate-thumbprint-pinning" class="hash-link" aria-label="Direct link to Certificate Thumbprint Pinning" title="Direct link to Certificate Thumbprint Pinning" translate="no">​</a></h2>
-<p><code>TrustedServerCertificateThumbprints</code> lets a network client trust a specific allow-list of server certificate thumbprints only.</p>
+<p>A thumbprint is a hash that identifies one certificate. <code>TrustedServerCertificateThumbprints</code> lets a network client trust a specific allow-list of server certificate thumbprints only.</p>
 <p>Kommander applies that list when it creates a shared gRPC channel. It also applies the list when a REST client builds its peer handlers.</p>
 <p><code>TrustedClientCertificateThumbprints</code> is the allow-list for an incoming <code>MutualTls</code> request. Use SHA-256 thumbprints in hexadecimal. Do not use <code>X509Certificate2.Thumbprint</code> as the source of truth, because .NET gives the SHA-1 thumbprint there.</p>
 <p>An empty list of trusted clients is dangerous for node authentication. It accepts each client certificate that completes the TLS handshake. The server executable rejects <code>MutualTls</code> without a minimum of one <code>--trusted-client-cert-thumbprint</code>. An embedded host must keep the same rule.</p>
@@ -178,17 +156,22 @@
 </ul>
 <p>Do not use <code>HttpAuthBearerToken</code> for a new production deployment.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="fail-closed-startup-checks">Fail-Closed Startup Checks<a href="#fail-closed-startup-checks" class="hash-link" aria-label="Direct link to Fail-Closed Startup Checks" title="Direct link to Fail-Closed Startup Checks" translate="no">​</a></h2>
-<p>Kommander fails the startup for a dangerous combination:</p>
+<p>These checks make a configuration mistake fail at the start of the node. The mistake does not appear later as an unexplained failure of a peer connection.</p>
+<p>Every host, embedded or not, fails the startup for these combinations:</p>
 <ul>
-<li class="">the <code>SharedSecret</code> mode without a shared secret</li>
 <li class=""><code>MutualTls</code> without a client certificate</li>
 <li class=""><code>MutualTls</code> together with <code>AllowInsecureCertificateValidation</code></li>
-<li class=""><code>MutualTls</code> on a cleartext listener</li>
-<li class="">mutual TLS in the server executable without a trusted client certificate thumbprint</li>
 </ul>
-<p>These checks make a configuration mistake fail at the start of the node. The mistake does not appear later as an unexplained failure of a peer connection.</p>
+<p>The server executable also fails the startup for these combinations:</p>
+<ul>
+<li class=""><code>SharedSecret</code> without <code>--node-shared-secret</code></li>
+<li class=""><code>MutualTls</code> without a <code>--trusted-client-cert-thumbprint</code></li>
+<li class=""><code>MutualTls</code> together with <code>--allow-plaintext-listener</code></li>
+<li class=""><code>Disabled</code> on a bind address that is not loopback, unless you pass <code>--allow-unauthenticated-cluster</code></li>
+</ul>
+<p>An embedded host does not get these four checks at startup, so review your own configuration. <code>SharedSecret</code> without a secret throws on the first authenticated request. A cleartext request in <code>MutualTls</code> mode fails that request with <code>TlsRequired</code> when <code>RequireTls</code> is on, or with <code>CertificateRequired</code> when it is off.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="server-cli-flags">Server CLI Flags<a href="#server-cli-flags" class="hash-link" aria-label="Direct link to Server CLI Flags" title="Direct link to Server CLI Flags" translate="no">​</a></h2>
-<table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><code>--node-auth-mode</code></td><td><code>Disabled</code>, <code>SharedSecret</code>, or <code>MutualTls</code>.</td></tr><tr><td><code>--node-shared-secret</code></td><td>The shared secret of the <code>SharedSecret</code> mode.</td></tr><tr><td><code>--node-auth-header</code></td><td>The name of the header or the metadata for a shared-secret signature.</td></tr><tr><td><code>--trusted-server-cert-thumbprint</code></td><td>The SHA-256 thumbprint allow-list for the server certificates of the peers.</td></tr><tr><td><code>--trusted-client-cert-thumbprint</code></td><td>The SHA-256 thumbprint allow-list for the client certificates of the peers in <code>MutualTls</code> mode.</td></tr><tr><td><code>--client-certificate</code></td><td>The PKCS#12 client certificate for the peers in <code>MutualTls</code> mode. It defaults to <code>--https-certificate</code>.</td></tr><tr><td><code>--client-certificate-password</code></td><td>The password of the client certificate archive.</td></tr><tr><td><code>--allow-insecure-certificate-validation</code></td><td>A bypass of the outbound certificate validation, for development only. Kommander rejects it with <code>MutualTls</code>.</td></tr></tbody></table>
+<table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody><tr><td><code>--node-auth-mode</code></td><td><code>Disabled</code>, <code>SharedSecret</code>, or <code>MutualTls</code>.</td></tr><tr><td><code>--node-shared-secret</code></td><td>The shared secret of the <code>SharedSecret</code> mode.</td></tr><tr><td><code>--node-auth-header</code></td><td>The name of the header or the metadata for a shared-secret signature.</td></tr><tr><td><code>--trusted-server-cert-thumbprint</code></td><td>The SHA-256 thumbprint allow-list for the server certificates of the peers.</td></tr><tr><td><code>--trusted-client-cert-thumbprint</code></td><td>The SHA-256 thumbprint allow-list for the client certificates of the peers in <code>MutualTls</code> mode.</td></tr><tr><td><code>--client-certificate</code></td><td>The PKCS#12 client certificate for the peers in <code>MutualTls</code> mode. It defaults to <code>--https-certificate</code>.</td></tr><tr><td><code>--client-certificate-password</code></td><td>The password of the client certificate archive.</td></tr><tr><td><code>--allow-insecure-certificate-validation</code></td><td>A bypass of the outbound certificate validation, for development only. Kommander rejects it with <code>MutualTls</code>.</td></tr><tr><td><code>--allow-unauthenticated-cluster</code></td><td>Permits <code>--node-auth-mode Disabled</code> on a bind address that is not loopback, for development only. Every Raft endpoint then accepts unauthenticated requests from the network.</td></tr><tr><td><code>--allow-plaintext-listener</code></td><td>Binds the cleartext HTTP listener even when an HTTPS certificate is configured. Kommander rejects it with <code>MutualTls</code>.</td></tr></tbody></table>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="related-pages">Related Pages<a href="#related-pages" class="hash-link" aria-label="Direct link to Related Pages" title="Direct link to Related Pages" translate="no">​</a></h2>
 <ul>
 <li class=""><a class="" href="/kommander.github.io/docs/reference/configuration/">Configuration</a></li>

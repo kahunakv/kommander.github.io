@@ -7,7 +7,7 @@
 
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.69f5b818.css">
-<script src="/kommander.github.io/assets/js/runtime~main.df136cb8.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bba20bdb.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.ffc08ffb.js" defer="defer"></script>
 </head>
 <body>
@@ -24,7 +24,7 @@
 <li class="">The latency of one key range grows while the other partitions stay healthy.</li>
 </ul>
 <p>A split spreads the work of one hot range over two partitions. Each partition is its own Raft group with its own leader, so the two halves can be led by different nodes.</p>
-<p>Kommander never splits a partition by itself. You decide when to split, and you call <code>SplitPartitionAsync</code> on the leader of the source partition. If your application keeps state for each partition, register an <code>IRaftStateMachineTransfer</code> on every node first, so the new partition receives its state.</p>
+<p>Kommander never splits a partition by itself. You decide when to split, and you call <code>SplitPartitionAsync</code> on a node that leads both the source partition and partition <code>0</code>. If your application keeps state for each partition, plan how that state moves. A registered <code>IRaftStateMachineTransfer</code> imports it on one node only, and the split can succeed even when that transfer fails. See <a href="#state-transfer-is-important" class="">State Transfer Is Important</a>.</p>
 <p>This guide gives the operational flow of a split. For the full API, see <a class="" href="/kommander.github.io/docs/guides/elastic-partitions/">Elastic Partitions</a>.</p>
 <p>Kommander gives <code>GetPartitionLogOpsPerSecond</code>, <code>GetPartitionWalQueueDepth</code>, and <code>GetPartitionCommitWaitMs</code>. They help you separate a busy partition from a saturated partition. Read <a class="" href="/kommander.github.io/docs/guides/partition-load-signals/">Partition Load Signals</a> before you build an automatic split trigger.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-a-split-does">What A Split Does<a href="#what-a-split-does" class="hash-link" aria-label="Direct link to What A Split Does" title="Direct link to What A Split Does" translate="no">​</a></h2>
@@ -42,7 +42,7 @@
 <p>Check these conditions first:</p>
 <ul>
 <li class="">The source partition is a user partition. Its id is more than <code>0</code>.</li>
-<li class="">The local node is the leader of the source partition.</li>
+<li class="">The local node leads the source partition and partition <code>0</code>, the system partition. The map change replicates through partition <code>0</code>. A node that leads only the source gets <code>Status = NodeIsNotLeader</code>. <a class="" href="/kommander.github.io/docs/guides/merging-idle-partitions/#leadership-requirement">Merging Idle Partitions</a> shows how to move a leadership.</li>
 <li class="">Your application is ready to refresh its routing state.</li>
 <li class="">Your application registered a state-transfer behavior, if the data must move with the new partition.</li>
 </ul>
@@ -73,12 +73,18 @@
 <p>That is the reason for this method:</p>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(230, 1%, 98%);--prism-color:hsl(230, 8%, 24%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="background-color:hsl(230, 1%, 98%);color:hsl(230, 8%, 24%)"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">raft</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token function" style="color:hsl(221, 87%, 60%)">RegisterStateMachineTransfer</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token keyword" style="color:hsl(301, 63%, 40%)">new</span><span class="token plain"> </span><span class="token constructor-invocation class-name" style="color:hsl(35, 99%, 36%)">MyStateMachineTransfer</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><br></div></code></pre></div></div>
 <p>Without a state transfer, a split changes the routing. The new partition can then have no application state.</p>
+<p>A registered transfer does not guarantee the move either. <code>result.Success</code> means that the map change committed. It does not prove that state moved:</p>
+<ul>
+<li class=""><code>ImportRange</code> runs once, on the node that coordinates the split. Your application must get the data to the other replicas of the target.</li>
+<li class="">If the export or the import fails, the split still succeeds. <code>result.StateTransfer</code> reports the outcome.</li>
+</ul>
+<p>See <a class="" href="/kommander.github.io/docs/guides/elastic-partitions/#state-transfer-during-a-split">State Transfer During A Split</a> for the details.</p>
 <!-- -->
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="a-simple-operating-pattern">A Simple Operating Pattern<a href="#a-simple-operating-pattern" class="hash-link" aria-label="Direct link to A Simple Operating Pattern" title="Direct link to A Simple Operating Pattern" translate="no">​</a></h2>
 <p>Use this sequence for a first implementation:</p>
 <ol>
 <li class="">Detect a constant high rate in the replicated log and WAL saturation. The WAL is the write-ahead log.</li>
-<li class="">Split the partition at the leader.</li>
+<li class="">Split the partition on a node that leads the source and partition <code>0</code>.</li>
 <li class="">Refresh the partition map on all the application nodes.</li>
 <li class="">Retry each <code>PartitionMoved</code> write with the new map.</li>
 <li class="">Make sure that different nodes lead the two partitions, if your goal is less fsync pressure. An fsync is a durable flush to disk.</li>

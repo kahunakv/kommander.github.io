@@ -7,7 +7,7 @@
 
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.69f5b818.css">
-<script src="/kommander.github.io/assets/js/runtime~main.df136cb8.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bba20bdb.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.ffc08ffb.js" defer="defer"></script>
 </head>
 <body>
@@ -22,7 +22,7 @@
 <li class="">The learner receives the data that it is missing and catches up.</li>
 <li class="">The leader promotes the learner to a voter after its lag stays small.</li>
 <li class="">A node can leave gracefully. Kommander commits its removal from the roster.</li>
-<li class="">Kommander evicts a node that stays dead. The failure detector is on by default, and all the built-in transports support it. The system-partition leader removes a <code>Dead</code> member after <code>DeadMemberEvictionGrace</code> (default 2 minutes).</li>
+<li class="">Kommander evicts a node that stays dead. The failure detector is on by default, and all the built-in transports support it. The system-partition leader removes a <code>Dead</code> member after <code>DeadMemberEvictionGrace</code> (default 10 minutes).</li>
 </ul>
 <p>Read this page before you add or remove nodes in production, or when a new node stays a learner. This page gives the behavior that a user can see.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="the-core-idea">The Core Idea<a href="#the-core-idea" class="hash-link" aria-label="Direct link to The Core Idea" title="Direct link to The Core Idea" translate="no">​</a></h2>
@@ -36,7 +36,6 @@
 <li class="">Gossip can spread the roster faster. It does not decide the nodes that can vote.</li>
 <li class="">Kommander rejects an append-log RPC or a snapshot RPC from an endpoint outside the committed roster. The one exception is an endpoint that is already the accepted leader of that term.</li>
 </ul>
-<p>Remember one thing above all: the membership truth comes from Raft. It does not come from discovery or gossip.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="member-roles">Member Roles<a href="#member-roles" class="hash-link" aria-label="Direct link to Member Roles" title="Direct link to Member Roles" translate="no">​</a></h2>
 <p>Each member has one of these roles:</p>
 <ul>
@@ -96,16 +95,16 @@
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(230, 1%, 98%);--prism-color:hsl(230, 8%, 24%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="background-color:hsl(230, 1%, 98%);color:hsl(230, 8%, 24%)"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token keyword" style="color:hsl(301, 63%, 40%)">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token function" style="color:hsl(221, 87%, 60%)">LeaveCluster</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token named-parameter punctuation" style="color:hsl(119, 34%, 47%)">dispose</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">:</span><span class="token plain"> </span><span class="token boolean" style="color:hsl(35, 99%, 36%)">true</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><br></div></code></pre></div></div>
 <p><code>LeaveCluster</code> is the helper for a shutdown. Its behavior is:</p>
 <ol>
-<li class="">The node marks itself <code>Leaving</code>.</li>
-<li class="">It stops its campaigns immediately.</li>
-<li class="">The cluster commits <code>RemoveMember(self)</code> on partition <code>0</code>.</li>
-<li class="">The node shuts down.</li>
+<li class="">The node stops its campaigns immediately. This is a local step, separate from the committed <code>Leaving</code> role above.</li>
+<li class="">It tries to commit <code>RemoveMember(self)</code> on partition <code>0</code>.</li>
+<li class="">The node shuts down, whether or not that commit succeeded.</li>
 </ol>
 <p>The node can be the system-partition leader. It then removes itself under the old quorum. After that, it steps down.</p>
+<p><code>LeaveCluster</code> does not tell you if the removal committed. When you need to know, use <code>RequestLeaveAsync</code>.</p>
 <p>For a controlled decommission, use <code>RequestLeaveAsync</code> first:</p>
 <div class="language-csharp codeBlockContainer_Ckt0 theme-code-block" style="--prism-background-color:hsl(230, 1%, 98%);--prism-color:hsl(230, 8%, 24%)"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-csharp codeBlock_bY9V thin-scrollbar" style="background-color:hsl(230, 1%, 98%);color:hsl(230, 8%, 24%)"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token class-name" style="color:hsl(35, 99%, 36%)">LeaveClusterResult</span><span class="token plain"> result </span><span class="token operator" style="color:hsl(221, 87%, 60%)">=</span><span class="token plain"> </span><span class="token keyword" style="color:hsl(301, 63%, 40%)">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token function" style="color:hsl(221, 87%, 60%)">RequestLeaveAsync</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token plain">cancellationToken</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain" style="display:inline-block"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain"></span><span class="token keyword" style="color:hsl(301, 63%, 40%)">if</span><span class="token plain"> </span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token plain">result</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token plain">Left</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token plain"></span><br></div><div class="token-line" style="color:hsl(230, 8%, 24%)"><span class="token plain">    </span><span class="token keyword" style="color:hsl(301, 63%, 40%)">await</span><span class="token plain"> raft</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">.</span><span class="token function" style="color:hsl(221, 87%, 60%)">LeaveCluster</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">(</span><span class="token named-parameter punctuation" style="color:hsl(119, 34%, 47%)">dispose</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">:</span><span class="token plain"> </span><span class="token boolean" style="color:hsl(35, 99%, 36%)">true</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">,</span><span class="token plain"> cancellationToken</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">)</span><span class="token punctuation" style="color:hsl(119, 34%, 47%)">;</span><br></div></code></pre></div></div>
 <p><code>RequestLeaveAsync</code> asks the cluster to remove the local node from the committed roster. It does not stop the node. An operator or a host service can then examine the result before the end of the process.</p>
-<p><code>RequestLeaveAsync</code> uses a drain-first decommission in one case. That case is an active replica placement with the leaving node in the committed partition map:</p>
+<p><code>RequestLeaveAsync</code> uses a drain-first decommission in one case. That case needs <code>EnablePlacementRebalancer = true</code> and a committed partition map that names the leaving node. Otherwise, Kommander removes the member directly. With placement in use, you must then repair its replicas yourself. The drain does this:</p>
 <ol>
 <li class="">The cluster commits the member role as <code>Leaving</code>.</li>
 <li class="">The placement passes add replacement replicas on the nodes that stay.</li>
@@ -123,7 +122,7 @@
 <li class=""><code>RefusedDrainInProgress</code>: Another member drains now. Retry after that drain ends.</li>
 <li class=""><code>NotInitialized</code>: The local node has no committed roster to leave yet.</li>
 <li class=""><code>NoLeader</code>: Kommander could not resolve the system-partition leader.</li>
-<li class=""><code>Timeout</code>: The cancellation token or the deadline of the caller bounded the request.</li>
+<li class=""><code>Timeout</code>: The cancellation token or the deadline of the caller bounded the request. The removal can still have committed, so read the roster again before you decide.</li>
 <li class=""><code>DrainTimedOut</code>: The evacuation did not finish before <code>DecommissionDrainTimeout</code>. The role returned to <code>Voter</code>.</li>
 <li class=""><code>Evicted</code>: SWIM evicted the node while the decommission was in progress. The replicas were not fully evacuated, so the node must not be stopped as if the decommission completed.</li>
 </ul>
@@ -148,7 +147,7 @@
 <li class="">A learner catches up from the retained committed log history first.</li>
 <li class=""><code>IRaftSystemStateTransfer</code> can repair the application deltas on partition <code>0</code>.</li>
 <li class=""><code>IRaftPartitionStateTransfer</code> repairs the whole state of a user partition. It is the preferred hook for the catch-up of a learner.</li>
-<li class=""><code>IRaftStateMachineTransfer</code> moves a key range during a split or a merge. For catch-up, Kommander uses it only when <code>IRaftPartitionStateTransfer</code> is not registered.</li>
+<li class=""><code>IRaftStateMachineTransfer</code> moves a key range during a split. For catch-up, Kommander uses it only when <code>IRaftPartitionStateTransfer</code> is not registered.</li>
 <li class="">A heavily compacted cluster can still block a promotion when the necessary transfer hook is missing.</li>
 <li class="">A join timeout can mean two things. The learner could not catch up from the retained WAL. The learner could not install a snapshot.</li>
 </ul>
@@ -166,24 +165,14 @@
 <p>Kommander enables SWIM by default. <code>PingInterval</code> defaults to <code>1 second</code>.</p>
 <p>Set <code>PingInterval</code> to <code>0</code> or lower only when you want no failure detection. Then also set <code>EnableQuiescence = false</code>. A quiesced partition depends on SWIM to detect a dead leader node.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="transport-support">Transport Support<a href="#transport-support" class="hash-link" aria-label="Direct link to Transport Support" title="Direct link to Transport Support" translate="no">​</a></h2>
-<p>The transport support is:</p>
+<p>These features work on <code>InMemory</code>, gRPC, and REST:</p>
 <ul>
-<li class="">The roster commits and the join flow work on <code>InMemory</code>, gRPC, and REST.</li>
-<li class="">The RPCs for a graceful leave work on <code>InMemory</code>, gRPC, and REST.</li>
-<li class="">The cross-partition remote lag checks for a learner promotion work on <code>InMemory</code>, gRPC, and REST.</li>
-<li class="">The snapshot installation works on <code>InMemory</code>, gRPC, and REST.</li>
-<li class="">The direct SWIM probe and the indirect SWIM probe work on <code>InMemory</code>, gRPC, and REST.</li>
-<li class="">The gossip anti-entropy works on <code>InMemory</code>, gRPC, and REST.</li>
-</ul>
-<p>For a gRPC cluster and a REST cluster today, this means:</p>
-<ul>
-<li class="">A join works.</li>
-<li class="">A graceful leave works through the transport RPC path.</li>
-<li class="">A learner promotion can use remote checks of the follower lag. It does not depend on local observations only.</li>
-<li class="">A repair below the floor can use the snapshot install RPC. This needs the relevant transfer hook.</li>
-<li class="">The committed membership changes still replicate through Raft.</li>
-<li class="">The SWIM failure detection works through the transport.</li>
-<li class="">The roster convergence through gossip works through the transport. The load reports of the leader balancer also work.</li>
+<li class="">the roster commits and the join flow</li>
+<li class="">the RPCs for a graceful leave</li>
+<li class="">the remote lag checks for a learner promotion, so a promotion does not depend on local observations only</li>
+<li class="">snapshot installation, which needs the relevant transfer hook</li>
+<li class="">the direct SWIM probe and the indirect SWIM probe</li>
+<li class="">the gossip anti-entropy, and the load reports of the leader balancer.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="important-status-values">Important Status Values<a href="#important-status-values" class="hash-link" aria-label="Direct link to Important Status Values" title="Direct link to Important Status Values" translate="no">​</a></h2>
 <p>A membership operation can give these relevant statuses:</p>
@@ -201,7 +190,7 @@
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="eviction-races-and-auto-rejoin">Eviction Races And Auto-Rejoin<a href="#eviction-races-and-auto-rejoin" class="hash-link" aria-label="Direct link to Eviction Races And Auto-Rejoin" title="Direct link to Eviction Races And Auto-Rejoin" translate="no">​</a></h2>
 <p>The eviction of a dead member is conservative on purpose.</p>
-<p><code>DeadMemberEvictionGrace</code> defaults to <code>2 minutes</code>. A member can stay <code>Dead</code> after that grace period. The system-partition leader then makes one final direct probe before it commits <code>RemoveMember</code>. If the endpoint responds, Kommander marks it alive. It then skips the eviction in that pass.</p>
+<p><code>DeadMemberEvictionGrace</code> defaults to <code>10 minutes</code>. A member can stay <code>Dead</code> after that grace period. The system-partition leader then makes one final direct probe before it commits <code>RemoveMember</code>. If the endpoint responds, Kommander marks it alive. It then skips the eviction in that pass.</p>
 <p>This prevents the eviction of a node that entered the <code>Dead</code> state for a short time during a slow restart. That node becomes reachable again before the commit of the removal.</p>
 <p>A node that runs can find that Kommander removed it from the committed roster. With <code>EnableAutoRejoin = true</code>, the node runs the join flow again automatically. It enters as a learner. It returns to the voter role after a normal catch-up. Kommander suppresses the auto-rejoin during a requested graceful leave and before the first successful join of the node. If SWIM evicts the node while <code>RequestLeaveAsync</code> is active, the committed <code>Evicted</code> departure reason cancels that suppression because the requested drain did not complete.</p>
 <p>Disable the auto-rejoin only for one operational model. In that model, you remove a live node remotely on purpose. You expect that process to stay outside the cluster while it runs.</p>
@@ -233,7 +222,6 @@
 <p>See <a class="" href="/kommander.github.io/docs/reference/configuration/">Configuration</a> for the defaults and the operational notes.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="practical-advice">Practical Advice<a href="#practical-advice" class="hash-link" aria-label="Direct link to Practical Advice" title="Direct link to Practical Advice" translate="no">​</a></h2>
 <ul>
-<li class="">Use discovery to find the contact points. It is not the source of truth for the nodes that can vote.</li>
 <li class="">Connect <code>OnMembershipChanged</code> to your logs or your metrics. Every roster change is then observable.</li>
 <li class="">Keep <code>EnableQuiescence = false</code> if you disable SWIM with <code>PingInterval = 0</code>.</li>
 <li class="">A learner can stay a learner. Examine the catch-up behavior and the compaction behavior first. Do not assume that the elections are broken.</li>

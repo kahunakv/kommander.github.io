@@ -7,7 +7,7 @@
 
 <meta name="algolia-site-verification" content="CCAE52A1C7A7537A">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"><link rel="stylesheet" href="/kommander.github.io/assets/css/styles.69f5b818.css">
-<script src="/kommander.github.io/assets/js/runtime~main.df136cb8.js" defer="defer"></script>
+<script src="/kommander.github.io/assets/js/runtime~main.bba20bdb.js" defer="defer"></script>
 <script src="/kommander.github.io/assets/js/main.ffc08ffb.js" defer="defer"></script>
 </head>
 <body>
@@ -23,7 +23,7 @@
 <ol>
 <li class="">one node acts as leader</li>
 <li class="">the leader proposes an application command</li>
-<li class="">a quorum stores the command durably</li>
+<li class="">a quorum of replicas stores the command, durably with a durable WAL adapter and <code>syncWrites</code> on (the default)</li>
 <li class="">every replica applies committed commands in the same order</li>
 <li class="">another node can become leader when the current leader is unavailable.</li>
 </ol>
@@ -81,10 +81,11 @@
 <ul>
 <li class="">a linearizable compare-and-set register workload checked with Knossos</li>
 <li class="">a log-append workload that checks replica agreement, acknowledged-entry durability, uniqueness, exactly-once apply, and monotonic application</li>
-<li class="">nemeses for network partitions, process kills, pauses, and membership leave/join churn</li>
+<li class="">nemeses for network partitions, process kills, pauses, membership leave/join churn, and clock skew</li>
 <li class="">gRPC as the default transport path, with REST available as a transport option.</li>
 </ul>
-<p>Green Jepsen runs are an important milestone because they show these workloads did not find stale reads, lost acknowledged entries, divergent logs, duplicate application, or ordering anomalies under the tested fault schedules. They are not a proof that every possible application workload is anomaly-free; they are strong evidence that Kommander&#x27;s consensus path behaves correctly under the failures the suite models.</p>
+<p>A green run shows that these workloads found no stale reads, lost acknowledged entries, divergent logs, duplicate application, or ordering anomalies under that run&#x27;s fault schedule. It is not a proof of correctness.</p>
+<p>The suite has found real defects, including two different entries committed at one log index. The project fixed that one. A related finding, an acknowledged append missing from every replica, has not recurred since that fix, and its root cause is probably the same defect but is not proven. <a href="https://github.com/kahunakv/kommander-jepsen/blob/main/FINDINGS.md" target="_blank" rel="noopener noreferrer" class="">FINDINGS.md</a> records each finding and its status.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="what-your-application-still-owns">What Your Application Still Owns<a href="#what-your-application-still-owns" class="hash-link" aria-label="Direct link to What Your Application Still Owns" title="Direct link to What Your Application Still Owns" translate="no">​</a></h2>
 <p>Kommander is not a finished database. It deliberately does not define:</p>
 <ul>
@@ -132,6 +133,7 @@
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="license-and-status">License And Status<a href="#license-and-status" class="hash-link" aria-label="Direct link to License And Status" title="Direct link to License And Status" translate="no">​</a></h2>
 <p>Kommander uses the MIT license. It can be used, modified, and distributed in commercial or internal applications without a copyleft requirement, subject to the license notice and terms.</p>
 <p>Kommander is designed for production-oriented embedded coordination. Evaluate configuration, storage, security, monitoring, and operational behavior against your production requirements before adoption.</p>
+<p>Three kinds of evidence back the consensus path, and each covers a limited scope. Jepsen tests a real five-node cluster under injected faults. Deterministic simulation runs real three-node clusters in one process, with simulated time, network, and disk. TLA+ models in the repository&#x27;s <code>formal/</code> folder cover the commit and durability path of a small configuration. None of them is a proof that your deployment is correct.</p>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="used-by">Used By<a href="#used-by" class="hash-link" aria-label="Direct link to Used By" title="Direct link to Used By" translate="no">​</a></h2>
 <p>Kommander is used by:</p>
 <ul>
@@ -140,7 +142,7 @@
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="where-to-go-next">Where To Go Next<a href="#where-to-go-next" class="hash-link" aria-label="Direct link to Where To Go Next" title="Direct link to Where To Go Next" translate="no">​</a></h2>
 <ul>
-<li class="">New to consensus: read <a class="" href="/kommander.github.io/docs/intro/">Kommander And Raft</a></li>
+<li class="">New to consensus: read <a class="" href="/kommander.github.io/docs/intro/">Kommander</a></li>
 <li class="">Ready to try it: follow <a class="" href="/kommander.github.io/docs/getting-started/">Getting Started</a></li>
 <li class="">Evaluating the design: read the <a class="" href="/kommander.github.io/docs/architecture/overview/">Architecture Overview</a></li>
 <li class="">Looking for concrete applications: browse the <a class="" href="/kommander.github.io/docs/recipes/">Recipes</a></li>
